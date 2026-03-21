@@ -325,8 +325,7 @@ function pCard(p, isAdmin){
   const pbcls=p.status==='terlambat'?'red':p.status==='tersedia'?'grn':'vio';
   const _retLbl=isAdmin?retLabel(p):retLabelUmum(p);
   const _prof=isAdmin?profP(p):profUmum(p);
-  const clickAttr=isAdmin?` onclick="oDet('${p.id}')"`:'';
-  return `<div class="pc ${p.status}"${clickAttr}>
+  return `<div class="pc ${p.status}" onclick="oDet('${p.id}')">
     <div class="fb" style="margin-bottom:9px">
       <div>
         <div style="display:flex;align-items:center"><span class="hlt ${hsc(p)}"></span><span style="font-size:14px;font-weight:900">${p.peminjam}</span></div>
