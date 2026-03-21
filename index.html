@@ -269,13 +269,16 @@ function stats(){
   const avail=kurOn?f.kurAmount-buf-f.living:0;
   const dep=S.projects.filter(p=>p.status==='aktif'||p.status==='terlambat').reduce((s,p)=>s+parseFloat(p.jumlah||0),0);
   const idle=kurOn?Math.max(0,avail-dep):0;
-  const tp=S.projects.reduce((s,p)=>s+(p.payments||[]).reduce((ps,py)=>{const pr=parseFloat(py.jumlah||0)-parseFloat(p.jumlah||0);return ps+(pr>0?pr:0);},0),0);
+  const tp=S.projects.reduce((s,p)=>s+(p.payments||[]).reduce((ps,py)=>ps+parseFloat(py.jumlah||0),0),0);
   const ms=f.startDate?Math.max(1,Math.round((new Date()-new Date(f.startDate+'T00:00:00'))/2629800000)):1;
   const bufRem=buf/f.angsuran;
   const pinjCic=S.external.filter(e=>e.tipe==='pinjaman'&&e.status!=='selesai').reduce((s,e)=>s+parseFloat(e.cicilanBulan||0),0);
   const pinjP=S.external.filter(e=>e.tipe==='pinjaman'&&e.status!=='selesai').reduce((s,e)=>s+parseFloat(e.jumlah||0),0);
   const invP=S.external.filter(e=>e.tipe==='investor'&&e.status!=='selesai').reduce((s,e)=>s+parseFloat(e.jumlah||0),0);
-  return{buf,avail,dep,idle,tp,ms,bufRem,pinjCic,pinjP,invP};
+  // investor idle = total investor funds - allocated to projects
+  const invAlloc=S.external.filter(e=>e.tipe==='investor'&&e.status!=='selesai').reduce((s,e)=>s+(e.alokasi||[]).reduce((as,a)=>as+parseFloat(a.jumlah||0),0),0);
+  const invIdle=Math.max(0,invP-invAlloc);
+  return{buf,avail,dep,idle,tp,ms,bufRem,pinjCic,pinjP,invP,invIdle};
 }
 
 // ── NAVIGATION ────────────────────────────────────────────────────────
@@ -462,16 +465,24 @@ function rD(){
   const bufCls=bufPct>60?'grn':bufPct>30?'vio':'org';
   const act=S.projects.filter(p=>p.status==='aktif'||p.status==='terlambat');
   const urg=act.filter(p=>{const d=du(p.tanggalJT);return d!==null&&d<=7;});
-  // auto profit log from payments
+  // auto profit log from payments (each payment = return received)
   const autoLog=[];
   S.projects.forEach(p=>(p.payments||[]).forEach(py=>{
-    const pr=parseFloat(py.jumlah||0)-parseFloat(p.jumlah||0);
-    if(pr>0) autoLog.push({tanggal:py.tanggal,jumlah:pr,peminjam:p.peminjam,catatan:py.catatan||''});
+    const amt=parseFloat(py.jumlah||0);
+    if(amt>0) autoLog.push({tanggal:py.tanggal,jumlah:amt,peminjam:p.peminjam,catatan:py.catatan||''});
   }));
   autoLog.sort((a,b)=>new Date(b.tanggal)-new Date(a.tanggal));
 
   const kurOn=f.kurEnabled!==false&&f.kurAmount>0;
   let h=`
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div style="font-size:18px;font-weight:900;color:var(--txt)">💰 Dana</div>
+    <div style="display:flex;gap:6px">
+      <button class="hdr-icon" onclick="oFund()">⚙️</button>
+      <button class="hdr-icon" onclick="exportJ()">⬆️</button>
+      <button class="hdr-icon" onclick="importJ()">⬇️</button>
+    </div>
+  </div>
   <div class="mg">
     <div class="mc vio"><div class="ml">Deployed</div><div class="mv">${fj(st.dep)}</div><div class="ms">${act.length} proyek</div></div>
     <div class="mc grn"><div class="ml">Total Profit</div><div class="mv">${fj(st.tp)}</div><div class="ms">Dari ${autoLog.length} bayaran</div></div>
@@ -562,7 +573,7 @@ function rR(){
   const st=stats(), f=S.fund;
   const act=S.projects.filter(p=>p.status==='aktif'||p.status==='terlambat');
   const done=S.projects.filter(p=>p.status==='selesai');
-  const potP=act.reduce((s,p)=>s+prof(p.jumlah),0);
+  const potP=act.reduce((s,p)=>s+profP(p),0);
   const dpct=st.avail>0?Math.min(100,(st.dep/st.avail)*100):0;
   const kurPct=Math.min(100,(st.ms/60)*100);
   const up=S.projects.filter(p=>(p.status==='aktif'||p.status==='terlambat')&&(()=>{const d=du(p.tanggalJT);return d!==null&&d<=30;})()).sort((a,b)=>new Date(a.tanggalJT)-new Date(b.tanggalJT));
@@ -589,11 +600,11 @@ function rR(){
     </div>
     <div class="cw"><canvas id="ch-p"></canvas></div>
   </div>
-  <div class="card">
+  ${(f.kurEnabled!==false&&f.kurAmount>0)?`<div class="card">
     <div class="fb mb8"><span class="st">🏦 Progress KUR</span><span class="txs tbold tvio">${kurPct.toFixed(1)}%</span></div>
     <div class="pw mb8"><div class="pb vio" style="width:${kurPct}%"></div></div>
     <div class="fb txx tg"><span>Bulan ke-${st.ms} dari 60</span><span>Sisa ~${Math.max(0,60-st.ms)} bln</span></div>
-  </div>
+  </div>`:''}
   <div class="card">
     <div class="st mb12">⏰ Jatuh Tempo 30 Hari</div>
     ${up.length===0?`<div style="text-align:center;padding:14px;color:var(--sub);font-size:12px;font-weight:700">✅ Tidak ada dalam 30 hari</div>`:
@@ -626,8 +637,8 @@ function swPP(v){
 function getProfitEntries(){
   const entries=[];
   S.projects.forEach(p=>(p.payments||[]).forEach(py=>{
-    const pr=parseFloat(py.jumlah||0)-parseFloat(p.jumlah||0);
-    if(pr>0&&py.tanggal) entries.push({tanggal:py.tanggal,jumlah:pr,label:p.peminjam});
+    const amt=parseFloat(py.jumlah||0);
+    if(amt>0&&py.tanggal) entries.push({tanggal:py.tanggal,jumlah:amt,label:p.peminjam});
   }));
   return entries;
 }
@@ -657,7 +668,12 @@ function buildPChartPeriod(){
 function buildAChart(st){
   const ctx=document.getElementById('ch-a'); if(!ctx) return;
   if(charts.a) charts.a.destroy();
-  charts.a=new Chart(ctx,{type:'doughnut',data:{labels:['Deployed','Idle','Buffer KUR','Living'],datasets:[{data:[st.dep,st.idle,st.buf,S.fund.living],backgroundColor:['#6C47FF','#F5A623','#18C964','#0EA5E9'],borderWidth:0,hoverOffset:5}]},options:{responsive:true,maintainAspectRatio:false,cutout:'62%',plugins:{legend:{position:'right',labels:{font:{family:'Nunito',weight:'700',size:10},boxWidth:11,padding:10}},tooltip:{callbacks:{label:c=>` ${c.label}: ${fj(c.raw)}`}}}}});
+  const cLabels=['Deployed'];const cData=[st.dep];const cColors=['#8B5CF6'];
+  if(st.invIdle>0){cLabels.push('Investor Idle');cData.push(st.invIdle);cColors.push('#F59E0B');}
+  if(st.idle>0){cLabels.push('KUR Idle');cData.push(st.idle);cColors.push('#FB923C');}
+  if(st.buf>0){cLabels.push('Buffer KUR');cData.push(st.buf);cColors.push('#22C55E');}
+  if(S.fund.living>0){cLabels.push('Living');cData.push(S.fund.living);cColors.push('#3B82F6');}
+  charts.a=new Chart(ctx,{type:'doughnut',data:{labels:cLabels,datasets:[{data:cData,backgroundColor:cColors,borderWidth:0,hoverOffset:5}]},options:{responsive:true,maintainAspectRatio:false,cutout:'62%',plugins:{legend:{position:'right',labels:{font:{family:'Nunito',weight:'700',size:10},boxWidth:11,padding:10}},tooltip:{callbacks:{label:c=>` ${c.label}: ${fj(c.raw)}`}}}}});
 }
 function buildPChart(labels,data){
   const ctx=document.getElementById('ch-p'); if(!ctx) return;
