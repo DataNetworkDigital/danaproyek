@@ -236,7 +236,9 @@ function profUmum(p){
     }
     return parseFloat((rb*dur).toFixed(2));
   }
-  // sekali: umum sees no profit (kontrak - kontrak = 0)
+  // sekali: umum profit from sekaliUmum fields
+  if(p.sekaliModeUmum==='rupiah') return parseFloat(p.sekaliUmumRp||0);
+  if(p.sekaliUmumPersen) return parseFloat((kontrakP(p)*parseFloat(p.sekaliUmumPersen||0)/100).toFixed(2));
   return 0;
 }
 function retLabelUmum(p){
@@ -252,7 +254,10 @@ function retLabelUmum(p){
     const pct=p.returnModeUmum==='persen'?` (${p.returnPersenUmum}%)`:'';
     return `${fj(rb)}/bln${pct} × ${dur} bln`;
   }
-  return `${fj(kontrakP(p))} (1×)`;
+  // sekali umum
+  const pu=profUmum(p);
+  const pctLbl=p.sekaliUmumPersen?` (${p.sekaliUmumPersen}%)`:'';
+  return `${fj(kontrakP(p)+pu)}${pctLbl} (1×)`;
 }
 function hsc(p){ if(p.status==='terlambat') return 'r'; if(p.status==='tersedia') return 'o'; if(p.status==='selesai') return 'v'; return 'g'; }
 function statusLabel(s){ return s==='aktif'?'🟢 Aktif':s==='terlambat'?'🔴 Terlambat':s==='tersedia'?'🟡 Tersedia':'✅ Selesai'; }
@@ -642,6 +647,29 @@ function oPM(id){
         </div>
       </div>
     </div>
+    <div id="fp-ret-sekali" style="display:${prt!=='bulanan'?'block':'none'}">
+      <div style="background:var(--p-l);border-radius:12px;padding:12px;margin-bottom:13px">
+        <div style="font-size:12px;font-weight:900;color:var(--p);margin-bottom:10px">📢 Keuntungan Umum (Tampilan Publik)</div>
+        <div class="fg" style="margin-bottom:0">
+          <div style="display:flex;gap:6px;margin-bottom:6px">
+            <button type="button" class="btn sm ${(p?.sekaliModeUmum||'persen')==='rupiah'?'pr':'ou'}" id="fp-sumode-rp" style="flex:1">Rp (jt)</button>
+            <button type="button" class="btn sm ${(p?.sekaliModeUmum||'persen')==='persen'?'pr':'ou'}" id="fp-sumode-pct" style="flex:1">% dari Kontrak</button>
+          </div>
+          <div id="fp-su-rp" style="display:${(p?.sekaliModeUmum||'persen')==='rupiah'?'block':'none'}">
+            <input class="fi" id="fp-su-rp-val" type="number" step="0.01" value="${p?.sekaliUmumRp||''}" placeholder="15">
+            <div class="fh">Keuntungan yang dilihat publik (jt)</div>
+          </div>
+          <div id="fp-su-pct" style="display:${(p?.sekaliModeUmum||'persen')==='persen'?'block':'none'}">
+            <input class="fi" id="fp-su-pct-val" type="number" step="0.1" value="${p?.sekaliUmumPersen||'15'}" placeholder="15">
+            <div class="fh">% keuntungan dari kontrak yang dilihat publik</div>
+          </div>
+        </div>
+      </div>
+      <div style="background:var(--o-l);border-radius:12px;padding:12px;margin-bottom:13px">
+        <div style="font-size:12px;font-weight:900;color:#B56B00;margin-bottom:8px">🔐 Keuntungan Admin</div>
+        <div class="fh" style="margin-bottom:0">Profit admin otomatis dihitung dari: Nilai Kontrak − Jumlah Deploy</div>
+      </div>
+    </div>
     <div id="fp-c" style="display:none" class="fc-note"></div>
     <div class="fr">
       <div class="fg"><label class="fl">Tanggal Mulai *</label><input class="fi" id="fp-m" type="date" value="${p?p.tanggalMulai:ds}"></div>
@@ -676,9 +704,21 @@ function oPM(id){
   document.getElementById('fp-m').addEventListener('change',updDue);
   document.getElementById('fp-rt').addEventListener('change',function(){
     document.getElementById('fp-ret-bulanan').style.display=this.value==='bulanan'?'block':'none';
+    document.getElementById('fp-ret-sekali').style.display=this.value!=='bulanan'?'block':'none';
     updCalc();
   });
-  ['fp-rb','fp-dur','fp-pct'].forEach(id=>{const el2=document.getElementById(id);if(el2)el2.addEventListener('input',updCalc);});
+  ['fp-rb','fp-dur','fp-pct','fp-su-rp-val','fp-su-pct-val'].forEach(id=>{const el2=document.getElementById(id);if(el2)el2.addEventListener('input',updCalc);});
+  // sekali umum mode toggle
+  let _sekaliModeUmum=p?.sekaliModeUmum||'persen';
+  document.getElementById('fp-sumode-rp').addEventListener('click',function(){
+    _sekaliModeUmum='rupiah';this.className='btn sm pr';document.getElementById('fp-sumode-pct').className='btn sm ou';
+    document.getElementById('fp-su-rp').style.display='block';document.getElementById('fp-su-pct').style.display='none';updCalc();
+  });
+  document.getElementById('fp-sumode-pct').addEventListener('click',function(){
+    _sekaliModeUmum='persen';this.className='btn sm pr';document.getElementById('fp-sumode-rp').className='btn sm ou';
+    document.getElementById('fp-su-pct').style.display='block';document.getElementById('fp-su-rp').style.display='none';updCalc();
+  });
+  window._getSekaliModeUmum=()=>_sekaliModeUmum;
   // mode toggle buttons
   let _retMode=prm;
   document.getElementById('fp-mode-pct').addEventListener('click',function(){
@@ -807,6 +847,16 @@ function savePrj(){
     data.returnPersenUmum=pctU;
   } else {
     data.returnTotal=kontrak;
+    // sekali umum fields
+    const sm=window._getSekaliModeUmum?window._getSekaliModeUmum():'persen';
+    data.sekaliModeUmum=sm;
+    if(sm==='persen'){
+      data.sekaliUmumPersen=parseFloat(document.getElementById('fp-su-pct-val')?.value||0);
+      data.sekaliUmumRp=kontrak*data.sekaliUmumPersen/100;
+    } else {
+      data.sekaliUmumRp=parseFloat(document.getElementById('fp-su-rp-val')?.value||0);
+      data.sekaliUmumPersen=0;
+    }
   }
   if(eP){const i=S.projects.findIndex(p=>p.id===eP);if(i>=0) S.projects[i]={...S.projects[i],...data};toast('✅ Diupdate!');}
   else{S.projects.push({id:uid(),...data,payments:[]});toast('🎉 Ditambahkan!');}
