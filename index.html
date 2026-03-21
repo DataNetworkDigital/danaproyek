@@ -1118,7 +1118,7 @@ function oDet(id){
       const isLocked=!isPaid && s.dueDate>today;
       const finalLbl=s.isFinal?` + Pokok ${fj(parseFloat(p.jumlah))}`:'';
       const statusIcon=isPaid?'✅':isDue?'⏳':'🔒';
-      const statusText=isPaid?`Dibayar ${fd(s.paidDate)}`:isDue?'Belum dibayar':'Belum jatuh tempo';
+      const statusText=isPaid?`Dibayar ${fd(s.paidDate)}${s.catatan?' · '+s.catatan:''}`:isDue?'Belum dibayar':'Belum jatuh tempo';
       const statusColor=isPaid?'#0B8F46':isDue?'#B56B00':'var(--sub)';
       h+=`<div id="srow-${p.id}-${s.month}" style="padding:10px 0;border-bottom:1px solid var(--bdr)">
         <div class="fb"><span style="font-weight:800;font-size:12px">Bulan ${s.month} — ${fd(s.dueDate)}</span><span style="font-weight:900;font-size:12px">${fj(s.amount)}${s.paidAmount&&s.paidAmount!==s.amount?' (aktual: '+fj(s.paidAmount)+')':''}${finalLbl}</span></div>
@@ -1248,7 +1248,7 @@ function confirmSchedulePay(pid, month){
     if(!amt||amt<=0){toast('❌ Jumlah wajib');return;}
     if(rt==='bulanan'){
       const item2=p.schedule.find(s2=>s2.month===month);
-      if(item2){item2.status='paid';item2.paidDate=date;item2.paidAmount=amt;}
+      if(item2){item2.status='paid';item2.paidDate=date;item2.paidAmount=amt;item2.catatan=note;}
       if(!p.payments) p.payments=[];
       p.payments.push({id:uid(),tanggal:date,jumlah:amt,catatan:note});
       if(p.schedule.every(s2=>s2.status==='paid')) p.status='selesai';
@@ -1305,6 +1305,7 @@ function editSchedulePay(pid, month){
     if(!amt||amt<=0){toast('❌ Jumlah wajib');return;}
     item.paidAmount=amt;
     item.paidDate=date;
+    item.catatan=note;
     // Update payments array
     if(payIdx>=0){
       p.payments[payIdx].jumlah=amt;
