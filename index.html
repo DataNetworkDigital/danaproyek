@@ -15,8 +15,9 @@ var db=firebase.firestore();
 <style>
 :root{--p:#6C47FF;--p-l:#EEE9FF;--g:#18C964;--g-l:#D1FAE5;--o:#F5A623;--o-l:#FFF3DC;--r:#F31260;--r-l:#FFE4EE;--b:#0EA5E9;--b-l:#E0F2FE;--bg:#F8F7FF;--card:#FFF;--txt:#11045A;--sub:#7B7A99;--bdr:#EAE8F5;--nav:66px;--hdr:58px;--rad:18px;--rad-s:12px;--sh:0 2px 16px rgba(108,71,255,.08);--sh-l:0 8px 32px rgba(108,71,255,.16)}
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{height:100%;overflow:hidden;font-family:'Nunito',sans-serif;background:var(--bg);color:var(--txt)}
-#app{max-width:430px;margin:0 auto;height:100vh;display:flex;flex-direction:column;overflow:hidden;background:var(--bg)}
+html,body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:'Nunito',sans-serif;background:var(--bg);color:var(--txt)}
+#app{max-width:430px;margin:0 auto;height:100dvh;height:100vh;height:-webkit-fill-available;display:flex;flex-direction:column;overflow:hidden;background:var(--bg)}
+@supports(height:100dvh){#app{height:100dvh}}
 .hdr{height:var(--hdr);background:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 18px;border-bottom:1.5px solid var(--bdr);flex-shrink:0;z-index:10}
 .hdr-t{font-size:17px;font-weight:900;color:var(--txt)}.hdr-s{font-size:10px;color:var(--sub);font-weight:700;margin-top:1px}
 .hdr-icon{background:var(--p-l);border:none;border-radius:10px;width:34px;height:34px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:15px}
