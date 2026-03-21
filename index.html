@@ -584,7 +584,7 @@ function oPM(id){
   const ds=new Date().toISOString().split('T')[0];
   const el=document.getElementById('mo-p-b');
   const prt=p?.returnType||'sekali';
-  const prm=p?.returnMode||'rupiah';
+  const prm=p?.returnMode||'persen';
   el.innerHTML=`
     <div class="fg"><label class="fl">Nama Peminjam *</label><input class="fi" id="fp-n" value="${p?p.peminjam:''}" placeholder="Nama lengkap"></div>
     <div class="fg"><label class="fl">Nilai Kontrak (jt) *</label><input class="fi" id="fp-k" type="number" step="0.01" value="${p?p.kontrak||'':''}" placeholder="100"></div>
@@ -611,15 +611,15 @@ function oPM(id){
         <div style="font-size:12px;font-weight:900;color:var(--p);margin-bottom:10px">📢 Return Umum (Tampilan Publik)</div>
         <div class="fg" style="margin-bottom:0">
           <div style="display:flex;gap:6px;margin-bottom:6px">
-            <button type="button" class="btn sm ${(p?.returnModeUmum||'rupiah')==='rupiah'?'pr':'ou'}" id="fp-umode-rp" style="flex:1">Rp Langsung</button>
-            <button type="button" class="btn sm ${p?.returnModeUmum==='persen'?'pr':'ou'}" id="fp-umode-pct" style="flex:1">% dari Kontrak</button>
+            <button type="button" class="btn sm ${(p?.returnModeUmum||'persen')==='rupiah'?'pr':'ou'}" id="fp-umode-rp" style="flex:1">Rp (jt)</button>
+            <button type="button" class="btn sm ${(p?.returnModeUmum||'persen')==='persen'?'pr':'ou'}" id="fp-umode-pct" style="flex:1">% dari Kontrak</button>
           </div>
-          <div id="fp-urb-rp" style="display:${(p?.returnModeUmum||'rupiah')==='rupiah'?'block':'none'}">
-            <input class="fi" id="fp-urb" type="number" step="0.01" value="${p?p.returnBulananUmum||'':''}" placeholder="3">
+          <div id="fp-urb-rp" style="display:${(p?.returnModeUmum||'persen')==='rupiah'?'block':'none'}">
+            <input class="fi" id="fp-urb" type="number" step="0.01" value="${p?p.returnBulananUmum||'':''}" placeholder="2">
             <div class="fh">Return/bln yang dilihat publik (jt)</div>
           </div>
-          <div id="fp-urb-pct" style="display:${p?.returnModeUmum==='persen'?'block':'none'}">
-            <input class="fi" id="fp-upct" type="number" step="0.1" value="${p?p.returnPersenUmum||'':''}" placeholder="3">
+          <div id="fp-urb-pct" style="display:${(p?.returnModeUmum||'persen')==='persen'?'block':'none'}">
+            <input class="fi" id="fp-upct" type="number" step="0.1" value="${p?p.returnPersenUmum||'':'2'}" placeholder="2">
             <div class="fh">% dari kontrak/bln yang dilihat publik</div>
           </div>
         </div>
@@ -628,16 +628,16 @@ function oPM(id){
         <div style="font-size:12px;font-weight:900;color:#B56B00;margin-bottom:10px">🔐 Return Admin (Data Sebenarnya)</div>
         <div class="fg" style="margin-bottom:0"><label class="fl">Return per Bulan</label>
           <div style="display:flex;gap:6px;margin-bottom:6px">
-            <button type="button" class="btn sm ${prm==='persen'?'pr':'ou'}" id="fp-mode-pct" style="flex:1">% dari Kontrak</button>
-            <button type="button" class="btn sm ${prm==='rupiah'?'pr':'ou'}" id="fp-mode-rp" style="flex:1">Rp Langsung</button>
+            <button type="button" class="btn sm ${(prm||'persen')==='rupiah'?'pr':'ou'}" id="fp-mode-rp" style="flex:1">Rp (jt)</button>
+            <button type="button" class="btn sm ${(prm||'persen')==='persen'?'pr':'ou'}" id="fp-mode-pct" style="flex:1">% dari Kontrak</button>
           </div>
-          <div id="fp-rb-pct" style="display:${prm==='persen'?'block':'none'}">
-            <input class="fi" id="fp-pct" type="number" step="0.1" value="${p?p.returnPersen||'':''}" placeholder="5">
-            <div class="fh">% dari nilai kontrak per bulan</div>
-          </div>
-          <div id="fp-rb-rp" style="display:${prm==='rupiah'?'block':'none'}">
+          <div id="fp-rb-rp" style="display:${(prm||'persen')==='rupiah'?'block':'none'}">
             <input class="fi" id="fp-rb" type="number" step="0.01" value="${p?p.returnBulanan||'':''}" placeholder="5">
             <div class="fh">Jumlah Rp per bulan (jt)</div>
+          </div>
+          <div id="fp-rb-pct" style="display:${(prm||'persen')==='persen'?'block':'none'}">
+            <input class="fi" id="fp-pct" type="number" step="0.1" value="${p?p.returnPersen||'':'5'}" placeholder="5">
+            <div class="fh">% dari nilai kontrak per bulan</div>
           </div>
         </div>
       </div>
@@ -691,7 +691,7 @@ function oPM(id){
   });
   window._getRetMode=()=>_retMode;
   // umum mode toggle buttons
-  let _retModeUmum=p?.returnModeUmum||'rupiah';
+  let _retModeUmum=p?.returnModeUmum||'persen';
   document.getElementById('fp-umode-pct')?.addEventListener('click',function(){
     _retModeUmum='persen';this.className='btn sm pr';document.getElementById('fp-umode-rp').className='btn sm ou';
     document.getElementById('fp-urb-pct').style.display='block';document.getElementById('fp-urb-rp').style.display='none';
