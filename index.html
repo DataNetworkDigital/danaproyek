@@ -189,6 +189,19 @@ function gc(d){ if(d===null) return 'var(--sub)'; if(d<0) return 'var(--r)'; if(
 function am(s,m){ const d=new Date(s+'T00:00:00'); d.setMonth(d.getMonth()+m); return d.toISOString().split('T')[0]; }
 function ret(j){ return parseFloat((parseFloat(j)*100/85).toFixed(2)); }
 function prof(j){ return parseFloat((parseFloat(j)*15/85).toFixed(2)); }
+// Project-aware return & profit: uses custom returnAmount if set, else formula
+function retP(p){ return parseFloat(p.returnTotal||0) || ret(p.jumlah); }
+function profP(p){ return parseFloat((retP(p)-parseFloat(p.jumlah)).toFixed(2)); }
+// Return label
+function retLabel(p){
+  const rt=p.returnType||'sekali';
+  if(rt==='bulanan'){
+    const rb=parseFloat(p.returnBulanan||0);
+    const dur=parseInt(p.durasiReturn||1);
+    return `${fj(rb)}/bln × ${dur} bln`;
+  }
+  return `${fj(retP(p))} (1×)`;
+}
 function hsc(p){ if(p.status==='terlambat') return 'r'; if(p.status==='tersedia') return 'g'; const d=du(p.tanggalJT); if(d===null) return 'g'; if(d<0) return 'r'; if(d<=7) return 'o'; return 'g'; }
 function statusLabel(s){ return s==='aktif'?'🟢 Aktif':s==='terlambat'?'🔴 Terlambat':s==='tersedia'?'🟡 Tersedia':'✅ Selesai'; }
 function stats(){
@@ -274,7 +287,7 @@ function pCard(p){
     ${invAlloc.length>0?`<div style="margin-bottom:8px">${invAlloc.map(e=>`<span class="at">👤 ${e.nama}</span>`).join('')}</div>`:''}
     <div class="fb mb8 txx"><span class="tg tbold">Progress</span><span class="tvio tbold">${Math.round(prog)}%</span></div>
     <div class="pw mb8"><div class="pb ${pbcls}" style="width:${p.status==='tersedia'?100:prog}%"></div></div>
-    <div class="fb txx"><span class="tg">Return: <b style="color:var(--txt)">${fj(ret(p.jumlah))}</b></span><span class="tgrn tbold">+${fj(prof(p.jumlah))} profit</span></div>
+    <div class="fb txx"><span class="tg">Return: <b style="color:var(--txt)">${retLabel(p)}</b></span><span class="tgrn tbold">+${fj(profP(p))} profit</span></div>
   </div>`;
 }
 
@@ -511,11 +524,22 @@ function oPM(id){
   document.getElementById('mo-p-t').textContent=p?'✏️ Edit Proyek':'➕ Tambah Proyek';
   const ds=new Date().toISOString().split('T')[0];
   const el=document.getElementById('mo-p-b');
+  const prt=p?.returnType||'sekali';
   el.innerHTML=`
     <div class="fg"><label class="fl">Nama Peminjam *</label><input class="fi" id="fp-n" value="${p?p.peminjam:''}" placeholder="Nama lengkap"></div>
-    <div class="fr">
-      <div class="fg"><label class="fl">Jumlah Deploy (jt) *</label><input class="fi" id="fp-j" type="number" value="${p?p.jumlah:''}" placeholder="85"></div>
-      <div class="fg"><label class="fl">Return (jt)</label><input class="fi" id="fp-r" type="number" readonly style="background:#F8F7FF" placeholder="Auto"><div class="fh">Auto 85→100</div></div>
+    <div class="fg"><label class="fl">Jumlah Deploy (jt) *</label><input class="fi" id="fp-j" type="number" value="${p?p.jumlah:''}" placeholder="85"></div>
+    <div class="fg"><label class="fl">Tipe Return</label><select class="fi fs" id="fp-rt">
+      <option value="sekali" ${prt==='sekali'?'selected':''}>💰 Sekali di Akhir Periode</option>
+      <option value="bulanan" ${prt==='bulanan'?'selected':''}>📅 Bulanan (Cicilan)</option>
+    </select></div>
+    <div id="fp-ret-sekali" style="display:${prt==='sekali'?'block':'none'}">
+      <div class="fg"><label class="fl">Total Return (jt)</label><input class="fi" id="fp-r" type="number" step="0.01" value="${p?p.returnTotal||'':''}" placeholder="Auto: 85→100"><div class="fh">Kosongkan untuk auto (deploy×100/85). Isi untuk custom.</div></div>
+    </div>
+    <div id="fp-ret-bulanan" style="display:${prt==='bulanan'?'block':'none'}">
+      <div class="fr">
+        <div class="fg"><label class="fl">Return/Bulan (jt) *</label><input class="fi" id="fp-rb" type="number" step="0.01" value="${p?p.returnBulanan||'':''}"></div>
+        <div class="fg"><label class="fl">Durasi (bulan) *</label><input class="fi" id="fp-dur" type="number" value="${p?p.durasiReturn||'':''}"></div>
+      </div>
     </div>
     <div id="fp-c" style="display:none" class="fc-note"></div>
     <div class="fr">
@@ -533,18 +557,38 @@ function oPM(id){
   const btnRow=el.querySelector('div[style*="margin-top:4px"]');
   if(p){const db=document.createElement('button');db.className='btn dn';db.textContent='🗑️';db.onclick=()=>delProj(p.id);btnRow.appendChild(db);}
   const sb=document.createElement('button');sb.className='btn pr fw';sb.textContent='💾 Simpan';sb.onclick=savePrj;btnRow.appendChild(sb);
-  // live calc
+  // live calc & toggle
   document.getElementById('fp-j').addEventListener('input',updCalc);
   document.getElementById('fp-m').addEventListener('change',updDue);
-  if(p){document.getElementById('fp-r').value=ret(p.jumlah);updCalc();}
+  document.getElementById('fp-rt').addEventListener('change',function(){
+    const v=this.value;
+    document.getElementById('fp-ret-sekali').style.display=v==='sekali'?'block':'none';
+    document.getElementById('fp-ret-bulanan').style.display=v==='bulanan'?'block':'none';
+    updCalc();
+  });
+  ['fp-r','fp-rb','fp-dur'].forEach(id=>{const el2=document.getElementById(id);if(el2)el2.addEventListener('input',updCalc);});
+  updCalc();
   om('mo-p');
 }
 function updCalc(){
   const j=parseFloat(document.getElementById('fp-j')?.value||0);
-  const c=document.getElementById('fp-c'), r=document.getElementById('fp-r');
-  if(!c||!r) return;
-  if(j>0){r.value=ret(j);c.style.display='block';c.innerHTML=`💡 Deploy <b>${fj(j)}</b> → Return <b>${fj(ret(j))}</b> · Profit <b style="color:#0B8F46">+${fj(prof(j))}</b>`;}
-  else{c.style.display='none';r.value='';}
+  const c=document.getElementById('fp-c');
+  if(!c) return;
+  const rt=document.getElementById('fp-rt')?.value||'sekali';
+  if(j<=0){c.style.display='none';return;}
+  let totalRet,totalProf;
+  if(rt==='bulanan'){
+    const rb=parseFloat(document.getElementById('fp-rb')?.value||0);
+    const dur=parseInt(document.getElementById('fp-dur')?.value||0);
+    totalRet=rb*dur; totalProf=totalRet-j;
+    if(rb>0&&dur>0){c.style.display='block';c.innerHTML=`💡 Deploy <b>${fj(j)}</b> → ${fj(rb)}/bln × ${dur} bln = <b>${fj(totalRet)}</b> · Profit <b style="color:#0B8F46">+${fj(totalProf)}</b>`;}
+    else{c.style.display='none';}
+  } else {
+    const customR=parseFloat(document.getElementById('fp-r')?.value||0);
+    totalRet=customR>0?customR:ret(j); totalProf=totalRet-j;
+    c.style.display='block';
+    c.innerHTML=`💡 Deploy <b>${fj(j)}</b> → Return <b>${fj(totalRet)}</b>${customR?'':' (auto)'} · Profit <b style="color:#0B8F46">+${fj(totalProf)}</b>`;
+  }
 }
 function updDue(){const m=document.getElementById('fp-m')?.value;if(m) document.getElementById('fp-jt').value=am(m,3);}
 function savePrj(){
@@ -554,11 +598,24 @@ function savePrj(){
   const jt=document.getElementById('fp-jt')?.value;
   const s=document.getElementById('fp-s')?.value;
   const ct=document.getElementById('fp-ct')?.value?.trim();
+  const rt=document.getElementById('fp-rt')?.value||'sekali';
   if(!n){toast('❌ Nama wajib diisi');return;}
   if(!j||j<=0){toast('❌ Jumlah wajib diisi');return;}
   if(!m||!jt){toast('❌ Tanggal wajib diisi');return;}
-  if(eP){const i=S.projects.findIndex(p=>p.id===eP);if(i>=0) S.projects[i]={...S.projects[i],peminjam:n,jumlah:j,returnAmount:ret(j),tanggalMulai:m,tanggalJT:jt,status:s,catatan:ct};toast('✅ Diupdate!');}
-  else{S.projects.push({id:uid(),peminjam:n,jumlah:j,returnAmount:ret(j),tanggalMulai:m,tanggalJT:jt,status:s,catatan:ct,payments:[]});toast('🎉 Ditambahkan!');}
+  // Return fields
+  let returnTotal=0, returnBulanan=0, durasiReturn=0;
+  if(rt==='bulanan'){
+    returnBulanan=parseFloat(document.getElementById('fp-rb')?.value||0);
+    durasiReturn=parseInt(document.getElementById('fp-dur')?.value||0);
+    if(!returnBulanan||!durasiReturn){toast('❌ Isi return bulanan & durasi');return;}
+    returnTotal=returnBulanan*durasiReturn;
+  } else {
+    const customR=parseFloat(document.getElementById('fp-r')?.value||0);
+    returnTotal=customR>0?customR:ret(j);
+  }
+  const data={peminjam:n,jumlah:j,returnType:rt,returnTotal,returnBulanan,durasiReturn,tanggalMulai:m,tanggalJT:jt,status:s,catatan:ct};
+  if(eP){const i=S.projects.findIndex(p=>p.id===eP);if(i>=0) S.projects[i]={...S.projects[i],...data};toast('✅ Diupdate!');}
+  else{S.projects.push({id:uid(),...data,payments:[]});toast('🎉 Ditambahkan!');}
   save();cm('mo-p');rAll();
 }
 function delProj(id){
@@ -572,7 +629,7 @@ function oDet(id){
   const p=S.projects.find(x=>x.id===id); if(!p) return;
   const d=du(p.tanggalJT);
   const invs=S.external.filter(e=>e.tipe==='investor'&&(e.alokasi||[]).some(a=>a.pid===id));
-  const totalBH=invs.reduce((s,e)=>{const a=e.alokasi.find(x=>x.pid===id)||{};const pct=a.bagiHasilPct||e.bagiHasilPct||0;return s+prof(a.jumlah||p.jumlah)*pct/100;},0);
+  const totalBH=invs.reduce((s,e)=>{const a=e.alokasi.find(x=>x.pid===id)||{};const pct=a.bagiHasilPct||e.bagiHasilPct||0;return s+profP(p)*pct/100;},0);
   const el=document.getElementById('mo-det-b');
   let h=`
     <div class="fb mb12">
@@ -580,16 +637,18 @@ function oDet(id){
       <span class="bdg ${p.status}">${statusLabel(p.status)}</span>
     </div>
     <div class="ir"><span class="ik">Jumlah Deploy</span><span class="iv tvio">${fj(p.jumlah)}</span></div>
-    <div class="ir"><span class="ik">Return Diharapkan</span><span class="iv">${fj(ret(p.jumlah))}</span></div>
-    <div class="ir"><span class="ik">Profit Bersih</span><span class="iv tgrn">+${fj(prof(p.jumlah))}</span></div>
+    <div class="ir"><span class="ik">Tipe Return</span><span class="iv">${(p.returnType||'sekali')==='bulanan'?'📅 Bulanan':'💰 Sekali (Akhir)'}</span></div>
+    <div class="ir"><span class="ik">Return</span><span class="iv">${retLabel(p)}</span></div>
+    <div class="ir"><span class="ik">Total Return</span><span class="iv">${fj(retP(p))}</span></div>
+    <div class="ir"><span class="ik">Profit Bersih</span><span class="iv tgrn">+${fj(profP(p))}</span></div>
     <div class="ir"><span class="ik">Tanggal Mulai</span><span class="iv">${fd(p.tanggalMulai)}</span></div>
     <div class="ir"><span class="ik">Jatuh Tempo</span><span class="iv" style="color:${gc(d)}">${fd(p.tanggalJT)}</span></div>
     ${d!==null?`<div class="ir"><span class="ik">Status Waktu</span><span class="iv" style="color:${gc(d)}">${gl(d)}</span></div>`:''}
     ${p.catatan?`<div class="ir"><span class="ik">Catatan</span><span class="iv">${p.catatan}</span></div>`:''}`;
   if(invs.length>0){
     h+=`<div class="dv"></div><div style="font-weight:900;font-size:13px;margin-bottom:8px">🟠 Investor Terlibat</div>`;
-    invs.forEach(e=>{const a=e.alokasi.find(x=>x.pid===id)||{};const pct=a.bagiHasilPct||e.bagiHasilPct||0;const ph=prof(a.jumlah||p.jumlah)*pct/100;h+=`<div class="pi"><div><div style="font-weight:800;font-size:12px">${e.nama}</div><div class="txx tg">Alokasi: ${fj(a.jumlah||0)} · ${pct}% bagi hasil</div></div><div class="tred tbold">-${fj(ph)}</div></div>`;});
-    h+=`<div style="background:var(--g-l);border-radius:8px;padding:8px 11px;margin-top:6px;font-size:11px;font-weight:800;color:#0B8F46">Net profit kamu: ${fj(prof(p.jumlah)-totalBH)}</div>`;
+    invs.forEach(e=>{const a=e.alokasi.find(x=>x.pid===id)||{};const pct=a.bagiHasilPct||e.bagiHasilPct||0;const ph=profP(p)*pct/100;h+=`<div class="pi"><div><div style="font-weight:800;font-size:12px">${e.nama}</div><div class="txx tg">Alokasi: ${fj(a.jumlah||0)} · ${pct}% bagi hasil</div></div><div class="tred tbold">-${fj(ph)}</div></div>`;});
+    h+=`<div style="background:var(--g-l);border-radius:8px;padding:8px 11px;margin-top:6px;font-size:11px;font-weight:800;color:#0B8F46">Net profit kamu: ${fj(profP(p)-totalBH)}</div>`;
   }
   h+=`<div class="dv"></div><div class="fb mb12"><span style="font-weight:900;font-size:13px">💳 Pembayaran (${(p.payments||[]).length})</span></div>`;
   if(!(p.payments||[]).length) h+=`<div style="text-align:center;padding:8px;color:var(--sub);font-size:11px;font-weight:700">Belum ada pembayaran</div>`;
