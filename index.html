@@ -190,32 +190,38 @@ function gc(d){ if(d===null) return 'var(--sub)'; if(d<0) return 'var(--r)'; if(
 function am(s,m){ const d=new Date(s+'T00:00:00'); d.setMonth(d.getMonth()+m); return d.toISOString().split('T')[0]; }
 function ret(j){ return parseFloat((parseFloat(j)*100/85).toFixed(2)); }
 function prof(j){ return parseFloat((parseFloat(j)*15/85).toFixed(2)); }
-// Project-aware return & profit
-// Bulanan: return/bulan = pure profit (bunga), pokok dikembalikan di akhir
-// Sekali: total return includes pokok, profit = return - deploy
-function retP(p){
-  if((p.returnType||'sekali')==='bulanan'){
-    const rb=parseFloat(p.returnBulanan||0), dur=parseInt(p.durasiReturn||0);
-    return parseFloat(p.jumlah) + rb*dur; // pokok + (bunga × durasi)
-  }
-  return parseFloat(p.returnTotal||0) || ret(p.jumlah);
-}
+// Project-aware: kontrak = nilai kontrak, jumlah = deploy
+// Profit = kontrak - deploy (or for bulanan: returnBulanan × durasi)
+function kontrakP(p){ return parseFloat(p.kontrak||0) || parseFloat(p.jumlah||0); }
 function profP(p){
-  if((p.returnType||'sekali')==='bulanan'){
-    const rb=parseFloat(p.returnBulanan||0), dur=parseInt(p.durasiReturn||0);
-    return parseFloat((rb*dur).toFixed(2)); // bunga saja
+  const rt=p.returnType||'sekali';
+  if(rt==='bulanan'){
+    // returnBulanan bisa dalam Rp atau % dari kontrak
+    const dur=parseInt(p.durasiReturn||0);
+    let rb;
+    if(p.returnMode==='persen'){
+      rb=kontrakP(p)*parseFloat(p.returnPersen||0)/100;
+    } else {
+      rb=parseFloat(p.returnBulanan||0);
+    }
+    return parseFloat((rb*dur).toFixed(2));
   }
-  return parseFloat((retP(p)-parseFloat(p.jumlah)).toFixed(2));
+  // sekali: profit = kontrak - deploy
+  return parseFloat((kontrakP(p)-parseFloat(p.jumlah)).toFixed(2));
 }
-// Return label
+function retBulananRp(p){
+  if(p.returnMode==='persen') return parseFloat((kontrakP(p)*parseFloat(p.returnPersen||0)/100).toFixed(2));
+  return parseFloat(p.returnBulanan||0);
+}
 function retLabel(p){
   const rt=p.returnType||'sekali';
   if(rt==='bulanan'){
-    const rb=parseFloat(p.returnBulanan||0);
+    const rb=retBulananRp(p);
     const dur=parseInt(p.durasiReturn||1);
-    return `${fj(rb)}/bln × ${dur} bln + pokok`;
+    const pct=p.returnMode==='persen'?` (${p.returnPersen}%)`:'';
+    return `${fj(rb)}/bln${pct} × ${dur} bln`;
   }
-  return `${fj(retP(p))} (1×)`;
+  return `${fj(kontrakP(p))} (1×)`;
 }
 function hsc(p){ if(p.status==='terlambat') return 'r'; if(p.status==='tersedia') return 'g'; const d=du(p.tanggalJT); if(d===null) return 'g'; if(d<0) return 'r'; if(d<=7) return 'o'; return 'g'; }
 function statusLabel(s){ return s==='aktif'?'🟢 Aktif':s==='terlambat'?'🔴 Terlambat':s==='tersedia'?'🟡 Tersedia':'✅ Selesai'; }
@@ -289,7 +295,7 @@ function pCard(p){
         <div style="font-size:10px;color:var(--sub);font-weight:600;margin-top:2px">${p.catatan?p.catatan.slice(0,40)+(p.catatan.length>40?'…':''):'Tanpa catatan'}</div>
       </div>
       <div class="tr">
-        <div style="font-size:13px;font-weight:800;color:var(--p)">${fj(p.jumlah)}</div>
+        <div style="font-size:13px;font-weight:800;color:var(--p)">${fj(kontrakP(p))}</div>
         <span class="bdg ${p.status}">${statusLabel(p.status)}</span>
       </div>
     </div>
@@ -540,20 +546,32 @@ function oPM(id){
   const ds=new Date().toISOString().split('T')[0];
   const el=document.getElementById('mo-p-b');
   const prt=p?.returnType||'sekali';
+  const prm=p?.returnMode||'rupiah';
   el.innerHTML=`
     <div class="fg"><label class="fl">Nama Peminjam *</label><input class="fi" id="fp-n" value="${p?p.peminjam:''}" placeholder="Nama lengkap"></div>
-    <div class="fg"><label class="fl">Jumlah Deploy (jt) *</label><input class="fi" id="fp-j" type="number" value="${p?p.jumlah:''}" placeholder="85"></div>
+    <div class="fr">
+      <div class="fg"><label class="fl">Nilai Kontrak (jt) *</label><input class="fi" id="fp-k" type="number" step="0.01" value="${p?p.kontrak||'':''}" placeholder="100"></div>
+      <div class="fg"><label class="fl">Jumlah Deploy (jt) *</label><input class="fi" id="fp-j" type="number" step="0.01" value="${p?p.jumlah:''}" placeholder="85"><div class="fh">Uang yang benar-benar keluar</div></div>
+    </div>
     <div class="fg"><label class="fl">Tipe Return</label><select class="fi fs" id="fp-rt">
       <option value="sekali" ${prt==='sekali'?'selected':''}>💰 Sekali di Akhir Periode</option>
-      <option value="bulanan" ${prt==='bulanan'?'selected':''}>📅 Bulanan (Cicilan)</option>
+      <option value="bulanan" ${prt==='bulanan'?'selected':''}>📅 Bulanan</option>
     </select></div>
-    <div id="fp-ret-sekali" style="display:${prt==='sekali'?'block':'none'}">
-      <div class="fg"><label class="fl">Total Return (jt)</label><input class="fi" id="fp-r" type="number" step="0.01" value="${p?p.returnTotal||'':''}" placeholder="Auto: 85→100"><div class="fh">Kosongkan untuk auto (deploy×100/85). Isi untuk custom.</div></div>
-    </div>
     <div id="fp-ret-bulanan" style="display:${prt==='bulanan'?'block':'none'}">
-      <div class="fr">
-        <div class="fg"><label class="fl">Return/Bulan (jt) *</label><input class="fi" id="fp-rb" type="number" step="0.01" value="${p?p.returnBulanan||'':''}"></div>
-        <div class="fg"><label class="fl">Durasi (bulan) *</label><input class="fi" id="fp-dur" type="number" value="${p?p.durasiReturn||'':''}"></div>
+      <div class="fg"><label class="fl">Durasi (bulan) *</label><input class="fi" id="fp-dur" type="number" value="${p?p.durasiReturn||'':''}"></div>
+      <div class="fg"><label class="fl">Return per Bulan</label>
+        <div style="display:flex;gap:6px;margin-bottom:6px">
+          <button type="button" class="btn sm ${prm==='persen'?'pr':'ou'}" id="fp-mode-pct" style="flex:1">% dari Kontrak</button>
+          <button type="button" class="btn sm ${prm==='rupiah'?'pr':'ou'}" id="fp-mode-rp" style="flex:1">Rp Langsung</button>
+        </div>
+        <div id="fp-rb-pct" style="display:${prm==='persen'?'block':'none'}">
+          <input class="fi" id="fp-pct" type="number" step="0.1" value="${p?p.returnPersen||'':''}" placeholder="5">
+          <div class="fh">% dari nilai kontrak per bulan</div>
+        </div>
+        <div id="fp-rb-rp" style="display:${prm==='rupiah'?'block':'none'}">
+          <input class="fi" id="fp-rb" type="number" step="0.01" value="${p?p.returnBulanan||'':''}" placeholder="5">
+          <div class="fh">Jumlah Rp per bulan (jt)</div>
+        </div>
       </div>
     </div>
     <div id="fp-c" style="display:none" class="fc-note"></div>
@@ -573,62 +591,95 @@ function oPM(id){
   if(p){const db=document.createElement('button');db.className='btn dn';db.textContent='🗑️';db.onclick=()=>delProj(p.id);btnRow.appendChild(db);}
   const sb=document.createElement('button');sb.className='btn pr fw';sb.textContent='💾 Simpan';sb.onclick=savePrj;btnRow.appendChild(sb);
   // live calc & toggle
+  document.getElementById('fp-k').addEventListener('input',updCalc);
   document.getElementById('fp-j').addEventListener('input',updCalc);
   document.getElementById('fp-m').addEventListener('change',updDue);
   document.getElementById('fp-rt').addEventListener('change',function(){
-    const v=this.value;
-    document.getElementById('fp-ret-sekali').style.display=v==='sekali'?'block':'none';
-    document.getElementById('fp-ret-bulanan').style.display=v==='bulanan'?'block':'none';
+    document.getElementById('fp-ret-bulanan').style.display=this.value==='bulanan'?'block':'none';
     updCalc();
   });
-  ['fp-r','fp-rb','fp-dur'].forEach(id=>{const el2=document.getElementById(id);if(el2)el2.addEventListener('input',updCalc);});
+  ['fp-rb','fp-dur','fp-pct'].forEach(id=>{const el2=document.getElementById(id);if(el2)el2.addEventListener('input',updCalc);});
+  // mode toggle buttons
+  let _retMode=prm;
+  document.getElementById('fp-mode-pct').addEventListener('click',function(){
+    _retMode='persen';this.className='btn sm pr';document.getElementById('fp-mode-rp').className='btn sm ou';
+    document.getElementById('fp-rb-pct').style.display='block';document.getElementById('fp-rb-rp').style.display='none';updCalc();
+  });
+  document.getElementById('fp-mode-rp').addEventListener('click',function(){
+    _retMode='rupiah';this.className='btn sm pr';document.getElementById('fp-mode-pct').className='btn sm ou';
+    document.getElementById('fp-rb-rp').style.display='block';document.getElementById('fp-rb-pct').style.display='none';updCalc();
+  });
+  window._getRetMode=()=>_retMode;
   updCalc();
   om('mo-p');
 }
 function updCalc(){
+  const k=parseFloat(document.getElementById('fp-k')?.value||0);
   const j=parseFloat(document.getElementById('fp-j')?.value||0);
   const c=document.getElementById('fp-c');
   if(!c) return;
+  if(k<=0&&j<=0){c.style.display='none';return;}
   const rt=document.getElementById('fp-rt')?.value||'sekali';
-  if(j<=0){c.style.display='none';return;}
-  let totalRet,totalProf;
+  const kontrak=k||j;
+  const deploy=j||k;
   if(rt==='bulanan'){
-    const rb=parseFloat(document.getElementById('fp-rb')?.value||0);
     const dur=parseInt(document.getElementById('fp-dur')?.value||0);
-    totalProf=rb*dur; totalRet=j+totalProf; // bunga = rb×dur, pokok kembali di akhir
-    if(rb>0&&dur>0){c.style.display='block';c.innerHTML=`💡 Deploy <b>${fj(j)}</b> → Bunga ${fj(rb)}/bln × ${dur} bln = <b style="color:#0B8F46">+${fj(totalProf)} profit</b><br><span style="font-size:10px;color:var(--sub)">Pokok ${fj(j)} dikembalikan di akhir · Total kembali: ${fj(totalRet)}</span>`;}
-    else{c.style.display='none';}
+    const mode=window._getRetMode?window._getRetMode():'rupiah';
+    let rb;
+    if(mode==='persen'){
+      const pct=parseFloat(document.getElementById('fp-pct')?.value||0);
+      rb=kontrak*pct/100;
+    } else {
+      rb=parseFloat(document.getElementById('fp-rb')?.value||0);
+    }
+    if(rb>0&&dur>0){
+      const totalProf=rb*dur;
+      c.style.display='block';
+      c.innerHTML=`💡 Kontrak <b>${fj(kontrak)}</b> · Deploy <b>${fj(deploy)}</b><br>
+        Return: ${fj(rb)}/bln × ${dur} bln = <b style="color:#0B8F46">+${fj(totalProf)} profit</b><br>
+        <span style="font-size:10px;color:var(--sub)">Pokok ${fj(deploy)} kembali di akhir · Total: ${fj(deploy+totalProf)}</span>`;
+    } else {c.style.display='none';}
   } else {
-    const customR=parseFloat(document.getElementById('fp-r')?.value||0);
-    totalRet=customR>0?customR:ret(j); totalProf=totalRet-j;
+    const totalProf=kontrak-deploy;
     c.style.display='block';
-    c.innerHTML=`💡 Deploy <b>${fj(j)}</b> → Return <b>${fj(totalRet)}</b>${customR?'':' (auto)'} · Profit <b style="color:#0B8F46">+${fj(totalProf)}</b>`;
+    c.innerHTML=`💡 Kontrak <b>${fj(kontrak)}</b> · Deploy <b>${fj(deploy)}</b><br>
+      Di akhir kembali <b>${fj(kontrak)}</b> · Profit <b style="color:${totalProf>=0?'#0B8F46':'var(--r)'}">+${fj(totalProf)}</b>`;
   }
 }
 function updDue(){const m=document.getElementById('fp-m')?.value;if(m) document.getElementById('fp-jt').value=am(m,3);}
 function savePrj(){
   const n=document.getElementById('fp-n')?.value?.trim();
-  const j=parseFloat(document.getElementById('fp-j')?.value);
+  const k=parseFloat(document.getElementById('fp-k')?.value||0);
+  const j=parseFloat(document.getElementById('fp-j')?.value||0);
   const m=document.getElementById('fp-m')?.value;
   const jt=document.getElementById('fp-jt')?.value;
   const s=document.getElementById('fp-s')?.value;
   const ct=document.getElementById('fp-ct')?.value?.trim();
   const rt=document.getElementById('fp-rt')?.value||'sekali';
   if(!n){toast('❌ Nama wajib diisi');return;}
-  if(!j||j<=0){toast('❌ Jumlah wajib diisi');return;}
+  if(!j||j<=0){toast('❌ Jumlah deploy wajib');return;}
   if(!m||!jt){toast('❌ Tanggal wajib diisi');return;}
-  // Return fields
-  let returnTotal=0, returnBulanan=0, durasiReturn=0;
+  const kontrak=k||j;
+  const data={peminjam:n,kontrak,jumlah:j,returnType:rt,tanggalMulai:m,tanggalJT:jt,status:s,catatan:ct};
   if(rt==='bulanan'){
-    returnBulanan=parseFloat(document.getElementById('fp-rb')?.value||0);
-    durasiReturn=parseInt(document.getElementById('fp-dur')?.value||0);
-    if(!returnBulanan||!durasiReturn){toast('❌ Isi return bulanan & durasi');return;}
-    returnTotal=j + returnBulanan*durasiReturn; // pokok + bunga
+    const dur=parseInt(document.getElementById('fp-dur')?.value||0);
+    const mode=window._getRetMode?window._getRetMode():'rupiah';
+    let rb,pct=0;
+    if(mode==='persen'){
+      pct=parseFloat(document.getElementById('fp-pct')?.value||0);
+      rb=kontrak*pct/100;
+    } else {
+      rb=parseFloat(document.getElementById('fp-rb')?.value||0);
+    }
+    if(!rb||!dur){toast('❌ Isi return & durasi');return;}
+    data.returnMode=mode;
+    data.returnBulanan=rb;
+    data.returnPersen=pct;
+    data.durasiReturn=dur;
+    data.returnTotal=j+rb*dur;
   } else {
-    const customR=parseFloat(document.getElementById('fp-r')?.value||0);
-    returnTotal=customR>0?customR:ret(j);
+    data.returnTotal=kontrak;
   }
-  const data={peminjam:n,jumlah:j,returnType:rt,returnTotal,returnBulanan,durasiReturn,tanggalMulai:m,tanggalJT:jt,status:s,catatan:ct};
   if(eP){const i=S.projects.findIndex(p=>p.id===eP);if(i>=0) S.projects[i]={...S.projects[i],...data};toast('✅ Diupdate!');}
   else{S.projects.push({id:uid(),...data,payments:[]});toast('🎉 Ditambahkan!');}
   save();cm('mo-p');rAll();
@@ -651,11 +702,11 @@ function oDet(id){
       <div style="font-size:17px;font-weight:900">${p.peminjam}</div>
       <span class="bdg ${p.status}">${statusLabel(p.status)}</span>
     </div>
+    <div class="ir"><span class="ik">Nilai Kontrak</span><span class="iv">${fj(kontrakP(p))}</span></div>
     <div class="ir"><span class="ik">Jumlah Deploy</span><span class="iv tvio">${fj(p.jumlah)}</span></div>
     <div class="ir"><span class="ik">Tipe Return</span><span class="iv">${(p.returnType||'sekali')==='bulanan'?'📅 Bulanan':'💰 Sekali (Akhir)'}</span></div>
-    <div class="ir"><span class="ik">Return</span><span class="iv">${retLabel(p)}</span></div>
-    <div class="ir"><span class="ik">Total Return</span><span class="iv">${fj(retP(p))}</span></div>
-    <div class="ir"><span class="ik">Profit Bersih</span><span class="iv tgrn">+${fj(profP(p))}</span></div>
+    ${(p.returnType||'sekali')==='bulanan'?`<div class="ir"><span class="ik">Return/Bulan</span><span class="iv">${fj(retBulananRp(p))}${p.returnMode==='persen'?` (${p.returnPersen}%)`:''}</span></div><div class="ir"><span class="ik">Durasi</span><span class="iv">${p.durasiReturn||0} bulan</span></div>`:''}
+    <div class="ir"><span class="ik">Profit</span><span class="iv tgrn">+${fj(profP(p))}</span></div>
     <div class="ir"><span class="ik">Tanggal Mulai</span><span class="iv">${fd(p.tanggalMulai)}</span></div>
     <div class="ir"><span class="ik">Jatuh Tempo</span><span class="iv" style="color:${gc(d)}">${fd(p.tanggalJT)}</span></div>
     ${d!==null?`<div class="ir"><span class="ik">Status Waktu</span><span class="iv" style="color:${gc(d)}">${gl(d)}</span></div>`:''}
