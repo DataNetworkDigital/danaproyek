@@ -422,7 +422,7 @@ function pCard(p, isAdmin){
     </div>
     ${isAdmin&&invAlloc.length>0?`<div style="margin-bottom:8px">${invAlloc.map(e=>`<span class="at">👤 ${e.nama}</span>`).join('')}</div>`:''}
     <div class="fb mb8 txx"><span class="tg tbold">Progress</span><span class="tvio tbold">${Math.round(prog)}%</span></div>
-    <div class="pw mb8"><div class="pb ${pbcls}" style="width:${p.status==='tersedia'?100:prog}%"></div></div>
+    <div class="pw mb8"><div class="pb ${pbcls}" style="width:${prog}%"></div></div>
     ${isAdmin?`<div class="fb txx"><span class="tg">Deploy: <b style="color:var(--txt)">${fj(p.jumlah)}</b></span></div><div class="fb txx mt6">`:`<div class="fb txx">`}<span class="tg">Return: <b style="color:var(--txt)">${_retLbl}</b></span><span class="tgrn tbold">+${fj(_prof)} profit</span></div>
   </div>`;
 }
