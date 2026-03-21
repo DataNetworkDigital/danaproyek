@@ -158,27 +158,26 @@ let CP='b', MT='aktif', eP=null, eE=null, extTab='pinjaman';
 let charts={}, profPeriod='6m', profCFrom='', profCTo='';
 
 let _pin='', _saving=false, _saveTimer=null;
-const PIN_KEY='dt_pin_hash';
-function pinHash(p){let h=0;for(let i=0;i<p.length;i++){h=((h<<5)-h)+p.charCodeAt(i);h|=0;}return 'ph_'+Math.abs(h).toString(36);}
+const DOC_ID='main_data';
 
 function load(){
   try{const s=localStorage.getItem('dt_v3');if(s)S={...S,...JSON.parse(s)};}catch(e){}
 }
 async function loadFromFirestore(){
-  if(!_pin)return;
   try{
-    const snap=await db.collection('danatrack').doc(pinHash(_pin)).get();
+    const snap=await db.collection('danatrack').doc(DOC_ID).get();
     if(snap.exists){const d=snap.data();S={...S,...d.state};localStorage.setItem('dt_v3',JSON.stringify(S));}
   }catch(e){console.warn('Firestore load:',e);}
 }
 function save(){
   try{localStorage.setItem('dt_v3',JSON.stringify(S));}catch(e){}
+  if(!_adminUnlocked)return; // only admin can write to cloud
   if(_saveTimer)clearTimeout(_saveTimer);
   _saveTimer=setTimeout(saveToFirestore,800);
 }
 async function saveToFirestore(){
-  if(!_pin||_saving)return;_saving=true;
-  try{await db.collection('danatrack').doc(pinHash(_pin)).set({state:JSON.parse(JSON.stringify(S)),updatedAt:new Date().toISOString()},{merge:true});}catch(e){console.warn('Firestore save:',e);}
+  if(!_adminUnlocked||_saving)return;_saving=true;
+  try{await db.collection('danatrack').doc(DOC_ID).set({state:JSON.parse(JSON.stringify(S)),updatedAt:new Date().toISOString()},{merge:true});}catch(e){console.warn('Firestore save:',e);}
   _saving=false;
 }
 function exportJ(){const b=new Blob([JSON.stringify(S,null,2)],{type:'application/json'});const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download='danatrack-'+new Date().toISOString().split('T')[0]+'.json';a.click();URL.revokeObjectURL(u);toast('✅ Data diekspor!')}
@@ -1642,6 +1641,8 @@ async function unlockAdmin(){
 // ── INIT ──────────────────────────────────────────────────────────────
 load();
 go('b');
+// Load from cloud for everyone (not just admin)
+loadFromFirestore().then(()=>rAll()).catch(()=>{});
 </script>
 </body>
 </html>
