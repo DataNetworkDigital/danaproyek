@@ -262,9 +262,11 @@ function retLabelUmum(p){
 function hsc(p){ if(p.status==='terlambat') return 'r'; if(p.status==='tersedia') return 'o'; if(p.status==='selesai') return 'v'; return 'g'; }
 function statusLabel(s){ return s==='aktif'?'🟢 Aktif':s==='terlambat'?'🔴 Terlambat':s==='tersedia'?'🟡 Tersedia':'✅ Selesai'; }
 function stats(){
-  const f=S.fund, buf=f.angsuran*f.bufferMonths, avail=f.kurAmount-buf-f.living;
+  const f=S.fund, kurOn=f.kurEnabled!==false&&f.kurAmount>0;
+  const buf=kurOn?f.angsuran*f.bufferMonths:0;
+  const avail=kurOn?f.kurAmount-buf-f.living:0;
   const dep=S.projects.filter(p=>p.status==='aktif'||p.status==='terlambat').reduce((s,p)=>s+parseFloat(p.jumlah||0),0);
-  const idle=Math.max(0,avail-dep);
+  const idle=kurOn?Math.max(0,avail-dep):0;
   const tp=S.projects.reduce((s,p)=>s+(p.payments||[]).reduce((ps,py)=>{const pr=parseFloat(py.jumlah||0)-parseFloat(p.jumlah||0);return ps+(pr>0?pr:0);},0),0);
   const ms=f.startDate?Math.max(1,Math.round((new Date()-new Date(f.startDate+'T00:00:00'))/2629800000)):1;
   const bufRem=buf/f.angsuran;
@@ -466,28 +468,29 @@ function rD(){
   }));
   autoLog.sort((a,b)=>new Date(b.tanggal)-new Date(a.tanggal));
 
+  const kurOn=f.kurEnabled!==false&&f.kurAmount>0;
   let h=`
-  <div class="bn ${bufCls}"><span class="bi">${bufPct>60?'🛡️':bufPct>30?'⚡':'⚠️'}</span>
-    <div><div class="bt">Dana Talangan Aktif</div><div class="bs">Buffer ${f.bufferMonths} bln · ${act.length} aktif · ${fj(st.dep)} deployed</div></div>
-  </div>
   <div class="mg">
     <div class="mc vio"><div class="ml">Deployed</div><div class="mv">${fj(st.dep)}</div><div class="ms">${act.length} proyek</div></div>
-    <div class="mc ${st.idle>0?'org':'grn'}"><div class="ml">Dana Idle</div><div class="mv">${fj(st.idle)}</div><div class="ms">${st.idle>0?'Bisa di-deploy':'Fully deployed'}</div></div>
     <div class="mc grn"><div class="ml">Total Profit</div><div class="mv">${fj(st.tp)}</div><div class="ms">Dari ${autoLog.length} bayaran</div></div>
+    ${kurOn?`<div class="mc ${st.idle>0?'org':'grn'}"><div class="ml">Dana Idle</div><div class="mv">${fj(st.idle)}</div><div class="ms">${st.idle>0?'Bisa di-deploy':'Fully deployed'}</div></div>`:''}
     <div class="mc ${urg.length>0?'red':'vio'}"><div class="ml">Jatuh Tempo</div><div class="mv">${urg.length}</div><div class="ms">${urg.length>0?'Dalam 7 hari!':'Aman'}</div></div>
-  </div>
-  <div class="card">
-    <div class="fb mb8"><span class="tbold txs">🛡️ Buffer KUR</span><span class="bdg ${st.bufRem>=4?'aktif':st.bufRem>=2?'warn':'terlambat'}">${st.bufRem.toFixed(1)} bln</span></div>
-    <div class="pw"><div class="pb ${st.bufRem>=4?'grn':st.bufRem>=2?'org':'red'}" style="width:${bufPct}%"></div></div>
-    <div class="txx tg mt6">Angsuran: ${fj(f.angsuran)}/bln · Buffer total: ${fj(f.angsuran*f.bufferMonths)}</div>
-  </div>
-  <div class="card">
-    <div class="fb mb8"><span class="st">📅 Progress KUR</span><span class="txs tbold tvio">${kurPct.toFixed(1)}%</span></div>
-    <div class="pw mb8"><div class="pb vio" style="width:${kurPct}%"></div></div>
-    <div class="fb txx tg"><span>Bulan ke-${st.ms} dari 60</span><span>Sisa ~${Math.max(0,60-st.ms)} bln</span></div>
-    <div class="ir" style="margin-top:4px"><span class="ik">Tersedia untuk deploy</span><span class="iv tvio">${fj(st.avail)}</span></div>
-  </div>
-  <div class="card">
+  </div>`;
+  if(kurOn){
+    h+=`
+    <div class="card">
+      <div class="fb mb8"><span class="tbold txs">🛡️ Buffer KUR</span><span class="bdg ${st.bufRem>=4?'aktif':st.bufRem>=2?'warn':'terlambat'}">${st.bufRem.toFixed(1)} bln</span></div>
+      <div class="pw"><div class="pb ${st.bufRem>=4?'grn':st.bufRem>=2?'org':'red'}" style="width:${bufPct}%"></div></div>
+      <div class="txx tg mt6">Angsuran: ${fj(f.angsuran)}/bln · Buffer total: ${fj(f.angsuran*f.bufferMonths)}</div>
+    </div>
+    <div class="card">
+      <div class="fb mb8"><span class="st">📅 Progress KUR</span><span class="txs tbold tvio">${kurPct.toFixed(1)}%</span></div>
+      <div class="pw mb8"><div class="pb vio" style="width:${kurPct}%"></div></div>
+      <div class="fb txx tg"><span>Bulan ke-${st.ms} dari 60</span><span>Sisa ~${Math.max(0,60-st.ms)} bln</span></div>
+      <div class="ir" style="margin-top:4px"><span class="ik">Tersedia untuk deploy</span><span class="iv tvio">${fj(st.avail)}</span></div>
+    </div>`;
+  }
+  h+=`<div class="card">
     <div class="st mb12">📈 Log Profit (Otomatis)</div>
     ${autoLog.length===0?`<div style="text-align:center;padding:14px;color:var(--sub);font-size:11px;font-weight:700">📭 Belum ada pembayaran</div>`:
       autoLog.slice(0,15).map(l=>`<div class="pi"><div><div style="font-weight:800;font-size:12px">${l.peminjam}</div><div class="txx tg">${fd(l.tanggal)}${l.catatan?' · '+l.catatan:''}</div></div><div class="tgrn tbold">+${fj(l.jumlah)}</div></div>`).join('')}
@@ -1235,23 +1238,50 @@ function mExtDone(id){const i=S.external.findIndex(e=>e.id===id);if(i>=0){S.exte
 // ── FUND CONFIG ───────────────────────────────────────────────────────
 function oFund(){
   const f=S.fund;
-  document.getElementById('mo-fund-b').innerHTML=`
-    <div class="fg"><label class="fl">Jumlah KUR (jt)</label><input class="fi" id="ef-k" type="number" value="${f.kurAmount}"></div>
-    <div class="fg"><label class="fl">Angsuran/Bulan (jt)</label><input class="fi" id="ef-a" type="number" step="0.001" value="${f.angsuran}"></div>
-    <div class="fg"><label class="fl">Buffer (bulan)</label><input class="fi" id="ef-b" type="number" value="${f.bufferMonths}"></div>
-    <div class="fg"><label class="fl">Living Allowance (jt)</label><input class="fi" id="ef-l" type="number" value="${f.living}"></div>
-    <div class="fg"><label class="fl">Tanggal Mulai KUR</label><input class="fi" id="ef-s" type="date" value="${f.startDate}"></div>
-    <button class="btn pr fw" onclick="saveFund()">💾 Simpan</button>`;
+  const kurOn=f.kurEnabled!==false;
+  const el=document.getElementById('mo-fund-b');
+  el.innerHTML=`
+    <div class="fg">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <div><div class="fl" style="margin:0">🏦 KUR</div><div class="fh" style="margin:0">Aktifkan jika menggunakan pinjaman KUR</div></div>
+        <label style="position:relative;width:48px;height:28px;cursor:pointer">
+          <input type="checkbox" id="ef-kur-on" ${kurOn?'checked':''} style="opacity:0;width:0;height:0">
+          <span style="position:absolute;inset:0;border-radius:14px;background:${kurOn?'var(--p)':'var(--bdr)'};transition:all .2s"></span>
+          <span style="position:absolute;top:3px;left:${kurOn?'23px':'3px'};width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.15);transition:all .2s"></span>
+        </label>
+      </div>
+    </div>
+    <div id="ef-kur-fields" style="display:${kurOn?'block':'none'}">
+      <div class="fg"><label class="fl">Jumlah KUR (jt)</label><input class="fi" id="ef-k" type="number" value="${f.kurAmount||0}"></div>
+      <div class="fg"><label class="fl">Angsuran/Bulan (jt)</label><input class="fi" id="ef-a" type="number" step="0.001" value="${f.angsuran||0}"></div>
+      <div class="fg"><label class="fl">Buffer (bulan)</label><input class="fi" id="ef-b" type="number" value="${f.bufferMonths||6}"></div>
+      <div class="fg"><label class="fl">Tanggal Mulai KUR</label><input class="fi" id="ef-s" type="date" value="${f.startDate||''}"></div>
+    </div>
+    <div class="dv"></div>
+    <div class="fg"><label class="fl">Living Allowance (jt)</label><input class="fi" id="ef-l" type="number" value="${f.living||0}"></div>`;
+  const sb=document.createElement('button');sb.className='btn pr fw';sb.textContent='💾 Simpan';sb.onclick=saveFund;el.appendChild(sb);
+  // toggle handler
+  document.getElementById('ef-kur-on').addEventListener('change',function(){
+    document.getElementById('ef-kur-fields').style.display=this.checked?'block':'none';
+    const dot=this.parentElement.querySelectorAll('span');
+    dot[0].style.background=this.checked?'var(--p)':'var(--bdr)';
+    dot[1].style.left=this.checked?'23px':'3px';
+  });
   om('mo-fund');
 }
 function saveFund(){
-  const k=parseFloat(document.getElementById('ef-k')?.value);
-  const a=parseFloat(document.getElementById('ef-a')?.value);
-  const b=parseInt(document.getElementById('ef-b')?.value);
-  const l=parseFloat(document.getElementById('ef-l')?.value);
-  const s=document.getElementById('ef-s')?.value;
-  if(!k||!a||!b){toast('❌ Isi semua field');return;}
-  S.fund={...S.fund,kurAmount:k,angsuran:a,bufferMonths:b,living:l,startDate:s};
+  const kurOn=document.getElementById('ef-kur-on')?.checked;
+  const l=parseFloat(document.getElementById('ef-l')?.value||0);
+  if(kurOn){
+    const k=parseFloat(document.getElementById('ef-k')?.value||0);
+    const a=parseFloat(document.getElementById('ef-a')?.value||0);
+    const b=parseInt(document.getElementById('ef-b')?.value||6);
+    const s=document.getElementById('ef-s')?.value||'';
+    if(!k||!a){toast('❌ Isi jumlah & angsuran KUR');return;}
+    S.fund={...S.fund,kurEnabled:true,kurAmount:k,angsuran:a,bufferMonths:b,living:l,startDate:s};
+  } else {
+    S.fund={...S.fund,kurEnabled:false,living:l};
+  }
   save();cm('mo-fund');rD();toast('✅ Konfigurasi disimpan!');
 }
 
