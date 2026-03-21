@@ -182,7 +182,7 @@ function importJ(){const i=document.createElement('input');i.type='file';i.accep
 
 // ── UTILS ─────────────────────────────────────────────────────────────
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2);
-function fj(v){ if(v==null) return '—'; const n=parseFloat(v); if(isNaN(n)) return '—'; if(Math.abs(n)>=1000) return `Rp ${(n/1000).toFixed(2)} M`; return `Rp ${n.toFixed(1)} jt`; }
+function fj(v){ if(v==null) return '—'; const n=parseFloat(v); if(isNaN(n)) return '—'; if(Math.abs(n)>=1000) return `Rp ${(n/1000).toFixed(3).replace(/0+$/,'').replace(/\.$/,'')} M`; const s=n.toFixed(3).replace(/0+$/,'').replace(/\.$/,''); return `Rp ${s} jt`; }
 function fd(s){ if(!s) return '—'; return new Date(s+'T00:00:00').toLocaleDateString('id-ID',{day:'numeric',month:'short',year:'numeric'}); }
 function du(s){ if(!s) return null; const n=new Date(); n.setHours(0,0,0,0); return Math.round((new Date(s+'T00:00:00')-n)/86400000); }
 function gl(d){ if(d===null) return ''; if(d<0) return `${Math.abs(d)}h terlambat`; if(d===0) return 'Jatuh tempo hari ini!'; return `${d} hari lagi`; }
