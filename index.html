@@ -223,6 +223,36 @@ function retLabel(p){
   }
   return `${fj(kontrakP(p))} (1×)`;
 }
+function profUmum(p){
+  const rt=p.returnType||'sekali';
+  if(rt==='bulanan'){
+    const dur=parseInt(p.durasiReturn||0);
+    let rb;
+    if(p.returnModeUmum==='persen'){
+      rb=kontrakP(p)*parseFloat(p.returnPersenUmum||0)/100;
+    } else {
+      rb=parseFloat(p.returnBulananUmum||0);
+    }
+    return parseFloat((rb*dur).toFixed(2));
+  }
+  // sekali: umum sees no profit (kontrak - kontrak = 0)
+  return 0;
+}
+function retLabelUmum(p){
+  const rt=p.returnType||'sekali';
+  if(rt==='bulanan'){
+    let rb;
+    if(p.returnModeUmum==='persen'){
+      rb=parseFloat((kontrakP(p)*parseFloat(p.returnPersenUmum||0)/100).toFixed(2));
+    } else {
+      rb=parseFloat(p.returnBulananUmum||0);
+    }
+    const dur=parseInt(p.durasiReturn||1);
+    const pct=p.returnModeUmum==='persen'?` (${p.returnPersenUmum}%)`:'';
+    return `${fj(rb)}/bln${pct} × ${dur} bln`;
+  }
+  return `${fj(kontrakP(p))} (1×)`;
+}
 function hsc(p){ if(p.status==='terlambat') return 'r'; if(p.status==='tersedia') return 'g'; const d=du(p.tanggalJT); if(d===null) return 'g'; if(d<0) return 'r'; if(d<=7) return 'o'; return 'g'; }
 function statusLabel(s){ return s==='aktif'?'🟢 Aktif':s==='terlambat'?'🔴 Terlambat':s==='tersedia'?'🟡 Tersedia':'✅ Selesai'; }
 function stats(){
@@ -267,7 +297,12 @@ function rB(){
     if(p.status==='aktif'){ const d=du(p.tanggalJT); return d!==null&&d<=7; }
     return false;
   });
-  let h='';
+  const activeCount=S.projects.filter(p=>p.status==='aktif'||p.status==='terlambat').length;
+  const totalKontrak=S.projects.filter(p=>p.status!=='selesai').reduce((s,p)=>s+kontrakP(p),0);
+  let h=`<div class="mg">
+    <div class="mc vio"><div class="ml">PROYEK AKTIF</div><div class="mv">${activeCount}</div></div>
+    <div class="mc grn"><div class="ml">TOTAL KONTRAK</div><div class="mv">${fj(totalKontrak)}</div></div>
+  </div>`;
   if(urg.length>0){
     h+=`<div style="background:var(--r-l);border-radius:var(--rad);padding:13px 15px;margin-bottom:11px;border-left:4px solid var(--r)">
       <div style="font-weight:900;font-size:13px;color:var(--r);margin-bottom:6px">⚠️ ${urg.length} Proyek Perlu Perhatian</div>
@@ -277,18 +312,21 @@ function rB(){
   if(sorted.length===0){
     h+=`<div class="es"><div class="ei">🌱</div><div class="et">Belum ada proyek</div><div class="esb">Buka tab Proyek dan tap + untuk mulai</div></div>`;
   } else {
-    sorted.forEach(p=>{ h+=pCard(p); });
+    sorted.forEach(p=>{ h+=pCard(p, _adminUnlocked); });
   }
   document.getElementById('p-b').innerHTML=h;
 }
 
-function pCard(p){
+function pCard(p, isAdmin){
   const d=du(p.tanggalJT);
   const prog=p.tanggalMulai&&p.tanggalJT ? Math.max(0,Math.min(100,((new Date()-new Date(p.tanggalMulai+'T00:00:00'))/(new Date(p.tanggalJT+'T00:00:00')-new Date(p.tanggalMulai+'T00:00:00')))*100)) : 0;
   const invAlloc=S.external.filter(e=>e.tipe==='investor'&&e.status!=='selesai'&&(e.alokasi||[]).some(a=>a.pid===p.id));
   const pyc=(p.payments||[]).length;
   const pbcls=p.status==='terlambat'?'red':p.status==='tersedia'?'grn':'vio';
-  return `<div class="pc ${p.status}" onclick="oDet('${p.id}')">
+  const _retLbl=isAdmin?retLabel(p):retLabelUmum(p);
+  const _prof=isAdmin?profP(p):profUmum(p);
+  const clickAttr=isAdmin?` onclick="oDet('${p.id}')"`:'';
+  return `<div class="pc ${p.status}"${clickAttr}>
     <div class="fb" style="margin-bottom:9px">
       <div>
         <div style="display:flex;align-items:center"><span class="hlt ${hsc(p)}"></span><span style="font-size:14px;font-weight:900">${p.peminjam}</span></div>
@@ -303,12 +341,12 @@ function pCard(p){
       <span style="font-size:10px;color:var(--sub);font-weight:700">📅 ${fd(p.tanggalMulai)}</span>
       <span style="font-size:10px;color:var(--sub);font-weight:700">⏰ ${fd(p.tanggalJT)}</span>
       <span style="font-size:10px;font-weight:700;color:${gc(d)}">⌛ ${gl(d)||'—'}</span>
-      ${pyc>0?`<span style="font-size:10px;color:var(--sub);font-weight:700">💳 ${pyc}×</span>`:''}
+      ${isAdmin&&pyc>0?`<span style="font-size:10px;color:var(--sub);font-weight:700">💳 ${pyc}×</span>`:''}
     </div>
-    ${invAlloc.length>0?`<div style="margin-bottom:8px">${invAlloc.map(e=>`<span class="at">👤 ${e.nama}</span>`).join('')}</div>`:''}
+    ${isAdmin&&invAlloc.length>0?`<div style="margin-bottom:8px">${invAlloc.map(e=>`<span class="at">👤 ${e.nama}</span>`).join('')}</div>`:''}
     <div class="fb mb8 txx"><span class="tg tbold">Progress</span><span class="tvio tbold">${Math.round(prog)}%</span></div>
     <div class="pw mb8"><div class="pb ${pbcls}" style="width:${p.status==='tersedia'?100:prog}%"></div></div>
-    <div class="fb txx"><span class="tg">Return: <b style="color:var(--txt)">${retLabel(p)}</b></span><span class="tgrn tbold">+${fj(profP(p))} profit</span></div>
+    ${isAdmin?`<div class="fb txx"><span class="tg">Deploy: <b style="color:var(--txt)">${fj(p.jumlah)}</b></span></div><div class="fb txx mt6">`:`<div class="fb txx">`}<span class="tg">Return: <b style="color:var(--txt)">${_retLbl}</b></span><span class="tgrn tbold">+${fj(_prof)} profit</span></div>
   </div>`;
 }
 
@@ -321,7 +359,7 @@ function rM(){
   if(fil.length===0){
     h+=`<div class="es"><div class="ei">${MT==='aktif'?'🌱':MT==='terlambat'?'😌':MT==='selesai'?'🎉':'📭'}</div><div class="et">Tidak ada proyek ${MT}</div><div class="esb">${MT==='aktif'||MT==='tersedia'?'Tap + untuk tambah':'Belum ada di sini'}</div></div>`;
   } else {
-    fil.forEach(p=>{ h+=pCard(p); });
+    fil.forEach(p=>{ h+=pCard(p, true); });
   }
   document.getElementById('p-m').innerHTML=h;
 }
@@ -569,18 +607,38 @@ function oPM(id){
     </select></div>
     <div id="fp-ret-bulanan" style="display:${prt==='bulanan'?'block':'none'}">
       <div class="fg"><label class="fl">Durasi (bulan) *</label><input class="fi" id="fp-dur" type="number" value="${p?p.durasiReturn||'':''}"></div>
-      <div class="fg"><label class="fl">Return per Bulan</label>
-        <div style="display:flex;gap:6px;margin-bottom:6px">
-          <button type="button" class="btn sm ${prm==='persen'?'pr':'ou'}" id="fp-mode-pct" style="flex:1">% dari Kontrak</button>
-          <button type="button" class="btn sm ${prm==='rupiah'?'pr':'ou'}" id="fp-mode-rp" style="flex:1">Rp Langsung</button>
+      <div style="background:var(--p-l);border-radius:12px;padding:12px;margin-bottom:13px">
+        <div style="font-size:12px;font-weight:900;color:var(--p);margin-bottom:10px">📢 Return Umum (Tampilan Publik)</div>
+        <div class="fg" style="margin-bottom:0">
+          <div style="display:flex;gap:6px;margin-bottom:6px">
+            <button type="button" class="btn sm ${(p?.returnModeUmum||'rupiah')==='rupiah'?'pr':'ou'}" id="fp-umode-rp" style="flex:1">Rp Langsung</button>
+            <button type="button" class="btn sm ${p?.returnModeUmum==='persen'?'pr':'ou'}" id="fp-umode-pct" style="flex:1">% dari Kontrak</button>
+          </div>
+          <div id="fp-urb-rp" style="display:${(p?.returnModeUmum||'rupiah')==='rupiah'?'block':'none'}">
+            <input class="fi" id="fp-urb" type="number" step="0.01" value="${p?p.returnBulananUmum||'':''}" placeholder="3">
+            <div class="fh">Return/bln yang dilihat publik (jt)</div>
+          </div>
+          <div id="fp-urb-pct" style="display:${p?.returnModeUmum==='persen'?'block':'none'}">
+            <input class="fi" id="fp-upct" type="number" step="0.1" value="${p?p.returnPersenUmum||'':''}" placeholder="3">
+            <div class="fh">% dari kontrak/bln yang dilihat publik</div>
+          </div>
         </div>
-        <div id="fp-rb-pct" style="display:${prm==='persen'?'block':'none'}">
-          <input class="fi" id="fp-pct" type="number" step="0.1" value="${p?p.returnPersen||'':''}" placeholder="5">
-          <div class="fh">% dari nilai kontrak per bulan</div>
-        </div>
-        <div id="fp-rb-rp" style="display:${prm==='rupiah'?'block':'none'}">
-          <input class="fi" id="fp-rb" type="number" step="0.01" value="${p?p.returnBulanan||'':''}" placeholder="5">
-          <div class="fh">Jumlah Rp per bulan (jt)</div>
+      </div>
+      <div style="background:var(--o-l);border-radius:12px;padding:12px;margin-bottom:13px">
+        <div style="font-size:12px;font-weight:900;color:#B56B00;margin-bottom:10px">🔐 Return Admin (Data Sebenarnya)</div>
+        <div class="fg" style="margin-bottom:0"><label class="fl">Return per Bulan</label>
+          <div style="display:flex;gap:6px;margin-bottom:6px">
+            <button type="button" class="btn sm ${prm==='persen'?'pr':'ou'}" id="fp-mode-pct" style="flex:1">% dari Kontrak</button>
+            <button type="button" class="btn sm ${prm==='rupiah'?'pr':'ou'}" id="fp-mode-rp" style="flex:1">Rp Langsung</button>
+          </div>
+          <div id="fp-rb-pct" style="display:${prm==='persen'?'block':'none'}">
+            <input class="fi" id="fp-pct" type="number" step="0.1" value="${p?p.returnPersen||'':''}" placeholder="5">
+            <div class="fh">% dari nilai kontrak per bulan</div>
+          </div>
+          <div id="fp-rb-rp" style="display:${prm==='rupiah'?'block':'none'}">
+            <input class="fi" id="fp-rb" type="number" step="0.01" value="${p?p.returnBulanan||'':''}" placeholder="5">
+            <div class="fh">Jumlah Rp per bulan (jt)</div>
+          </div>
         </div>
       </div>
     </div>
@@ -632,6 +690,17 @@ function oPM(id){
     document.getElementById('fp-rb-rp').style.display='block';document.getElementById('fp-rb-pct').style.display='none';updCalc();
   });
   window._getRetMode=()=>_retMode;
+  // umum mode toggle buttons
+  let _retModeUmum=p?.returnModeUmum||'rupiah';
+  document.getElementById('fp-umode-pct')?.addEventListener('click',function(){
+    _retModeUmum='persen';this.className='btn sm pr';document.getElementById('fp-umode-rp').className='btn sm ou';
+    document.getElementById('fp-urb-pct').style.display='block';document.getElementById('fp-urb-rp').style.display='none';
+  });
+  document.getElementById('fp-umode-rp')?.addEventListener('click',function(){
+    _retModeUmum='rupiah';this.className='btn sm pr';document.getElementById('fp-umode-pct').className='btn sm ou';
+    document.getElementById('fp-urb-rp').style.display='block';document.getElementById('fp-urb-pct').style.display='none';
+  });
+  window._getRetModeUmum=()=>_retModeUmum;
   updCalc();
   om('mo-p');
 }
@@ -724,6 +793,18 @@ function savePrj(){
     data.returnPersen=pct;
     data.durasiReturn=dur;
     data.returnTotal=j+rb*dur;
+    // umum return fields
+    const modeU=window._getRetModeUmum?window._getRetModeUmum():'rupiah';
+    let rbU=0,pctU=0;
+    if(modeU==='persen'){
+      pctU=parseFloat(document.getElementById('fp-upct')?.value||0);
+      rbU=kontrak*pctU/100;
+    } else {
+      rbU=parseFloat(document.getElementById('fp-urb')?.value||0);
+    }
+    data.returnModeUmum=modeU;
+    data.returnBulananUmum=rbU;
+    data.returnPersenUmum=pctU;
   } else {
     data.returnTotal=kontrak;
   }
@@ -741,9 +822,32 @@ function delProj(id){
 function oDet(id){
   const p=S.projects.find(x=>x.id===id); if(!p) return;
   const d=du(p.tanggalJT);
+  const isAdmin=_adminUnlocked;
+  const el=document.getElementById('mo-det-b');
+  if(!isAdmin){
+    // Umum view: read-only, no deploy, no edit/pay/complete, umum profit
+    const _retLbl=retLabelUmum(p);
+    const _prof=profUmum(p);
+    let h=`
+      <div class="fb mb12">
+        <div style="font-size:17px;font-weight:900">${p.peminjam}</div>
+        <span class="bdg ${p.status}">${statusLabel(p.status)}</span>
+      </div>
+      <div class="ir"><span class="ik">Nilai Kontrak</span><span class="iv">${fj(kontrakP(p))}</span></div>
+      <div class="ir"><span class="ik">Tipe Return</span><span class="iv">${(p.returnType||'sekali')==='bulanan'?'📅 Bulanan':'💰 Sekali (Akhir)'}</span></div>
+      ${(p.returnType||'sekali')==='bulanan'?`<div class="ir"><span class="ik">Return</span><span class="iv">${_retLbl}</span></div>`:''}
+      <div class="ir"><span class="ik">Profit</span><span class="iv tgrn">+${fj(_prof)}</span></div>
+      <div class="ir"><span class="ik">Tanggal Mulai</span><span class="iv">${fd(p.tanggalMulai)}</span></div>
+      <div class="ir"><span class="ik">Jatuh Tempo</span><span class="iv" style="color:${gc(d)}">${fd(p.tanggalJT)}</span></div>
+      ${d!==null?`<div class="ir"><span class="ik">Status Waktu</span><span class="iv" style="color:${gc(d)}">${gl(d)}</span></div>`:''}
+      ${p.catatan?`<div class="ir"><span class="ik">Catatan</span><span class="iv">${p.catatan}</span></div>`:''}`;
+    el.innerHTML=h;
+    om('mo-det');
+    return;
+  }
+  // Admin view: full details
   const invs=S.external.filter(e=>e.tipe==='investor'&&(e.alokasi||[]).some(a=>a.pid===id));
   const totalBH=invs.reduce((s,e)=>{const a=e.alokasi.find(x=>x.pid===id)||{};const pct=a.bagiHasilPct||e.bagiHasilPct||0;return s+profP(p)*pct/100;},0);
-  const el=document.getElementById('mo-det-b');
   let h=`
     <div class="fb mb12">
       <div style="font-size:17px;font-weight:900">${p.peminjam}</div>
