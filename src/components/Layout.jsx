@@ -1,12 +1,10 @@
-import { NavLink, useNavigate } from 'react-router-dom'
-import { useAuth } from '../contexts/AuthContext'
+import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard,
   FolderKanban,
   Users,
   PieChart,
   CalendarClock,
-  LogOut,
   Menu,
   X,
 } from 'lucide-react'
@@ -21,19 +19,12 @@ const links = [
 ]
 
 export default function Layout({ children }) {
-  const { logout } = useAuth()
-  const navigate = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
-
-  const handleLogout = () => {
-    logout()
-    navigate('/login')
-  }
 
   return (
     <div className="min-h-dvh flex flex-col">
       {/* Top bar */}
-      <header className="glass sticky top-0 z-50 px-4 py-3 flex items-center justify-between">
+      <header className="glass sticky top-0 z-50 px-4 py-3 flex items-center">
         <div className="flex items-center gap-3">
           <button
             onClick={() => setMenuOpen(!menuOpen)}
@@ -45,9 +36,6 @@ export default function Layout({ children }) {
             FundTracker
           </h1>
         </div>
-        <button onClick={handleLogout} className="p-1.5 rounded-lg hover:bg-gray-100 transition text-gray-500">
-          <LogOut size={18} />
-        </button>
       </header>
 
       <div className="flex flex-1">
