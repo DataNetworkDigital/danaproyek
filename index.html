@@ -295,7 +295,7 @@ function om(id){ document.getElementById(id).classList.add('op'); document.body.
 function cm(id){ document.getElementById(id).classList.remove('op'); document.body.style.overflow=''; }
 
 // ── BERANDA ───────────────────────────────────────────────────────────
-let _bSort='default',_bSortDir=1,_bFilter={tersedia:true,aktif:true,selesai:true};
+let _bSort='default',_bSortDir=1,_bFilter={tersedia:true,aktif:true,selesai:true},_bPanelOpen='';
 function rB(){
   const tersediaC=S.projects.filter(p=>p.status==='tersedia').length;
   const aktifC=S.projects.filter(p=>p.status==='aktif'||p.status==='terlambat').length;
@@ -320,7 +320,7 @@ function rB(){
   }
   // toolbar: filter & sort icons
   const activeFilterCount=[_bFilter.tersedia,_bFilter.aktif,_bFilter.selesai].filter(x=>!x).length;
-  const sortLabel=_bSort==='kontrak'?'Investasi'+(_bSortDir===1?' ↑':' ↓'):_bSort==='durasi'?'Durasi'+(_bSortDir===1?' ↑':' ↓'):'';
+  const sortLabel=_bSort==='kontrak'?'Investasi'+(_bSortDir===1?' ↑':' ↓'):_bSort==='durasi'?'Durasi'+(_bSortDir===1?' ↑':' ↓'):_bSort==='nama'?'Nama'+(_bSortDir===1?' A→Z':' Z→A'):'';
   h+=`<div style="display:flex;gap:8px;margin-bottom:11px">
     <button onclick="togglePanel('b-filter')" style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:9px 12px;border-radius:12px;border:1.5px solid var(--bdr);background:#fff;font-size:11px;font-weight:800;color:var(--sub);cursor:pointer;font-family:Nunito,sans-serif">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="7" y1="12" x2="17" y2="12"/><line x1="10" y1="18" x2="14" y2="18"/></svg>
@@ -332,7 +332,7 @@ function rB(){
     </button>
   </div>`;
   // collapsible filter panel
-  h+=`<div id="b-filter" style="display:none;background:#fff;border-radius:14px;padding:14px;margin-bottom:11px;box-shadow:var(--sh)">
+  h+=`<div id="b-filter" style="display:${_bPanelOpen==='b-filter'?'block':'none'};background:#fff;border-radius:14px;padding:14px;margin-bottom:11px;box-shadow:var(--sh)">
     <div style="font-size:11px;font-weight:900;color:var(--txt);margin-bottom:10px">Filter Status</div>
     <div style="display:flex;flex-direction:column;gap:10px">
       ${[['tersedia','🟡','Tersedia','#F59E0B'],['aktif','🟢','Aktif','#10B981'],['selesai','✅','Selesai','var(--p)']].map(([k,ico,lbl,col])=>
@@ -345,10 +345,10 @@ function rB(){
     </div>
   </div>`;
   // collapsible sort panel
-  h+=`<div id="b-sort" style="display:none;background:#fff;border-radius:14px;padding:14px;margin-bottom:11px;box-shadow:var(--sh)">
+  h+=`<div id="b-sort" style="display:${_bPanelOpen==='b-sort'?'block':'none'};background:#fff;border-radius:14px;padding:14px;margin-bottom:11px;box-shadow:var(--sh)">
     <div style="font-size:11px;font-weight:900;color:var(--txt);margin-bottom:10px">Urutkan</div>
     <div style="display:flex;flex-direction:column;gap:6px">
-      ${[['default','Default'],['kontrak','💰 Nilai Investasi'],['durasi','⏱️ Durasi Proyek']].map(([k,lbl])=>{
+      ${[['default','Default'],['nama','🔤 Nama (A-Z)'],['kontrak','💰 Nilai Investasi'],['durasi','⏱️ Durasi Proyek']].map(([k,lbl])=>{
         const active=_bSort===k;
         const arrow=active&&k!=='default'?(_bSortDir===1?' ↑':' ↓'):'';
         return `<button onclick="toggleBSort('${k}')" style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-radius:10px;border:none;background:${active?'var(--p-l)':'#F8F7FF'};color:${active?'var(--p)':'var(--sub)'};font-size:12px;font-weight:800;cursor:pointer;font-family:Nunito,sans-serif;text-align:left">
@@ -369,6 +369,8 @@ function rB(){
   } else if(_bSort==='durasi'){
     const durMs=p=>{if(!p.tanggalMulai||!p.tanggalJT)return 0;return new Date(p.tanggalJT+'T00:00:00')-new Date(p.tanggalMulai+'T00:00:00');};
     list.sort((a,b)=>_bSortDir*(durMs(a)-durMs(b)));
+  } else if(_bSort==='nama'){
+    list.sort((a,b)=>_bSortDir*(a.peminjam||'').localeCompare(b.peminjam||''));
   } else {
     const order={terlambat:0,aktif:1,tersedia:2,selesai:3};
     list.sort((a,b)=>(order[a.status]??1)-(order[b.status]??1));
@@ -381,10 +383,10 @@ function rB(){
   document.getElementById('p-b').innerHTML=h;
 }
 function togglePanel(id){
-  const el=document.getElementById(id);if(!el)return;
-  const other=id==='b-filter'?'b-sort':'b-filter';
-  const otherEl=document.getElementById(other);if(otherEl)otherEl.style.display='none';
-  el.style.display=el.style.display==='none'?'block':'none';
+  _bPanelOpen=_bPanelOpen===id?'':id;
+  const f=document.getElementById('b-filter'),s=document.getElementById('b-sort');
+  if(f)f.style.display=_bPanelOpen==='b-filter'?'block':'none';
+  if(s)s.style.display=_bPanelOpen==='b-sort'?'block':'none';
 }
 function toggleBSort(k){
   if(_bSort===k){_bSortDir*=-1;} else {_bSort=k;_bSortDir=1;}
