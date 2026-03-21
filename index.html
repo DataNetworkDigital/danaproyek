@@ -376,8 +376,8 @@ function pCard(p, isAdmin){
   return `<div class="pc ${p.status}" onclick="oDet('${p.id}')">
     <div class="fb" style="margin-bottom:9px">
       <div>
-        <div style="display:flex;align-items:center"><span class="hlt ${hsc(p)}"></span><span style="font-size:14px;font-weight:900">${p.peminjam}</span></div>
-        <div style="font-size:10px;color:var(--sub);font-weight:600;margin-top:2px">${p.catatan?p.catatan.slice(0,40)+(p.catatan.length>40?'…':''):'Tanpa catatan'}</div>
+        <div style="display:flex;align-items:center"><span class="hlt ${hsc(p)}"></span><span style="font-size:${p.catatan?'14':'16'}px;font-weight:900">${p.peminjam}</span></div>
+        ${p.catatan?`<div style="font-size:10px;color:var(--sub);font-weight:600;margin-top:2px">${p.catatan.slice(0,40)+(p.catatan.length>40?'…':'')}</div>`:''}
       </div>
       <div class="tr">
         <div style="font-size:13px;font-weight:800;color:var(--p)">${fj(kontrakP(p))}</div>
