@@ -22,7 +22,8 @@ html,body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:
 .hdr-t{font-size:17px;font-weight:900;color:var(--txt)}.hdr-s{font-size:10px;color:var(--sub);font-weight:700;margin-top:1px}
 .hdr-icon{background:var(--p-l);border:none;border-radius:10px;width:34px;height:34px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:15px}
 .pages{flex:1;overflow:hidden;position:relative}
-.page{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;touch-action:pan-y;padding:14px 14px 96px;opacity:0;pointer-events:none;transform:translateY(6px);transition:opacity .22s,transform .22s}
+body.modal-open .pages{pointer-events:none}
+.page{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior-y:contain;padding:14px 14px 96px;opacity:0;pointer-events:none;transform:translateY(6px);transition:opacity .22s,transform .22s}
 .page.active{opacity:1;pointer-events:all;transform:translateY(0);animation:fadeUp .3s ease-out}
 .page::-webkit-scrollbar{width:3px}.page::-webkit-scrollbar-thumb{background:var(--bdr);border-radius:2px}
 .bnav{position:fixed;bottom:12px;left:50%;transform:translateX(-50%);width:calc(100% - 28px);max-width:400px;height:64px;background:rgba(255,255,255,.85);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-radius:20px;box-shadow:0 4px 24px rgba(0,0,0,.08);display:flex;padding:0 8px;padding-bottom:0;z-index:50;border:1px solid rgba(255,255,255,.6)}
@@ -371,7 +372,7 @@ function stats(){
 // ── NAVIGATION ────────────────────────────────────────────────────────
 function closeAllModals(){
   document.querySelectorAll('.mo').forEach(m=>m.classList.remove('op'));
-  document.body.style.removeProperty('overflow');
+  document.body.classList.remove('modal-open');
 }
 function go(p){
   closeAllModals();
@@ -390,8 +391,8 @@ function go(p){
 function fabAct(){ if(CP==='m') oPM(); else if(CP==='e') oEM(); }
 let _tt;
 function toast(m){ const t=document.getElementById('toast'); t.textContent=m; t.classList.add('show'); clearTimeout(_tt); _tt=setTimeout(()=>t.classList.remove('show'),2700); }
-function om(id){ document.getElementById(id).classList.add('op'); document.body.style.overflow='hidden'; }
-function cm(id){ document.getElementById(id).classList.remove('op'); document.body.style.overflow=''; document.body.style.removeProperty('overflow'); }
+function om(id){ document.getElementById(id).classList.add('op'); document.body.classList.add('modal-open'); }
+function cm(id){ document.getElementById(id).classList.remove('op'); if(!document.querySelector('.mo.op')) document.body.classList.remove('modal-open'); }
 
 // ── BERANDA ───────────────────────────────────────────────────────────
 let _bSort='default',_bSortDir=1,_bFilter={tersedia:true,aktif:true,selesai:true},_bPanelOpen='';
