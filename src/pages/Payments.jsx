@@ -1,70 +1,31 @@
 import { useState } from 'react'
 import { useData } from '../contexts/DataContext'
-import { formatCurrency, formatDate, daysUntil, getStatusColor } from '../lib/formatters'
+import { formatCurrency, formatDate, daysUntil } from '../lib/formatters'
+import { card, btnPrimary, badge, input, label as labelStyle } from '../lib/styles'
 import Modal from '../components/Modal'
 import EmptyState from '../components/EmptyState'
 import { CalendarClock, Plus, Pencil, Trash2, Check, Clock, AlertTriangle } from 'lucide-react'
 
-const defaultForm = {
-  projectId: '',
-  investorId: '',
-  amount: '',
-  dueDate: '',
-  type: 'return',
-  status: 'pending',
-  notes: '',
-}
+const defaultForm = { projectId: '', investorId: '', amount: '', dueDate: '', type: 'return', status: 'pending', notes: '' }
 
 export default function Payments() {
-  const {
-    payments, projects, investors,
-    addPayment, updatePayment, deletePayment,
-  } = useData()
+  const { payments, projects, investors, addPayment, updatePayment, deletePayment } = useData()
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState(null)
   const [form, setForm] = useState(defaultForm)
   const [filter, setFilter] = useState('all')
 
   const openAdd = () => { setEditing(null); setForm(defaultForm); setModalOpen(true) }
-  const openEdit = (p) => {
-    setEditing(p)
-    setForm({
-      projectId: p.projectId || '',
-      investorId: p.investorId || '',
-      amount: p.amount || '',
-      dueDate: p.dueDate || '',
-      type: p.type || 'return',
-      status: p.status || 'pending',
-      notes: p.notes || '',
-    })
-    setModalOpen(true)
-  }
+  const openEdit = (p) => { setEditing(p); setForm({ projectId: p.projectId || '', investorId: p.investorId || '', amount: p.amount || '', dueDate: p.dueDate || '', type: p.type || 'return', status: p.status || 'pending', notes: p.notes || '' }); setModalOpen(true) }
+  const handleSubmit = async (e) => { e.preventDefault(); if (editing) await updatePayment(editing.id, form); else await addPayment(form); setModalOpen(false) }
+  const handleDelete = async (id) => { if (window.confirm('Delete?')) await deletePayment(id) }
+  const markPaid = async (p) => { await updatePayment(p.id, { status: 'paid', paidDate: new Date().toISOString().split('T')[0] }) }
 
-  const handleSubmit = async (e) => {
-    e.preventDefault()
-    if (editing) await updatePayment(editing.id, form)
-    else await addPayment(form)
-    setModalOpen(false)
-  }
-
-  const handleDelete = async (id) => {
-    if (window.confirm('Delete this payment?')) await deletePayment(id)
-  }
-
-  const markPaid = async (payment) => {
-    await updatePayment(payment.id, { status: 'paid', paidDate: new Date().toISOString().split('T')[0] })
-  }
-
-  // Compute effective statuses
   const enriched = payments.map((p) => {
     const days = daysUntil(p.dueDate)
-    const effectiveStatus = p.status === 'pending' && days < 0 ? 'overdue' : p.status
-    return { ...p, effectiveStatus, daysUntil: days }
+    return { ...p, effectiveStatus: p.status === 'pending' && days < 0 ? 'overdue' : p.status, daysUntil: days }
   })
-
-  const filtered = filter === 'all'
-    ? enriched
-    : enriched.filter((p) => p.effectiveStatus === filter)
+  const filtered = filter === 'all' ? enriched : enriched.filter((p) => p.effectiveStatus === filter)
 
   const totals = {
     pending: enriched.filter((p) => p.effectiveStatus === 'pending').reduce((s, p) => s + (Number(p.amount) || 0), 0),
@@ -72,115 +33,81 @@ export default function Payments() {
     paid: enriched.filter((p) => p.effectiveStatus === 'paid').reduce((s, p) => s + (Number(p.amount) || 0), 0),
   }
 
+  const summaryCards = [
+    { icon: Clock, label: 'Pending', value: totals.pending, bg: 'linear-gradient(135deg, #fef3c7, #fffbeb)', color: '#d97706', shadow: 'rgba(245,158,11,0.15)' },
+    { icon: AlertTriangle, label: 'Overdue', value: totals.overdue, bg: 'linear-gradient(135deg, #fee2e2, #fef2f2)', color: '#dc2626', shadow: 'rgba(239,68,68,0.15)' },
+    { icon: Check, label: 'Paid', value: totals.paid, bg: 'linear-gradient(135deg, #d1fae5, #ecfdf5)', color: '#059669', shadow: 'rgba(16,185,129,0.15)' },
+  ]
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Payments</h1>
-          <p className="text-sm text-gray-500 mt-1">Track all payment schedules</p>
+          <h1 className="text-2xl font-extrabold text-gray-900">Payments</h1>
+          <p className="text-sm text-gray-400 mt-1">Track payment schedules</p>
         </div>
-        <button onClick={openAdd} className="btn-primary flex items-center gap-2 text-sm">
-          <Plus size={16} /> Add
-        </button>
+        <button onClick={openAdd} style={btnPrimary}><Plus size={16} /> Add</button>
       </div>
 
-      {/* Summary cards */}
       <div className="grid grid-cols-3 gap-3">
-        <div className="card !p-3 text-center">
-          <Clock size={18} className="mx-auto text-warning-500 mb-1" />
-          <p className="text-xs text-gray-500">Pending</p>
-          <p className="font-bold text-sm text-gray-900">{formatCurrency(totals.pending)}</p>
-        </div>
-        <div className="card !p-3 text-center">
-          <AlertTriangle size={18} className="mx-auto text-danger-500 mb-1" />
-          <p className="text-xs text-gray-500">Overdue</p>
-          <p className="font-bold text-sm text-danger-600">{formatCurrency(totals.overdue)}</p>
-        </div>
-        <div className="card !p-3 text-center">
-          <Check size={18} className="mx-auto text-success-500 mb-1" />
-          <p className="text-xs text-gray-500">Paid</p>
-          <p className="font-bold text-sm text-success-600">{formatCurrency(totals.paid)}</p>
-        </div>
+        {summaryCards.map(({ icon: Icon, label, value, bg, color, shadow }) => (
+          <div key={label} className="text-center p-3 rounded-2xl" style={{ background: bg, boxShadow: `0 2px 8px ${shadow}` }}>
+            <Icon size={20} className="mx-auto mb-1" style={{ color }} />
+            <p className="text-[10px] font-semibold text-gray-500 uppercase">{label}</p>
+            <p className="font-bold text-sm mt-0.5" style={{ color }}>{formatCurrency(value)}</p>
+          </div>
+        ))}
       </div>
 
-      {/* Filter */}
       <div className="flex gap-2">
         {['all', 'pending', 'overdue', 'paid'].map((s) => (
-          <button
-            key={s}
-            onClick={() => setFilter(s)}
-            className={`px-3 py-2 rounded-xl text-xs font-medium transition-all ${
-              filter === s ? 'bg-primary-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-            }`}
-          >
+          <button key={s} onClick={() => setFilter(s)}
+            style={filter === s ? { ...btnPrimary, fontSize: '12px', padding: '8px 16px' } : { background: 'white', color: '#6b7280', fontWeight: 600, fontSize: '12px', padding: '8px 16px', borderRadius: '14px', border: '1px solid rgba(0,0,0,0.06)', cursor: 'pointer' }}>
             {s.charAt(0).toUpperCase() + s.slice(1)}
           </button>
         ))}
       </div>
 
       {filtered.length === 0 ? (
-        <EmptyState
-          icon={CalendarClock}
-          title="No payments found"
-          description={payments.length === 0 ? "Add payment schedules to track due dates" : "Try a different filter"}
-          action={payments.length === 0 && <button onClick={openAdd} className="btn-primary text-sm">Add Payment</button>}
-        />
+        <EmptyState icon={CalendarClock} title="No payments found" description={payments.length === 0 ? "Add payment schedules" : "Try another filter"}
+          action={payments.length === 0 && <button onClick={openAdd} style={btnPrimary}>Add Payment</button>} />
       ) : (
         <div className="space-y-3">
           {filtered.map((payment) => {
             const project = projects.find((p) => p.id === payment.projectId)
             const investor = investors.find((i) => i.id === payment.investorId)
-
             return (
-              <div key={payment.id} className="card">
+              <div key={payment.id} style={card}>
                 <div className="flex items-start justify-between">
-                  <div className="flex-1 min-w-0">
+                  <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="font-bold text-sm text-gray-900">{project?.name || 'Unknown'}</h3>
-                      <span className={`badge ${getStatusColor(payment.effectiveStatus)}`}>
-                        {payment.effectiveStatus}
-                      </span>
-                      <span className="badge bg-gray-50 text-gray-500">{payment.type}</span>
+                      <span style={badge(payment.effectiveStatus)}>{payment.effectiveStatus}</span>
                     </div>
-                    {investor && (
-                      <p className="text-xs text-gray-500 mt-1">To: {investor.name}</p>
-                    )}
+                    {investor && <p className="text-[11px] text-gray-400 mt-1">To: {investor.name}</p>}
                   </div>
-                  <div className="flex items-center gap-1 shrink-0 ml-2">
+                  <div className="flex items-center gap-0.5 shrink-0 ml-2">
                     {payment.effectiveStatus !== 'paid' && (
-                      <button
-                        onClick={() => markPaid(payment)}
-                        className="p-2 rounded-lg hover:bg-green-50 transition"
-                        title="Mark as paid"
-                      >
-                        <Check size={14} className="text-success-500" />
+                      <button onClick={() => markPaid(payment)} className="p-2 rounded-xl hover:bg-green-50 transition" title="Mark paid">
+                        <Check size={14} className="text-emerald-400" />
                       </button>
                     )}
-                    <button onClick={() => openEdit(payment)} className="p-2 rounded-lg hover:bg-gray-100 transition">
-                      <Pencil size={14} className="text-gray-400" />
-                    </button>
-                    <button onClick={() => handleDelete(payment.id)} className="p-2 rounded-lg hover:bg-red-50 transition">
-                      <Trash2 size={14} className="text-gray-400 hover:text-danger-500" />
-                    </button>
+                    <button onClick={() => openEdit(payment)} className="p-2 rounded-xl hover:bg-gray-50 transition"><Pencil size={14} className="text-gray-300" /></button>
+                    <button onClick={() => handleDelete(payment.id)} className="p-2 rounded-xl hover:bg-red-50 transition"><Trash2 size={14} className="text-gray-300 hover:text-red-400" /></button>
                   </div>
                 </div>
-                <div className="mt-3 flex items-center justify-between">
-                  <div className="text-xs text-gray-500">
-                    <span>Due: {formatDate(payment.dueDate)}</span>
-                    {payment.daysUntil !== null && payment.effectiveStatus === 'pending' && (
-                      <span className="ml-2 text-warning-600">
-                        ({payment.daysUntil === 0 ? 'Today' : `${payment.daysUntil}d left`})
-                      </span>
+                <div className="mt-3 flex items-center justify-between pt-3" style={{ borderTop: '1px solid #f3f4f6' }}>
+                  <div className="text-xs text-gray-400 font-medium">
+                    <span>{formatDate(payment.dueDate)}</span>
+                    {payment.effectiveStatus === 'pending' && payment.daysUntil !== null && (
+                      <span className="ml-1.5" style={{ color: '#d97706' }}>({payment.daysUntil === 0 ? 'Today' : `${payment.daysUntil}d`})</span>
                     )}
                     {payment.effectiveStatus === 'overdue' && (
-                      <span className="ml-2 text-danger-500">
-                        ({Math.abs(payment.daysUntil)}d overdue)
-                      </span>
+                      <span className="ml-1.5" style={{ color: '#dc2626' }}>({Math.abs(payment.daysUntil)}d late)</span>
                     )}
                   </div>
                   <p className="font-bold text-sm text-gray-900">{formatCurrency(payment.amount)}</p>
                 </div>
-                {payment.notes && <p className="text-xs text-gray-400 mt-2">{payment.notes}</p>}
               </div>
             )
           })}
@@ -189,93 +116,25 @@ export default function Payments() {
 
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editing ? 'Edit Payment' : 'New Payment'}>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Project *</label>
-            <select
-              required
-              value={form.projectId}
-              onChange={(e) => setForm({ ...form, projectId: e.target.value })}
-              className="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary-200"
-            >
-              <option value="">Select project</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Investor (payee)</label>
-            <select
-              value={form.investorId}
-              onChange={(e) => setForm({ ...form, investorId: e.target.value })}
-              className="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary-200"
-            >
-              <option value="">Select investor</option>
-              {investors.map((i) => (
-                <option key={i.id} value={i.id}>{i.name}</option>
-              ))}
-            </select>
+          <div><label style={labelStyle}>Project *</label><select required value={form.projectId} onChange={(e) => setForm({ ...form, projectId: e.target.value })} style={input}>
+            <option value="">Select project</option>{projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select></div>
+          <div><label style={labelStyle}>Investor (payee)</label><select value={form.investorId} onChange={(e) => setForm({ ...form, investorId: e.target.value })} style={input}>
+            <option value="">Select investor</option>{investors.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+          </select></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label style={labelStyle}>Amount *</label><input required type="number" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} style={input} /></div>
+            <div><label style={labelStyle}>Due Date *</label><input required type="date" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} style={input} /></div>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Amount *</label>
-              <input
-                required
-                type="number"
-                value={form.amount}
-                onChange={(e) => setForm({ ...form, amount: e.target.value })}
-                className="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary-200"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Due Date *</label>
-              <input
-                required
-                type="date"
-                value={form.dueDate}
-                onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
-                className="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary-200"
-              />
-            </div>
+            <div><label style={labelStyle}>Type</label><select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} style={input}>
+              <option value="return">Return</option><option value="principal">Principal</option><option value="interest">Interest</option><option value="dividend">Dividend</option>
+            </select></div>
+            <div><label style={labelStyle}>Status</label><select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} style={input}>
+              <option value="pending">Pending</option><option value="paid">Paid</option>
+            </select></div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
-              <select
-                value={form.type}
-                onChange={(e) => setForm({ ...form, type: e.target.value })}
-                className="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary-200"
-              >
-                <option value="return">Return</option>
-                <option value="principal">Principal</option>
-                <option value="interest">Interest</option>
-                <option value="dividend">Dividend</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-              <select
-                value={form.status}
-                onChange={(e) => setForm({ ...form, status: e.target.value })}
-                className="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary-200"
-              >
-                <option value="pending">Pending</option>
-                <option value="paid">Paid</option>
-              </select>
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-            <textarea
-              value={form.notes}
-              onChange={(e) => setForm({ ...form, notes: e.target.value })}
-              className="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary-200"
-              rows={2}
-            />
-          </div>
-          <button type="submit" className="btn-primary w-full">
-            {editing ? 'Save Changes' : 'Add Payment'}
-          </button>
+          <button type="submit" style={{ ...btnPrimary, width: '100%', justifyContent: 'center' }}>{editing ? 'Save Changes' : 'Add Payment'}</button>
         </form>
       </Modal>
     </div>
