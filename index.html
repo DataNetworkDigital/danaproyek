@@ -398,22 +398,6 @@ function rB(){
     <div class="mc grn" style="text-align:center"><div class="ml">AKTIF</div><div class="mv">${aktifC}</div></div>
     <div class="mc vio" style="text-align:center"><div class="ml">SELESAI</div><div class="mv">${selesaiC}</div></div>
   </div>`;
-  // urgent alert - based on next unpaid schedule item
-  const urg=S.projects.filter(p=>{
-    if(p.status==='terlambat') return true;
-    if(p.status==='aktif'){
-      const nd=getNextDue(p);
-      if(nd){ const d=du(nd.dueDate); return d!==null&&d<=7; }
-      const d=du(p.tanggalJT); return d!==null&&d<=7;
-    }
-    return false;
-  });
-  if(urg.length>0){
-    h+=`<div style="background:var(--r-l);border-radius:var(--rad);padding:13px 15px;margin-bottom:11px;border-left:4px solid var(--r)">
-      <div style="font-weight:900;font-size:13px;color:var(--r);margin-bottom:6px">⚠️ ${urg.length} Proyek Perlu Perhatian</div>
-      ${urg.map(p=>{const nd=getNextDue(p);const dd=nd?nd.dueDate:p.tanggalJT;return `<div style="display:flex;justify-content:space-between;font-size:11px;padding:3px 0;border-top:1px solid rgba(243,18,96,.12)"><span style="font-weight:700">${p.peminjam}</span><span style="color:var(--r);font-weight:800">${gl(du(dd))}</span></div>`;}).join('')}
-    </div>`;
-  }
   // toolbar: filter & sort icons
   const activeFilterCount=[_bFilter.tersedia,_bFilter.aktif,_bFilter.selesai].filter(x=>!x).length;
   const sortLabel=_bSort==='kontrak'?'Investasi'+(_bSortDir===1?' ↑':' ↓'):_bSort==='durasi'?'Durasi'+(_bSortDir===1?' ↑':' ↓'):_bSort==='nama'?'Nama'+(_bSortDir===1?' A→Z':' Z→A'):'';
@@ -530,7 +514,24 @@ function rM(){
   const tabs=[['aktif','🟢'],['tersedia','🟡'],['terlambat','🔴'],['selesai','✅'],['semua','📋']];
   const fil=MT==='semua'?S.projects:S.projects.filter(p=>p.status===MT);
   const cnt=t=>t==='semua'?S.projects.length:S.projects.filter(p=>p.status===t).length;
-  let h=`<div class="tabs">${tabs.map(([t,ic])=>`<button class="tab ${MT===t?'on':''}" onclick="swMT('${t}')">${ic} ${t.charAt(0).toUpperCase()+t.slice(1)} <span style="background:${MT===t?'var(--p-l)':'#F1EFF9'};color:${MT===t?'var(--p)':'var(--sub)'};padding:1px 6px;border-radius:8px;font-size:9px">${cnt(t)}</span></button>`).join('')}</div>`;
+  // urgent alerts (admin only)
+  const urg=S.projects.filter(p=>{
+    if(p.status==='terlambat') return true;
+    if(p.status==='aktif'){
+      const nd=getNextDue(p);
+      if(nd){const d=du(nd.dueDate);return d!==null&&d<=7;}
+      const d=du(p.tanggalJT);return d!==null&&d<=7;
+    }
+    return false;
+  });
+  let h='';
+  if(urg.length>0){
+    h+=`<div style="background:var(--o-l);border-radius:var(--rad);padding:13px 15px;margin-bottom:11px;border-left:4px solid var(--o)">
+      <div style="font-weight:900;font-size:13px;color:#B56B00;margin-bottom:6px">⏰ ${urg.length} Perlu Perhatian</div>
+      ${urg.map(p=>{const nd=getNextDue(p);const dd=nd?nd.dueDate:p.tanggalJT;return `<div style="display:flex;justify-content:space-between;font-size:11px;padding:3px 0;border-top:1px solid rgba(245,158,11,.15)"><span style="font-weight:700">${p.peminjam}</span><span style="color:#B56B00;font-weight:800">${gl(du(dd))}</span></div>`;}).join('')}
+    </div>`;
+  }
+  h+=`<div class="tabs">${tabs.map(([t,ic])=>`<button class="tab ${MT===t?'on':''}" onclick="swMT('${t}')">${ic} ${t.charAt(0).toUpperCase()+t.slice(1)} <span style="background:${MT===t?'var(--p-l)':'#F1EFF9'};color:${MT===t?'var(--p)':'var(--sub)'};padding:1px 6px;border-radius:8px;font-size:9px">${cnt(t)}</span></button>`).join('')}</div>`;
   if(fil.length===0){
     h+=`<div class="es"><div class="ei">${MT==='aktif'?'🌱':MT==='terlambat'?'😌':MT==='selesai'?'🎉':'📭'}</div><div class="et">Tidak ada proyek ${MT}</div><div class="esb">${MT==='aktif'||MT==='tersedia'?'Tap + untuk tambah':'Belum ada di sini'}</div></div>`;
   } else {
@@ -1123,7 +1124,7 @@ function oDet(id){
         <div class="fb"><span style="font-weight:800;font-size:12px">Bulan ${s.month} — ${fd(s.dueDate)}</span><span style="font-weight:900;font-size:12px">${fj(s.amount)}${s.paidAmount&&s.paidAmount!==s.amount?' (aktual: '+fj(s.paidAmount)+')':''}${finalLbl}</span></div>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-top:4px">
           <span style="font-size:11px;font-weight:700;color:${statusColor}">${statusIcon} ${statusText}</span>
-          ${isDue?`<button class="btn sm gr" onclick="confirmSchedulePay('${p.id}',${s.month})">✏️ Bayar</button>`:''}
+          ${isDue?`<button class="btn sm gr" onclick="confirmSchedulePay('${p.id}',${s.month})">✏️ Bayar</button>`:''}${isPaid?`<button class="btn sm gh" onclick="editSchedulePay('${p.id}',${s.month})" style="font-size:10px">✏️ Edit</button>`:''}
         </div>
       </div>`;
     });
@@ -1258,6 +1259,60 @@ function confirmSchedulePay(pid, month){
     }
     save();cm('mo-det');oDet(pid);rAll();
     toast('✅ Pembayaran dicatat!');
+  };
+  const cancelBtn=document.createElement('button');
+  cancelBtn.className='btn ou fw';cancelBtn.textContent='Batal';
+  cancelBtn.onclick=function(){form.remove();};
+  btnRow.appendChild(saveBtn);btnRow.appendChild(cancelBtn);
+  form.appendChild(btnRow);
+  row.after(form);
+}
+function editSchedulePay(pid, month){
+  const p=S.projects.find(x=>x.id===pid); if(!p) return;
+  generateSchedule(p);
+  const item=p.schedule.find(s=>s.month===month);
+  if(!item||item.status!=='paid') return;
+  // Find matching payment in payments array
+  const payIdx=(p.payments||[]).findIndex(py=>py.catatan&&py.catatan.includes('Bulan '+month));
+  const pay=payIdx>=0?p.payments[payIdx]:null;
+  const curAmt=pay?pay.jumlah:(item.paidAmount||item.amount);
+  const curDate=pay?pay.tanggal:(item.paidDate||'');
+  const curNote=pay?pay.catatan:'';
+  // Toggle form
+  const formId='spay-form-'+month;
+  const existing=document.getElementById(formId);
+  if(existing){existing.remove();return;}
+  document.querySelectorAll('[id^="spay-form-"]').forEach(el=>el.remove());
+  const row=document.getElementById('srow-'+pid+'-'+month);
+  if(!row) return;
+  const form=document.createElement('div');
+  form.id=formId;
+  form.style.cssText='background:var(--p-l);border-radius:14px;padding:14px;margin-top:8px';
+  form.innerHTML=`
+    <div class="fr" style="margin-bottom:8px">
+      <div class="fg" style="margin:0"><label class="fl">Jumlah (jt)</label><input class="fi" id="sp-amt-${month}" type="number" step="0.01" value="${curAmt}"></div>
+      <div class="fg" style="margin:0"><label class="fl">Tanggal</label><input class="fi" id="sp-date-${month}" type="date" value="${curDate}"></div>
+    </div>
+    <div class="fg" style="margin-bottom:10px"><label class="fl">Catatan</label><input class="fi" id="sp-note-${month}" value="${curNote}" placeholder="Opsional"></div>`;
+  const btnRow=document.createElement('div');
+  btnRow.style.cssText='display:flex;gap:8px';
+  const saveBtn=document.createElement('button');
+  saveBtn.className='btn gr fw';saveBtn.textContent='💾 Simpan';
+  saveBtn.onclick=function(){
+    const amt=parseFloat(document.getElementById('sp-amt-'+month)?.value||0);
+    const date=document.getElementById('sp-date-'+month)?.value||'';
+    const note=document.getElementById('sp-note-'+month)?.value||'';
+    if(!amt||amt<=0){toast('❌ Jumlah wajib');return;}
+    item.paidAmount=amt;
+    item.paidDate=date;
+    // Update payments array
+    if(payIdx>=0){
+      p.payments[payIdx].jumlah=amt;
+      p.payments[payIdx].tanggal=date;
+      p.payments[payIdx].catatan=note;
+    }
+    save();cm('mo-det');oDet(pid);rAll();
+    toast('✅ Pembayaran diupdate!');
   };
   const cancelBtn=document.createElement('button');
   cancelBtn.className='btn ou fw';cancelBtn.textContent='Batal';
