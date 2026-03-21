@@ -197,6 +197,8 @@ function prof(j){ return parseFloat((parseFloat(j)*15/85).toFixed(2)); }
 // Profit = kontrak - deploy (or for bulanan: returnBulanan × durasi)
 function kontrakP(p){ return parseFloat(p.kontrak||0) || parseFloat(p.jumlah||0); }
 function profP(p){
+  // tersedia → selesai without being aktif = no profit
+  if(p.status === 'selesai' && !p.tanggalAktif) return 0;
   const rt=p.returnType||'sekali';
   if(rt==='bulanan'){
     // returnBulanan bisa dalam Rp atau % dari kontrak
@@ -227,6 +229,8 @@ function retLabel(p){
   return `${fj(kontrakP(p))} (1×)`;
 }
 function profUmum(p){
+  // tersedia → selesai without being aktif = no profit
+  if(p.status === 'selesai' && !p.tanggalAktif) return 0;
   const rt=p.returnType||'sekali';
   if(rt==='bulanan'){
     const dur=parseInt(p.durasiReturn||0);
@@ -338,7 +342,7 @@ function getNextDue(project){
 }
 
 function hsc(p){ if(p.status==='terlambat') return 'r'; if(p.status==='tersedia') return 'o'; if(p.status==='selesai') return 'v'; return 'g'; }
-function statusLabel(s){ return s==='aktif'?'🟢 Aktif':s==='terlambat'?'🔴 Terlambat':s==='tersedia'?'🟡 Tersedia':'✅ Selesai'; }
+function statusLabel(s,p){ if(s==='selesai'&&p&&!p.tanggalAktif) return '⏭️ Tidak Terambil'; return s==='aktif'?'🟢 Aktif':s==='terlambat'?'🔴 Terlambat':s==='tersedia'?'🟡 Tersedia':'✅ Selesai'; }
 function stats(){
   const f=S.fund, kurOn=f.kurEnabled!==false&&f.kurAmount>0;
   const buf=kurOn?f.angsuran*f.bufferMonths:0;
@@ -505,7 +509,7 @@ function pCard(p, isAdmin){
       </div>
       <div class="tr">
         <div style="font-size:13px;font-weight:800;color:var(--p)">${fj(kontrakP(p))}</div>
-        <span class="bdg ${p.status}">${statusLabel(p.status)}</span>
+        <span class="bdg ${p.status}">${statusLabel(p.status,p)}</span>
       </div>
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:9px">
@@ -855,10 +859,10 @@ function oPM(id){
       <div class="fg"><label class="fl">Tanggal Mulai *</label><input class="fi" id="fp-m" type="date" value="${p?p.tanggalMulai:ds}"></div>
       <div class="fg"><label class="fl">Jatuh Tempo *</label><input class="fi" id="fp-jt" type="date" value="${p?p.tanggalJT:am(ds,3)}"></div>
     </div>
+    ${p&&p.tanggalAktif?`<div class="fg"><label class="fl">Tanggal Masuk</label><div class="fi" style="background:#F1F5F9;color:var(--sub);cursor:default">${fd(p.tanggalAktif)}</div></div>`:''}
     <div class="fg"><label class="fl">Status</label><select class="fi fs" id="fp-s">
-      <option value="tersedia" ${p?.status==='tersedia'?'selected':''}>🟡 Tersedia</option>
-      <option value="aktif" ${(!p||p.status==='aktif')?'selected':''}>🟢 Aktif</option>
-      <option value="terlambat" ${p?.status==='terlambat'?'selected':''}>🔴 Terlambat</option>
+      <option value="tersedia" ${(p?.status==='tersedia'||!p)?'selected':''}>🟡 Tersedia</option>
+      ${p&&(p.status==='aktif'||p.status==='terlambat')?`<option value="aktif" ${p.status==='aktif'?'selected':''}>🟢 Aktif</option><option value="terlambat" ${p.status==='terlambat'?'selected':''}>🔴 Terlambat</option>`:''}
       <option value="selesai" ${p?.status==='selesai'?'selected':''}>✅ Selesai</option>
     </select></div>
     <div class="fg"><label class="fl">Catatan</label><input class="fi" id="fp-ct" value="${p?p.catatan||'':''}" placeholder="Nama project, keperluan, dll"></div>`;
@@ -1061,7 +1065,7 @@ function oDet(id){
     let h=`
       <div class="fb mb12">
         <div style="font-size:17px;font-weight:900">${p.peminjam}</div>
-        <span class="bdg ${p.status}">${statusLabel(p.status)}</span>
+        <span class="bdg ${p.status}">${statusLabel(p.status,p)}</span>
       </div>
       <div class="ir"><span class="ik">Nilai Kontrak</span><span class="iv">${fj(kontrakP(p))}</span></div>
       <div class="ir"><span class="ik">Tipe Return</span><span class="iv">${(p.returnType||'sekali')==='bulanan'?'📅 Bulanan':'💰 Sekali (Akhir)'}</span></div>
@@ -1081,7 +1085,7 @@ function oDet(id){
   let h=`
     <div class="fb mb12">
       <div style="font-size:17px;font-weight:900">${p.peminjam}</div>
-      <span class="bdg ${p.status}">${statusLabel(p.status)}</span>
+      <span class="bdg ${p.status}">${statusLabel(p.status,p)}</span>
     </div>
     <div class="ir"><span class="ik">Nilai Kontrak</span><span class="iv">${fj(kontrakP(p))}</span></div>
     <div class="ir"><span class="ik">Jumlah Deploy</span><span class="iv tvio">${fj(p.jumlah)}</span></div>
@@ -1091,6 +1095,7 @@ function oDet(id){
     <div class="ir"><span class="ik">Tanggal Mulai</span><span class="iv">${fd(p.tanggalMulai)}</span></div>
     <div class="ir"><span class="ik">Jatuh Tempo</span><span class="iv" style="color:${gc(d)}">${fd(p.tanggalJT)}</span></div>
     ${d!==null?`<div class="ir"><span class="ik">Status Waktu</span><span class="iv" style="color:${gc(d)}">${gl(d)}</span></div>`:''}
+    ${p.tanggalAktif?`<div class="ir"><span class="ik">Tanggal Masuk</span><span class="iv">${fd(p.tanggalAktif)}</span></div>`:''}
     ${p.catatan?`<div class="ir"><span class="ik">Catatan</span><span class="iv">${p.catatan}</span></div>`:''}`;
   if(invs.length>0){
     h+=`<div class="dv"></div><div style="font-weight:900;font-size:13px;margin-bottom:8px">🟠 Investor Terlibat</div>`;
@@ -1138,6 +1143,22 @@ function oDet(id){
     </div>`;
   }
   el.innerHTML=h;
+  // "Masuk Proyek" button for tersedia projects (admin only)
+  if(p.status==='tersedia' && isAdmin){
+    const mpDv=document.createElement('div');mpDv.className='dv';el.appendChild(mpDv);
+    const mpWrap=document.createElement('div');mpWrap.style.cssText='background:var(--g-l);border-radius:14px;padding:14px;margin-bottom:4px;';
+    const mpLbl=document.createElement('div');mpLbl.style.cssText='font-size:12px;font-weight:800;color:#0B8F46;margin-bottom:8px;';mpLbl.textContent='Ambil proyek ini dan set tanggal masuk:';
+    mpWrap.appendChild(mpLbl);
+    const mpDate=document.createElement('input');mpDate.type='date';mpDate.className='fi';mpDate.value=new Date().toISOString().split('T')[0];mpDate.id='mp-date';mpDate.style.marginBottom='10px';
+    mpWrap.appendChild(mpDate);
+    const mpBtn=document.createElement('button');mpBtn.className='btn gr fw';mpBtn.textContent='\uD83D\uDE80 Masuk Proyek';mpBtn.onclick=function(){
+      var dateVal=document.getElementById('mp-date').value;
+      if(!dateVal){toast('❌ Tanggal wajib diisi');return;}
+      p.tanggalAktif=dateVal;p.status='aktif';save();cm('mo-det');rAll();toast('🚀 Proyek diambil!');
+    };
+    mpWrap.appendChild(mpBtn);
+    el.appendChild(mpWrap);
+  }
   // action buttons — created via DOM to avoid quote issues
   const dv=document.createElement('div');dv.className='dv';el.appendChild(dv);
   const br=document.createElement('div');br.style.cssText='display:grid;gap:8px;';
