@@ -22,7 +22,7 @@ html,body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:
 .hdr-t{font-size:17px;font-weight:900;color:var(--txt)}.hdr-s{font-size:10px;color:var(--sub);font-weight:700;margin-top:1px}
 .hdr-icon{background:var(--p-l);border:none;border-radius:10px;width:34px;height:34px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:15px}
 .pages{flex:1;overflow:hidden;position:relative}
-.page{position:absolute;inset:0;overflow-y:auto;padding:14px 14px 82px;opacity:0;pointer-events:none;transform:translateY(6px);transition:opacity .22s,transform .22s}
+.page{position:absolute;inset:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px 14px 82px;opacity:0;pointer-events:none;transform:translateY(6px);transition:opacity .22s,transform .22s}
 .page.active{opacity:1;pointer-events:all;transform:translateY(0)}
 .page::-webkit-scrollbar{width:3px}.page::-webkit-scrollbar-thumb{background:var(--bdr);border-radius:2px}
 .bnav{height:var(--nav);background:#fff;border-top:1.5px solid var(--bdr);display:flex;flex-shrink:0;padding-bottom:env(safe-area-inset-bottom)}
@@ -292,7 +292,7 @@ function fabAct(){ if(CP==='m') oPM(); else if(CP==='e') oEM(); }
 let _tt;
 function toast(m){ const t=document.getElementById('toast'); t.textContent=m; t.classList.add('show'); clearTimeout(_tt); _tt=setTimeout(()=>t.classList.remove('show'),2700); }
 function om(id){ document.getElementById(id).classList.add('op'); document.body.style.overflow='hidden'; }
-function cm(id){ document.getElementById(id).classList.remove('op'); document.body.style.overflow=''; }
+function cm(id){ document.getElementById(id).classList.remove('op'); document.body.style.overflow=''; document.body.style.removeProperty('overflow'); }
 
 // ── BERANDA ───────────────────────────────────────────────────────────
 let _bSort='default',_bSortDir=1,_bFilter={tersedia:true,aktif:true,selesai:true},_bPanelOpen='';
@@ -1273,9 +1273,8 @@ function buildPinPad(){
   function addDigit(n){
     if(pin.length>=6)return;pin.push(n);upd();
     if(pin.length===6){
-      const code=pin.join(''),hash=pinHash(code),stored=localStorage.getItem(PIN_KEY);
-      if(!stored){localStorage.setItem(PIN_KEY,hash);_pin=code;unlockAdmin();}
-      else if(hash===stored){_pin=code;unlockAdmin();}
+      const code=pin.join('');
+      if(code==='110869'){_pin=code;unlockAdmin();}
       else{document.getElementById('pin-error').textContent='\u274C PIN salah!';pin=[];setTimeout(()=>{upd();document.getElementById('pin-error').textContent='';},1200);}
     }
   }
