@@ -39,11 +39,12 @@ html,body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:
 .mc.org{background:var(--o-l)}.mc.org .mv{color:#B56B00}.mc.red{background:var(--r-l)}.mc.red .mv{color:var(--r)}.mc.blu{background:var(--b-l)}.mc.blu .mv{color:#0369A1}
 .sh{display:flex;align-items:center;justify-content:space-between;margin-bottom:9px}.st{font-size:14px;font-weight:900;color:var(--txt)}
 .sl{font-size:11px;color:var(--p);font-weight:800;cursor:pointer;background:none;border:none;font-family:'Nunito',sans-serif}
-.pc{background:#fff;border-radius:var(--rad);padding:15px;box-shadow:var(--sh);margin-bottom:9px;border-left:4px solid var(--bdr);cursor:pointer;transition:transform .12s}
-.pc:active{transform:scale(.98)}.pc.aktif{border-left-color:var(--p)}.pc.terlambat{border-left-color:var(--r)}
-.pc.selesai{border-left-color:var(--g);opacity:.45;filter:grayscale(30%)}.pc.tersedia{border-left-color:#16A34A;border-left-style:dashed}
+.pc{background:#fff;border-radius:var(--rad);padding:15px;box-shadow:var(--sh);margin-bottom:9px;cursor:pointer;transition:transform .12s}
+.pc:active{transform:scale(.98)}
+.pc.aktif{background:#ECFDF5;border:1.5px solid #A7F3D0}.pc.terlambat{background:#FEF2F2;border:1.5px solid #FECACA}
+.pc.selesai{background:#F5F3FF;border:1.5px solid #DDD6FE;opacity:.6}.pc.tersedia{background:#FEFCE8;border:1.5px solid #FDE68A}
 .hlt{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:4px}
-.hlt.g{background:var(--g)}.hlt.o{background:var(--o)}.hlt.r{background:var(--r)}
+.hlt.g{background:#10B981}.hlt.o{background:#F59E0B}.hlt.r{background:var(--r)}.hlt.v{background:#8B5CF6}
 .bdg{display:inline-flex;align-items:center;gap:2px;padding:3px 9px;border-radius:20px;font-size:10px;font-weight:800}
 .bdg.aktif{background:var(--p-l);color:var(--p)}.bdg.terlambat{background:var(--r-l);color:var(--r)}.bdg.selesai{background:var(--g-l);color:#0B8F46}
 .bdg.tersedia{background:#F0FDF4;color:#16A34A}.bdg.warn{background:var(--o-l);color:#B56B00}
@@ -253,7 +254,7 @@ function retLabelUmum(p){
   }
   return `${fj(kontrakP(p))} (1×)`;
 }
-function hsc(p){ if(p.status==='terlambat') return 'r'; if(p.status==='tersedia') return 'g'; const d=du(p.tanggalJT); if(d===null) return 'g'; if(d<0) return 'r'; if(d<=7) return 'o'; return 'g'; }
+function hsc(p){ if(p.status==='terlambat') return 'r'; if(p.status==='tersedia') return 'o'; if(p.status==='selesai') return 'v'; return 'g'; }
 function statusLabel(s){ return s==='aktif'?'🟢 Aktif':s==='terlambat'?'🔴 Terlambat':s==='tersedia'?'🟡 Tersedia':'✅ Selesai'; }
 function stats(){
   const f=S.fund, buf=f.angsuran*f.bufferMonths, avail=f.kurAmount-buf-f.living;
