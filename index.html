@@ -295,32 +295,74 @@ function om(id){ document.getElementById(id).classList.add('op'); document.body.
 function cm(id){ document.getElementById(id).classList.remove('op'); document.body.style.overflow=''; }
 
 // ── BERANDA ───────────────────────────────────────────────────────────
+let _bSort='default',_bSortDir=1,_bFilter={tersedia:true,aktif:true,selesai:true};
 function rB(){
-  const order={terlambat:0,aktif:1,tersedia:2,selesai:3};
-  const sorted=[...S.projects].sort((a,b)=>(order[a.status]??1)-(order[b.status]??1));
+  const tersediaC=S.projects.filter(p=>p.status==='tersedia').length;
+  const aktifC=S.projects.filter(p=>p.status==='aktif'||p.status==='terlambat').length;
+  const selesaiC=S.projects.filter(p=>p.status==='selesai').length;
+  // summary cards: 3 in a row
+  let h=`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:11px">
+    <div class="mc org" style="text-align:center"><div class="ml">TERSEDIA</div><div class="mv">${tersediaC}</div></div>
+    <div class="mc grn" style="text-align:center"><div class="ml">AKTIF</div><div class="mv">${aktifC}</div></div>
+    <div class="mc vio" style="text-align:center"><div class="ml">SELESAI</div><div class="mv">${selesaiC}</div></div>
+  </div>`;
+  // urgent alert
   const urg=S.projects.filter(p=>{
     if(p.status==='terlambat') return true;
     if(p.status==='aktif'){ const d=du(p.tanggalJT); return d!==null&&d<=7; }
     return false;
   });
-  const activeCount=S.projects.filter(p=>p.status==='aktif'||p.status==='terlambat').length;
-  const totalKontrak=S.projects.filter(p=>p.status!=='selesai').reduce((s,p)=>s+kontrakP(p),0);
-  let h=`<div class="mg">
-    <div class="mc vio"><div class="ml">PROYEK AKTIF</div><div class="mv">${activeCount}</div></div>
-    <div class="mc grn"><div class="ml">TOTAL KONTRAK</div><div class="mv">${fj(totalKontrak)}</div></div>
-  </div>`;
   if(urg.length>0){
     h+=`<div style="background:var(--r-l);border-radius:var(--rad);padding:13px 15px;margin-bottom:11px;border-left:4px solid var(--r)">
       <div style="font-weight:900;font-size:13px;color:var(--r);margin-bottom:6px">⚠️ ${urg.length} Proyek Perlu Perhatian</div>
       ${urg.map(p=>`<div style="display:flex;justify-content:space-between;font-size:11px;padding:3px 0;border-top:1px solid rgba(243,18,96,.12)"><span style="font-weight:700">${p.peminjam}</span><span style="color:var(--r);font-weight:800">${gl(du(p.tanggalJT))}</span></div>`).join('')}
     </div>`;
   }
-  if(sorted.length===0){
+  // sort buttons
+  const sArr=[['kontrak','💰 Investasi'],['durasi','⏱️ Durasi']];
+  h+=`<div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+    <span style="font-size:10px;font-weight:800;color:var(--sub);padding:6px 0">Urutkan:</span>
+    ${sArr.map(([k,lbl])=>{
+      const active=_bSort===k;
+      const arrow=active?(_bSortDir===1?' ↑':' ↓'):'';
+      return `<button onclick="toggleBSort('${k}')" style="padding:5px 10px;border-radius:8px;font-size:10px;font-weight:800;border:1.5px solid ${active?'var(--p)':'var(--bdr)'};background:${active?'var(--p-l)':'#fff'};color:${active?'var(--p)':'var(--sub)'};cursor:pointer;font-family:Nunito,sans-serif">${lbl}${arrow}</button>`;
+    }).join('')}
+  </div>`;
+  // filter checkboxes
+  const fArr=[['tersedia','🟡 Tersedia'],['aktif','🟢 Aktif'],['selesai','✅ Selesai']];
+  h+=`<div style="display:flex;gap:8px;margin-bottom:11px">
+    ${fArr.map(([k,lbl])=>`<label style="display:flex;align-items:center;gap:4px;font-size:10px;font-weight:800;color:var(--sub);cursor:pointer"><input type="checkbox" ${_bFilter[k]?'checked':''} onchange="toggleBFilter('${k}')" style="width:14px;height:14px;accent-color:var(--p)">${lbl}</label>`).join('')}
+  </div>`;
+  // filter & sort projects
+  let list=S.projects.filter(p=>{
+    if((p.status==='aktif'||p.status==='terlambat')&&_bFilter.aktif) return true;
+    if(p.status==='tersedia'&&_bFilter.tersedia) return true;
+    if(p.status==='selesai'&&_bFilter.selesai) return true;
+    return false;
+  });
+  if(_bSort==='kontrak'){
+    list.sort((a,b)=>_bSortDir*(kontrakP(a)-kontrakP(b)));
+  } else if(_bSort==='durasi'){
+    const durMs=p=>{if(!p.tanggalMulai||!p.tanggalJT)return 0;return new Date(p.tanggalJT+'T00:00:00')-new Date(p.tanggalMulai+'T00:00:00');};
+    list.sort((a,b)=>_bSortDir*(durMs(a)-durMs(b)));
+  } else {
+    const order={terlambat:0,aktif:1,tersedia:2,selesai:3};
+    list.sort((a,b)=>(order[a.status]??1)-(order[b.status]??1));
+  }
+  if(list.length===0){
     h+=`<div class="es"><div class="ei">🌱</div><div class="et">Belum ada proyek</div><div class="esb">Buka tab Proyek dan tap + untuk mulai</div></div>`;
   } else {
-    sorted.forEach(p=>{ h+=pCard(p, _adminUnlocked); });
+    list.forEach(p=>{ h+=pCard(p, _adminUnlocked); });
   }
   document.getElementById('p-b').innerHTML=h;
+}
+function toggleBSort(k){
+  if(_bSort===k){_bSortDir*=-1;} else {_bSort=k;_bSortDir=1;}
+  rB();
+}
+function toggleBFilter(k){
+  _bFilter[k]=!_bFilter[k];
+  rB();
 }
 
 function pCard(p, isAdmin){
