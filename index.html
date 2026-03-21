@@ -190,16 +190,30 @@ function gc(d){ if(d===null) return 'var(--sub)'; if(d<0) return 'var(--r)'; if(
 function am(s,m){ const d=new Date(s+'T00:00:00'); d.setMonth(d.getMonth()+m); return d.toISOString().split('T')[0]; }
 function ret(j){ return parseFloat((parseFloat(j)*100/85).toFixed(2)); }
 function prof(j){ return parseFloat((parseFloat(j)*15/85).toFixed(2)); }
-// Project-aware return & profit: uses custom returnAmount if set, else formula
-function retP(p){ return parseFloat(p.returnTotal||0) || ret(p.jumlah); }
-function profP(p){ return parseFloat((retP(p)-parseFloat(p.jumlah)).toFixed(2)); }
+// Project-aware return & profit
+// Bulanan: return/bulan = pure profit (bunga), pokok dikembalikan di akhir
+// Sekali: total return includes pokok, profit = return - deploy
+function retP(p){
+  if((p.returnType||'sekali')==='bulanan'){
+    const rb=parseFloat(p.returnBulanan||0), dur=parseInt(p.durasiReturn||0);
+    return parseFloat(p.jumlah) + rb*dur; // pokok + (bunga × durasi)
+  }
+  return parseFloat(p.returnTotal||0) || ret(p.jumlah);
+}
+function profP(p){
+  if((p.returnType||'sekali')==='bulanan'){
+    const rb=parseFloat(p.returnBulanan||0), dur=parseInt(p.durasiReturn||0);
+    return parseFloat((rb*dur).toFixed(2)); // bunga saja
+  }
+  return parseFloat((retP(p)-parseFloat(p.jumlah)).toFixed(2));
+}
 // Return label
 function retLabel(p){
   const rt=p.returnType||'sekali';
   if(rt==='bulanan'){
     const rb=parseFloat(p.returnBulanan||0);
     const dur=parseInt(p.durasiReturn||1);
-    return `${fj(rb)}/bln × ${dur} bln`;
+    return `${fj(rb)}/bln × ${dur} bln + pokok`;
   }
   return `${fj(retP(p))} (1×)`;
 }
@@ -581,8 +595,8 @@ function updCalc(){
   if(rt==='bulanan'){
     const rb=parseFloat(document.getElementById('fp-rb')?.value||0);
     const dur=parseInt(document.getElementById('fp-dur')?.value||0);
-    totalRet=rb*dur; totalProf=totalRet-j;
-    if(rb>0&&dur>0){c.style.display='block';c.innerHTML=`💡 Deploy <b>${fj(j)}</b> → ${fj(rb)}/bln × ${dur} bln = <b>${fj(totalRet)}</b> · Profit <b style="color:#0B8F46">+${fj(totalProf)}</b>`;}
+    totalProf=rb*dur; totalRet=j+totalProf; // bunga = rb×dur, pokok kembali di akhir
+    if(rb>0&&dur>0){c.style.display='block';c.innerHTML=`💡 Deploy <b>${fj(j)}</b> → Bunga ${fj(rb)}/bln × ${dur} bln = <b style="color:#0B8F46">+${fj(totalProf)} profit</b><br><span style="font-size:10px;color:var(--sub)">Pokok ${fj(j)} dikembalikan di akhir · Total kembali: ${fj(totalRet)}</span>`;}
     else{c.style.display='none';}
   } else {
     const customR=parseFloat(document.getElementById('fp-r')?.value||0);
@@ -609,7 +623,7 @@ function savePrj(){
     returnBulanan=parseFloat(document.getElementById('fp-rb')?.value||0);
     durasiReturn=parseInt(document.getElementById('fp-dur')?.value||0);
     if(!returnBulanan||!durasiReturn){toast('❌ Isi return bulanan & durasi');return;}
-    returnTotal=returnBulanan*durasiReturn;
+    returnTotal=j + returnBulanan*durasiReturn; // pokok + bunga
   } else {
     const customR=parseFloat(document.getElementById('fp-r')?.value||0);
     returnTotal=customR>0?customR:ret(j);
