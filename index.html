@@ -349,7 +349,14 @@ function stats(){
   const avail=kurOn?f.kurAmount-buf-f.living:0;
   const dep=S.projects.filter(p=>p.status==='aktif'||p.status==='terlambat').reduce((s,p)=>s+parseFloat(p.jumlah||0),0);
   const idle=kurOn?Math.max(0,avail-dep):0;
-  const tp=S.projects.reduce((s,p)=>s+(p.payments||[]).reduce((ps,py)=>ps+parseFloat(py.jumlah||0),0),0);
+  const tp=S.projects.reduce((s,p)=>{
+    if((p.returnType||'sekali')==='bulanan'&&p.schedule){
+      // Use schedule as source of truth for bulanan
+      return s+p.schedule.filter(si=>si.status==='paid').reduce((ps,si)=>ps+parseFloat(si.paidAmount||si.amount||0),0);
+    }
+    // Sekali: use payments array
+    return s+(p.payments||[]).reduce((ps,py)=>ps+parseFloat(py.jumlah||0),0);
+  },0);
   const ms=f.startDate?Math.max(1,Math.round((new Date()-new Date(f.startDate+'T00:00:00'))/2629800000)):1;
   const bufRem=buf/f.angsuran;
   const pinjCic=S.external.filter(e=>e.tipe==='pinjaman'&&e.status!=='selesai').reduce((s,e)=>s+parseFloat(e.cicilanBulan||0),0);
@@ -550,12 +557,20 @@ function rD(){
   const bufCls=bufPct>60?'grn':bufPct>30?'vio':'org';
   const act=S.projects.filter(p=>p.status==='aktif'||p.status==='terlambat');
   const urg=act.filter(p=>{const d=du(p.tanggalJT);return d!==null&&d<=7;});
-  // auto profit log from payments (each payment = return received)
+  // auto profit log from schedule (bulanan) or payments (sekali)
   const autoLog=[];
-  S.projects.forEach(p=>(p.payments||[]).forEach(py=>{
-    const amt=parseFloat(py.jumlah||0);
-    if(amt>0) autoLog.push({tanggal:py.tanggal,jumlah:amt,peminjam:p.peminjam,catatan:py.catatan||''});
-  }));
+  S.projects.forEach(p=>{
+    if((p.returnType||'sekali')==='bulanan'&&p.schedule){
+      p.schedule.filter(si=>si.status==='paid').forEach(si=>{
+        autoLog.push({tanggal:si.paidDate||'',jumlah:parseFloat(si.paidAmount||si.amount||0),peminjam:p.peminjam,catatan:si.catatan||`Bulan ${si.month}`});
+      });
+    } else {
+      (p.payments||[]).forEach(py=>{
+        const amt=parseFloat(py.jumlah||0);
+        if(amt>0) autoLog.push({tanggal:py.tanggal,jumlah:amt,peminjam:p.peminjam,catatan:py.catatan||''});
+      });
+    }
+  });
   autoLog.sort((a,b)=>new Date(b.tanggal)-new Date(a.tanggal));
 
   const kurOn=f.kurEnabled!==false&&f.kurAmount>0;
@@ -721,10 +736,20 @@ function swPP(v){
 
 function getProfitEntries(){
   const entries=[];
-  S.projects.forEach(p=>(p.payments||[]).forEach(py=>{
-    const amt=parseFloat(py.jumlah||0);
-    if(amt>0&&py.tanggal) entries.push({tanggal:py.tanggal,jumlah:amt,label:p.peminjam});
-  }));
+  S.projects.forEach(p=>{
+    if((p.returnType||'sekali')==='bulanan'&&p.schedule){
+      p.schedule.filter(si=>si.status==='paid').forEach(si=>{
+        const d=si.paidDate||'';
+        const amt=parseFloat(si.paidAmount||si.amount||0);
+        if(amt>0&&d) entries.push({tanggal:d,jumlah:amt,label:p.peminjam});
+      });
+    } else {
+      (p.payments||[]).forEach(py=>{
+        const amt=parseFloat(py.jumlah||0);
+        if(amt>0&&py.tanggal) entries.push({tanggal:py.tanggal,jumlah:amt,label:p.peminjam});
+      });
+    }
+  });
   return entries;
 }
 
