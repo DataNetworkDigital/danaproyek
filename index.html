@@ -1119,11 +1119,11 @@ function oDet(id){
       const statusIcon=isPaid?'✅':isDue?'⏳':'🔒';
       const statusText=isPaid?`Dibayar ${fd(s.paidDate)}`:isDue?'Belum dibayar':'Belum jatuh tempo';
       const statusColor=isPaid?'#0B8F46':isDue?'#B56B00':'var(--sub)';
-      h+=`<div style="padding:10px 0;border-bottom:1px solid var(--bdr)">
-        <div class="fb"><span style="font-weight:800;font-size:12px">Bulan ${s.month} — ${fd(s.dueDate)}</span><span style="font-weight:900;font-size:12px">${fj(s.amount)}${finalLbl}</span></div>
+      h+=`<div id="srow-${p.id}-${s.month}" style="padding:10px 0;border-bottom:1px solid var(--bdr)">
+        <div class="fb"><span style="font-weight:800;font-size:12px">Bulan ${s.month} — ${fd(s.dueDate)}</span><span style="font-weight:900;font-size:12px">${fj(s.amount)}${s.paidAmount&&s.paidAmount!==s.amount?' (aktual: '+fj(s.paidAmount)+')':''}${finalLbl}</span></div>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-top:4px">
           <span style="font-size:11px;font-weight:700;color:${statusColor}">${statusIcon} ${statusText}</span>
-          ${isDue?`<button class="btn sm gr" onclick="confirmSchedulePay('${p.id}',${s.month})">✓</button>`:''}
+          ${isDue?`<button class="btn sm gr" onclick="confirmSchedulePay('${p.id}',${s.month})">✏️ Bayar</button>`:''}
         </div>
       </div>`;
     });
@@ -1134,11 +1134,11 @@ function oDet(id){
     const statusText=paid?`Dibayar ${fd(p.payments[p.payments.length-1].tanggal)}`:'Belum dibayar';
     const statusColor=paid?'#0B8F46':'#B56B00';
     h+=`<div style="font-weight:900;font-size:13px;margin-bottom:10px">💰 Pembayaran — ${fd(p.tanggalJT)}</div>`;
-    h+=`<div style="padding:10px 0;border-bottom:1px solid var(--bdr)">
+    h+=`<div id="srow-${p.id}-1" style="padding:10px 0;border-bottom:1px solid var(--bdr)">
       <div class="fb"><span style="font-weight:800;font-size:12px">Pengembalian</span><span style="font-weight:900;font-size:12px">${fj(kontrakP(p))}</span></div>
       <div style="display:flex;align-items:center;justify-content:space-between;margin-top:4px">
         <span style="font-size:11px;font-weight:700;color:${statusColor}">${statusIcon} ${statusText}</span>
-        ${!paid&&p.status!=='selesai'?`<button class="btn sm gr" onclick="confirmSchedulePay('${p.id}',1)">✓</button>`:''}
+        ${!paid&&p.status!=='selesai'?`<button class="btn sm gr" onclick="confirmSchedulePay('${p.id}',1)">✏️ Bayar</button>`:''}
       </div>
     </div>`;
   }
@@ -1208,28 +1208,63 @@ function confirmSchedulePay(pid, month){
   const p=S.projects.find(x=>x.id===pid); if(!p) return;
   const rt=p.returnType||'sekali';
   const today=new Date().toISOString().split('T')[0];
+  let defAmt, defNote;
   if(rt==='bulanan'){
     generateSchedule(p);
     const item=p.schedule.find(s=>s.month===month);
     if(!item||item.status==='paid') return;
-    item.status='paid';
-    item.paidDate=today;
-    // Add to payments array for backward compat
-    if(!p.payments) p.payments=[];
-    const amt=item.amount+(item.isFinal?parseFloat(p.jumlah):0);
-    p.payments.push({id:uid(), tanggal:today, jumlah:amt, catatan:`Bulan ${month}${item.isFinal?' + Pokok':''}`});
-    // If all schedule items paid, mark project done
-    if(p.schedule.every(s=>s.status==='paid')) p.status='selesai';
-    save(); cm('mo-det'); oDet(pid); rAll();
-    toast('✅ Pembayaran bulan '+month+' dicatat!');
+    defAmt=item.amount+(item.isFinal?parseFloat(p.jumlah):0);
+    defNote=`Bulan ${month}${item.isFinal?' + Pokok':''}`;
   } else {
-    // sekali payment
-    if(!p.payments) p.payments=[];
-    p.payments.push({id:uid(), tanggal:today, jumlah:kontrakP(p), catatan:'Pengembalian sekali'});
-    p.status='selesai';
-    save(); cm('mo-det'); rAll();
-    toast('✅ Pembayaran dicatat!');
+    defAmt=kontrakP(p);
+    defNote='Pengembalian sekali';
   }
+  // Show inline edit form
+  const formId='spay-form-'+month;
+  const existing=document.getElementById(formId);
+  if(existing){existing.remove();return;}
+  // Remove any other open forms
+  document.querySelectorAll('[id^="spay-form-"]').forEach(el=>el.remove());
+  const row=document.getElementById('srow-'+pid+'-'+month);
+  if(!row) return;
+  const form=document.createElement('div');
+  form.id=formId;
+  form.style.cssText='background:var(--p-l);border-radius:14px;padding:14px;margin-top:8px';
+  form.innerHTML=`
+    <div class="fr" style="margin-bottom:8px">
+      <div class="fg" style="margin:0"><label class="fl">Jumlah (jt)</label><input class="fi" id="sp-amt-${month}" type="number" step="0.01" value="${defAmt}"></div>
+      <div class="fg" style="margin:0"><label class="fl">Tanggal</label><input class="fi" id="sp-date-${month}" type="date" value="${today}"></div>
+    </div>
+    <div class="fg" style="margin-bottom:10px"><label class="fl">Catatan</label><input class="fi" id="sp-note-${month}" value="${defNote}" placeholder="Opsional"></div>`;
+  const btnRow=document.createElement('div');
+  btnRow.style.cssText='display:flex;gap:8px';
+  const saveBtn=document.createElement('button');
+  saveBtn.className='btn gr fw';saveBtn.textContent='✅ Simpan';
+  saveBtn.onclick=function(){
+    const amt=parseFloat(document.getElementById('sp-amt-'+month)?.value||0);
+    const date=document.getElementById('sp-date-'+month)?.value||today;
+    const note=document.getElementById('sp-note-'+month)?.value||'';
+    if(!amt||amt<=0){toast('❌ Jumlah wajib');return;}
+    if(rt==='bulanan'){
+      const item2=p.schedule.find(s2=>s2.month===month);
+      if(item2){item2.status='paid';item2.paidDate=date;item2.paidAmount=amt;}
+      if(!p.payments) p.payments=[];
+      p.payments.push({id:uid(),tanggal:date,jumlah:amt,catatan:note});
+      if(p.schedule.every(s2=>s2.status==='paid')) p.status='selesai';
+    } else {
+      if(!p.payments) p.payments=[];
+      p.payments.push({id:uid(),tanggal:date,jumlah:amt,catatan:note});
+      p.status='selesai';
+    }
+    save();cm('mo-det');oDet(pid);rAll();
+    toast('✅ Pembayaran dicatat!');
+  };
+  const cancelBtn=document.createElement('button');
+  cancelBtn.className='btn ou fw';cancelBtn.textContent='Batal';
+  cancelBtn.onclick=function(){form.remove();};
+  btnRow.appendChild(saveBtn);btnRow.appendChild(cancelBtn);
+  form.appendChild(btnRow);
+  row.after(form);
 }
 
 // ── EXTERNAL CRUD ─────────────────────────────────────────────────────
