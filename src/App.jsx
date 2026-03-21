@@ -11,7 +11,7 @@ import Payments from './pages/Payments'
 import './index.css'
 
 function ProtectedRoute({ children }) {
-  const { user, loading } = useAuth()
+  const { authenticated, loading } = useAuth()
   if (loading) {
     return (
       <div className="min-h-dvh flex items-center justify-center">
@@ -19,7 +19,7 @@ function ProtectedRoute({ children }) {
       </div>
     )
   }
-  if (!user) return <Navigate to="/login" replace />
+  if (!authenticated) return <Navigate to="/login" replace />
   return <Layout>{children}</Layout>
 }
 

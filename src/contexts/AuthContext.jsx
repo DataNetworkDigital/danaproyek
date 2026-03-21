@@ -1,30 +1,39 @@
-import { createContext, useContext, useEffect, useState } from 'react'
-import { onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth'
-import { auth, googleProvider } from '../lib/firebase'
+import { createContext, useContext, useState, useEffect } from 'react'
 
 const AuthContext = createContext()
+const PIN_KEY = 'fundtracker_authenticated'
+const APP_PIN = import.meta.env.VITE_PIN_CODE || '000000'
 
 export function useAuth() {
   return useContext(AuthContext)
 }
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null)
+  const [authenticated, setAuthenticated] = useState(false)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
-      setUser(u)
-      setLoading(false)
-    })
-    return unsub
+    const saved = sessionStorage.getItem(PIN_KEY)
+    if (saved === 'true') setAuthenticated(true)
+    setLoading(false)
   }, [])
 
-  const loginWithGoogle = () => signInWithPopup(auth, googleProvider)
-  const logout = () => signOut(auth)
+  const login = (pin) => {
+    if (pin === APP_PIN) {
+      sessionStorage.setItem(PIN_KEY, 'true')
+      setAuthenticated(true)
+      return true
+    }
+    return false
+  }
+
+  const logout = () => {
+    sessionStorage.removeItem(PIN_KEY)
+    setAuthenticated(false)
+  }
 
   return (
-    <AuthContext.Provider value={{ user, loading, loginWithGoogle, logout }}>
+    <AuthContext.Provider value={{ authenticated, loading, login, logout }}>
       {children}
     </AuthContext.Provider>
   )

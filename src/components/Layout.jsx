@@ -21,13 +21,13 @@ const links = [
 ]
 
 export default function Layout({ children }) {
-  const { user, logout } = useAuth()
+  const { logout } = useAuth()
   const navigate = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
 
-  const handleLogout = async () => {
-    await logout()
-    navigate('/')
+  const handleLogout = () => {
+    logout()
+    navigate('/login')
   }
 
   return (
@@ -45,16 +45,9 @@ export default function Layout({ children }) {
             FundTracker
           </h1>
         </div>
-        <div className="flex items-center gap-3">
-          <img
-            src={user?.photoURL}
-            alt=""
-            className="w-8 h-8 rounded-full border-2 border-primary-200"
-          />
-          <button onClick={handleLogout} className="p-1.5 rounded-lg hover:bg-gray-100 transition text-gray-500">
-            <LogOut size={18} />
-          </button>
-        </div>
+        <button onClick={handleLogout} className="p-1.5 rounded-lg hover:bg-gray-100 transition text-gray-500">
+          <LogOut size={18} />
+        </button>
       </header>
 
       <div className="flex flex-1">
