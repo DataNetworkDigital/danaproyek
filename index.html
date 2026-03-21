@@ -98,17 +98,21 @@ html,body{height:100%;overflow:hidden;font-family:'Nunito',sans-serif;background
 </style>
 </head>
 <body>
-<div id="pin-screen" style="position:fixed;inset:0;background:linear-gradient(135deg,#6C47FF,#A78BFA);z-index:999;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:'Nunito',sans-serif">
-  <div style="text-align:center;color:#fff;margin-bottom:32px">
-    <div style="font-size:40px;margin-bottom:8px">💸</div>
-    <div style="font-size:22px;font-weight:900">DanaTrack</div>
-    <div style="font-size:12px;opacity:.7;margin-top:4px">Masukkan PIN 6 digit</div>
+<!-- PIN Modal (shown when clicking Admin) -->
+<div class="mo" id="mo-pin" onclick="cm('mo-pin')">
+  <div class="modal" onclick="event.stopPropagation()" style="background:linear-gradient(135deg,#6C47FF,#A78BFA);padding:28px 18px 40px;text-align:center">
+    <div class="mh" style="background:rgba(255,255,255,.3)"></div>
+    <div style="color:#fff;margin-bottom:24px">
+      <div style="font-size:36px;margin-bottom:6px">🔐</div>
+      <div style="font-size:18px;font-weight:900">Admin Access</div>
+      <div style="font-size:11px;opacity:.7;margin-top:4px">Masukkan PIN 6 digit</div>
+    </div>
+    <div id="pin-dots" style="display:flex;gap:12px;justify-content:center;margin-bottom:20px"></div>
+    <div id="pin-error" style="color:#FFB4C8;font-size:12px;font-weight:800;height:18px;margin-bottom:10px"></div>
+    <div id="pin-pad" style="display:grid;grid-template-columns:repeat(3,64px);gap:8px;justify-content:center"></div>
   </div>
-  <div id="pin-dots" style="display:flex;gap:12px;margin-bottom:28px"></div>
-  <div id="pin-error" style="color:#FFB4C8;font-size:12px;font-weight:800;height:18px;margin-bottom:12px"></div>
-  <div id="pin-pad" style="display:grid;grid-template-columns:repeat(3,72px);gap:10px;justify-content:center"></div>
 </div>
-<div id="app" style="display:none">
+<div id="app">
   <div class="hdr" id="H">
     <div><div class="hdr-t" id="HT">💸 DanaTrack</div><div class="hdr-s" id="HS">Dana Talangan Manager</div></div>
     <div id="HA" style="display:flex;gap:6px"></div>
@@ -120,12 +124,13 @@ html,body{height:100%;overflow:hidden;font-family:'Nunito',sans-serif;background
     <div class="page" id="p-e"></div>
     <div class="page" id="p-r"></div>
   </div>
-  <nav class="bnav">
+  <nav class="bnav" id="nav">
     <button class="ni on" onclick="go('b')" id="n-b"><span class="ico">🏠</span><span class="lbl">Beranda</span></button>
-    <button class="ni" onclick="go('m')" id="n-m"><span class="ico">📋</span><span class="lbl">Proyek</span></button>
-    <button class="ni" onclick="go('d')" id="n-d"><span class="ico">💰</span><span class="lbl">Dana</span></button>
-    <button class="ni" onclick="go('e')" id="n-e"><span class="ico">🔗</span><span class="lbl">Eksternal</span></button>
-    <button class="ni" onclick="go('r')" id="n-r"><span class="ico">📊</span><span class="lbl">Laporan</span></button>
+    <button class="ni" onclick="go('m')" id="n-m" style="display:none"><span class="ico">📋</span><span class="lbl">Proyek</span></button>
+    <button class="ni" onclick="go('d')" id="n-d" style="display:none"><span class="ico">💰</span><span class="lbl">Dana</span></button>
+    <button class="ni" onclick="go('e')" id="n-e" style="display:none"><span class="ico">🔗</span><span class="lbl">Eksternal</span></button>
+    <button class="ni" onclick="go('r')" id="n-r" style="display:none"><span class="ico">📊</span><span class="lbl">Laporan</span></button>
+    <button class="ni" onclick="showPin()" id="n-admin"><span class="ico">🔐</span><span class="lbl">Admin</span></button>
   </nav>
 </div>
 <div class="mo" id="mo-p" onclick="cm('mo-p')"><div class="modal" onclick="event.stopPropagation()"><div class="mh"></div><div class="mtt" id="mo-p-t">Tambah Proyek</div><div id="mo-p-b"></div></div></div>
@@ -850,35 +855,57 @@ function rAll(){
   if(CP==='b') rB(); else if(CP==='m') rM(); else if(CP==='d') rD(); else if(CP==='e') rE(); else rR();
 }
 
-// ── PIN SCREEN ───────────────────────────────────────────────────────
-(function buildPinScreen(){
+// ── PIN & ADMIN ──────────────────────────────────────────────────────
+let _adminUnlocked=false;
+
+function buildPinPad(){
   const dots=document.getElementById('pin-dots');
   const pad=document.getElementById('pin-pad');
+  dots.innerHTML='';pad.innerHTML='';
   for(let i=0;i<6;i++){const d=document.createElement('div');d.style.cssText='width:14px;height:14px;border-radius:50%;border:2.5px solid rgba(255,255,255,.5);transition:all .15s';d.id='dot-'+i;dots.appendChild(d);}
   let pin=[];
-  const bs='width:72px;height:72px;border-radius:50%;border:2px solid rgba(255,255,255,.25);background:rgba(255,255,255,.1);color:#fff;font-size:24px;font-weight:900;cursor:pointer;font-family:Nunito,sans-serif;transition:all .1s;-webkit-tap-highlight-color:transparent';
+  const bs='width:64px;height:64px;border-radius:50%;border:2px solid rgba(255,255,255,.25);background:rgba(255,255,255,.1);color:#fff;font-size:22px;font-weight:900;cursor:pointer;font-family:Nunito,sans-serif;transition:all .1s;-webkit-tap-highlight-color:transparent';
   for(let n=1;n<=9;n++){const b=document.createElement('button');b.style.cssText=bs;b.textContent=n;b.onclick=()=>addDigit(n);pad.appendChild(b);}
   pad.appendChild(document.createElement('div'));
   const b0=document.createElement('button');b0.style.cssText=bs;b0.textContent='0';b0.onclick=()=>addDigit(0);pad.appendChild(b0);
-  const bd=document.createElement('button');bd.style.cssText=bs+';font-size:18px';bd.textContent='\u232B';bd.onclick=()=>{if(pin.length>0){pin.pop();upd();}};pad.appendChild(bd);
+  const bd=document.createElement('button');bd.style.cssText=bs+';font-size:16px';bd.textContent='\u232B';bd.onclick=()=>{if(pin.length>0){pin.pop();upd();}};pad.appendChild(bd);
   function upd(){for(let i=0;i<6;i++){document.getElementById('dot-'+i).style.background=i<pin.length?'#fff':'transparent';}}
   function addDigit(n){
     if(pin.length>=6)return;pin.push(n);upd();
     if(pin.length===6){
       const code=pin.join(''),hash=pinHash(code),stored=localStorage.getItem(PIN_KEY);
-      if(!stored){localStorage.setItem(PIN_KEY,hash);_pin=code;unlock();}
-      else if(hash===stored){_pin=code;unlock();}
+      if(!stored){localStorage.setItem(PIN_KEY,hash);_pin=code;unlockAdmin();}
+      else if(hash===stored){_pin=code;unlockAdmin();}
       else{document.getElementById('pin-error').textContent='\u274C PIN salah!';pin=[];setTimeout(()=>{upd();document.getElementById('pin-error').textContent='';},1200);}
     }
   }
-})();
-async function unlock(){
-  document.getElementById('pin-screen').style.display='none';
-  document.getElementById('app').style.display='flex';
-  load();
-  await loadFromFirestore();
-  go('b');
 }
+
+function showPin(){
+  if(_adminUnlocked){go('m');return;}
+  buildPinPad();
+  om('mo-pin');
+}
+
+async function unlockAdmin(){
+  _adminUnlocked=true;
+  cm('mo-pin');
+  // Show admin tabs, hide admin button
+  document.getElementById('n-m').style.display='';
+  document.getElementById('n-d').style.display='';
+  document.getElementById('n-e').style.display='';
+  document.getElementById('n-r').style.display='';
+  document.getElementById('n-admin').style.display='none';
+  // Load from Firestore
+  await loadFromFirestore();
+  rAll();
+  toast('🔓 Admin unlocked!');
+  go('m');
+}
+
+// ── INIT ──────────────────────────────────────────────────────────────
+load();
+go('b');
 </script>
 </body>
 </html>
