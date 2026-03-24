@@ -1641,8 +1641,29 @@ async function unlockAdmin(){
 // ── INIT ──────────────────────────────────────────────────────────────
 load();
 go('b');
-// Load from cloud for everyone (not just admin)
-loadFromFirestore().then(()=>rAll()).catch(()=>{});
+// Load from cloud for everyone (not just admin) — with retry
+(async function initCloud(){
+  for(let i=0;i<5;i++){
+    try{
+      if(typeof db==='undefined'){await new Promise(r=>setTimeout(r,500));continue;}
+      const snap=await db.collection('danatrack').doc(DOC_ID).get();
+      if(snap.exists){
+        const d=snap.data();
+        S={...S,...d.state};
+        localStorage.setItem('dt_v3',JSON.stringify(S));
+        rAll();
+        console.log('✅ Cloud data loaded:',S.projects.length,'projects');
+      } else {
+        console.log('No cloud data yet');
+      }
+      return;
+    }catch(e){
+      console.warn('Cloud load attempt '+(i+1)+':',e.message);
+      await new Promise(r=>setTimeout(r,1000));
+    }
+  }
+  console.warn('Cloud load failed after retries');
+})();
 </script>
 </body>
 </html>
