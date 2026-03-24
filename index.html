@@ -1089,6 +1089,7 @@ function oDet(id){
     const _retLbl=retLabelUmum(p);
     const _prof=profUmum(p);
     let h=`
+      <div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button onclick="cm('mo-det')" style="background:var(--bdr);border:none;border-radius:50%;width:32px;height:32px;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--sub)">✕</button></div>
       <div class="fb mb12">
         <div style="font-size:17px;font-weight:900">${p.peminjam}</div>
         <span class="bdg ${p.status}">${statusLabel(p.status,p)}</span>
@@ -1109,6 +1110,7 @@ function oDet(id){
   const invs=S.external.filter(e=>e.tipe==='investor'&&(e.alokasi||[]).some(a=>a.pid===id));
   const totalBH=invs.reduce((s,e)=>{const a=e.alokasi.find(x=>x.pid===id)||{};return s+calcInvestorReturn(p, a.jumlah||0);},0);
   let h=`
+    <div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button onclick="cm('mo-det')" style="background:var(--bdr);border:none;border-radius:50%;width:32px;height:32px;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--sub)">✕</button></div>
     <div class="fb mb12">
       <div style="font-size:17px;font-weight:900">${p.peminjam}</div>
       <span class="bdg ${p.status}">${statusLabel(p.status,p)}</span>
@@ -1508,6 +1510,7 @@ function oEDet(id){
   const isPinj=e.tipe==='pinjaman';
   const el=document.getElementById('mo-edet-b');
   let h=`
+    <div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button onclick="cm('mo-edet')" style="background:var(--bdr);border:none;border-radius:50%;width:32px;height:32px;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--sub)">✕</button></div>
     <div class="fb mb12"><div style="font-size:17px;font-weight:900">${e.nama}</div><span class="bdg ${e.tipe}">${isPinj?'💙 Pinjaman':'🟠 Investor'}</span></div>
     <div class="ir"><span class="ik">Jumlah Dana</span><span class="iv" style="color:${isPinj?'#0369A1':'#B56B00'}">${fj(e.jumlah)}</span></div>
     <div class="ir"><span class="ik">Status</span><span class="iv">${e.status==='selesai'?'✅ Selesai':'🔵 Aktif'}</span></div>
