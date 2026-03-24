@@ -1390,6 +1390,7 @@ function buildEF(e, tipe){
     <div class="fg"><label class="fl">Bagi Hasil Default (%)</label><input class="fi" id="fe-bh" type="number" step="0.1" value="${e?e.bagiHasilPct||0:0}" placeholder="30"><div class="fh">Default % bagi hasil per alokasi proyek</div></div>
     <div class="fg">
       <label class="fl">Alokasi Proyek <span id="inv-idle-lbl" style="color:#B56B00"></span></label>
+      <div style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:6px;margin-bottom:4px;font-size:9px;font-weight:800;color:var(--sub)"><span>Proyek</span><span>Nominal (jt)</span><span>% Proyek</span><span style="width:30px"></span></div>
       <div id="inv-alloc-rows"></div>
       <button type="button" id="add-alloc-btn" style="background:var(--o-l);color:#B56B00;border:none;border-radius:8px;padding:6px 12px;font-size:11px;font-weight:800;cursor:pointer;margin-top:6px;font-family:Nunito,sans-serif">+ Tambah Alokasi</button>
       <div class="fh mt6">Total: <span id="inv-alloc-total">—</span> · Idle: <span id="inv-idle">—</span></div>
@@ -1422,7 +1423,7 @@ function buildEF(e, tipe){
     // build allocation rows
     const rowsEl=document.getElementById('inv-alloc-rows');
     const existAllocData=(e&&e.alokasi)||[];
-    if(existAllocData.length>0) existAllocData.forEach(a=>addInvRowData(a.pid,a.jumlah||'',a.bagiHasilPct||''));
+    if(existAllocData.length>0) existAllocData.forEach(a=>addInvRowData(a.pid,a.jumlah||'',a.pctProyek||a.bagiHasilPct||''));
     else addInvRowData('','','');
     document.getElementById('add-alloc-btn').onclick=()=>addInvRowData('','','');
     document.getElementById('fe-j')?.addEventListener('input',updInvIdle);
@@ -1430,19 +1431,22 @@ function buildEF(e, tipe){
   }
 }
 
-function addInvRowData(pid,jumlah,bh){
+function addInvRowData(pid,jumlah,pct){
   const rowsEl=document.getElementById('inv-alloc-rows'); if(!rowsEl) return;
   const row=document.createElement('div');
   row.style.cssText='display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:6px;margin-bottom:8px;align-items:center';
   const projSel=document.createElement('select');projSel.className='fi fs inv-pid';projSel.style.fontSize='11px';
-  projSel.innerHTML=`<option value="">-- Proyek --</option>${S.projects.map(p=>`<option value="${p.id}"${p.id===pid?' selected':''}>${p.peminjam}</option>`).join('')}`;
-  projSel.addEventListener('change',updInvIdle);
-  const jmlIn=document.createElement('input');jmlIn.className='fi inv-jml';jmlIn.type='number';jmlIn.step='0.1';jmlIn.placeholder='jt';jmlIn.value=jumlah;jmlIn.style.fontSize='11px';
-  jmlIn.addEventListener('input',updInvIdle);
-  const bhIn=document.createElement('input');bhIn.className='fi inv-bh';bhIn.type='number';bhIn.step='0.1';bhIn.placeholder='%';bhIn.value=bh;bhIn.style.fontSize='11px';
+  projSel.innerHTML=`<option value="">-- Proyek --</option>${S.projects.map(p=>`<option value="${p.id}"${p.id===pid?' selected':''}>${p.peminjam} (${fj(kontrakP(p))})</option>`).join('')}`;
+  const jmlIn=document.createElement('input');jmlIn.className='fi inv-jml';jmlIn.type='number';jmlIn.step='0.01';jmlIn.placeholder='jt';jmlIn.value=jumlah||'';jmlIn.style.fontSize='11px';
+  const pctIn=document.createElement('input');pctIn.className='fi inv-pct';pctIn.type='number';pctIn.step='0.1';pctIn.placeholder='%';pctIn.value=pct||'';pctIn.style.fontSize='11px';
+  // Auto-calc: nominal ↔ % kepemilikan
+  function getKontrak(){ const sel=projSel.value; const pp=S.projects.find(x=>x.id===sel); return pp?kontrakP(pp):0; }
+  jmlIn.addEventListener('input',()=>{ const k=getKontrak(); if(k>0){pctIn.value=((parseFloat(jmlIn.value||0)/k)*100).toFixed(1);} updInvIdle(); });
+  pctIn.addEventListener('input',()=>{ const k=getKontrak(); if(k>0){jmlIn.value=((parseFloat(pctIn.value||0)/100)*k).toFixed(2);} updInvIdle(); });
+  projSel.addEventListener('change',()=>{ const k=getKontrak(); if(k>0&&jmlIn.value){pctIn.value=((parseFloat(jmlIn.value||0)/k)*100).toFixed(1);} updInvIdle(); });
   const rmBtn=document.createElement('button');rmBtn.type='button';rmBtn.style.cssText='background:var(--r-l);color:var(--r);border:none;border-radius:8px;width:30px;height:36px;font-size:14px;cursor:pointer';rmBtn.textContent='×';
   rmBtn.onclick=()=>{row.remove();updInvIdle();};
-  row.appendChild(projSel);row.appendChild(jmlIn);row.appendChild(bhIn);row.appendChild(rmBtn);
+  row.appendChild(projSel);row.appendChild(jmlIn);row.appendChild(pctIn);row.appendChild(rmBtn);
   rowsEl.appendChild(row);
 }
 function updInvIdle(){
@@ -1494,7 +1498,9 @@ function saveExt(tipe){
     const bh=parseFloat(document.getElementById('fe-bh')?.value||0);
     const alok=Array.from(document.getElementById('inv-alloc-rows')?.children||[]).map(row=>{
       const pid=row.querySelector('.inv-pid')?.value;
-      return pid?{pid,jumlah:parseFloat(row.querySelector('.inv-jml')?.value||0),bagiHasilPct:parseFloat(row.querySelector('.inv-bh')?.value||bh)}:null;
+      const jmlVal=parseFloat(row.querySelector('.inv-jml')?.value||0);
+      const pctVal=parseFloat(row.querySelector('.inv-pct')?.value||0);
+      return pid?{pid,jumlah:jmlVal,pctProyek:pctVal}:null;
     }).filter(Boolean);
     obj={...obj,bagiHasilPct:bh,alokasi:alok};
   }
