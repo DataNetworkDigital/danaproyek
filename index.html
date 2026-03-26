@@ -306,11 +306,13 @@ function generateSchedule(project){
   if(dur<=0) return;
   const rt=project.returnType||'sekali';
   if(rt!=='bulanan') return;
-  // Check if schedule exists and matches duration
+  // Check if schedule exists and matches duration + amount
   const existing=project.schedule||[];
-  if(existing.length===dur) return; // already correct
+  const monthlyAmt0=retBulananRp(project);
+  const amtMatch=existing.length>0&&Math.abs(parseFloat(existing[0].amount||0)-monthlyAmt0)<0.001;
+  if(existing.length===dur&&amtMatch) return; // already correct
   // Build new schedule, preserving paid statuses from existing
-  const monthlyAmt=retBulananRp(project);
+  const monthlyAmt=monthlyAmt0;
   const newSched=[];
   for(let i=0;i<dur;i++){
     const dueDate=am(project.tanggalMulai, i+1);
