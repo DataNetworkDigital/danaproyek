@@ -589,7 +589,6 @@ function rD(){
     <div class="mc vio"><div class="ml">Deployed</div><div class="mv">${fj(st.dep)}</div><div class="ms">${act.length} proyek</div></div>
     <div class="mc grn"><div class="ml">Total Profit</div><div class="mv">${fj(st.tp)}</div><div class="ms">Dari ${autoLog.length} bayaran</div></div>
     ${kurOn?`<div class="mc ${st.idle>0?'org':'grn'}"><div class="ml">Dana Idle</div><div class="mv">${fj(st.idle)}</div><div class="ms">${st.idle>0?'Bisa di-deploy':'Fully deployed'}</div></div>`:''}
-    <div class="mc ${urg.length>0?'red':'vio'}"><div class="ml">Jatuh Tempo</div><div class="mv">${urg.length}</div><div class="ms">${urg.length>0?'Dalam 7 hari!':'Aman'}</div></div>
   </div>`;
   if(kurOn){
     h+=`
