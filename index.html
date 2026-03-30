@@ -6,6 +6,7 @@
 <title>DanaTrack 💸</title>
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/11.1.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore-compat.js"></script>
 <script>
@@ -134,7 +135,7 @@ body.modal-open .pages{pointer-events:none}
     <button class="ni" onclick="go('m')" id="n-m" style="display:none"><span class="ico">📋</span><span class="lbl">Proyek</span></button>
     <button class="ni" onclick="go('d')" id="n-d" style="display:none"><span class="ico">💰</span><span class="lbl">Dana</span></button>
     <button class="ni" onclick="go('e')" id="n-e" style="display:none"><span class="ico">🔗</span><span class="lbl">Eksternal</span></button>
-    <button class="ni" onclick="go('r')" id="n-r" style="display:none"><span class="ico">📊</span><span class="lbl">Laporan</span></button>
+    <button class="ni" onclick="go('r')" id="n-r" style="display:none"><span class="ico">📄</span><span class="lbl">Dokumen</span></button>
     <button class="ni" onclick="showPin()" id="n-admin"><span class="ico">🔐</span><span class="lbl">Admin</span></button>
   </nav>
 </div>
@@ -382,12 +383,12 @@ function go(p){
   document.getElementById('p-'+p).classList.add('active');
   document.getElementById('n-'+p).classList.add('on');
   CP=p;
-  const ti={b:{t:'💸 DanaTrack',s:'Dana Talangan Manager'},m:{t:'📋 Proyek',s:'Kelola semua proyek'},d:{t:'💰 Dana',s:'Kesehatan & konfigurasi dana'},e:{t:'🔗 Eksternal',s:'Pinjaman & investor'},r:{t:'📊 Laporan',s:'Analitik & progress'}};
+  const ti={b:{t:'💸 DanaTrack',s:'Dana Talangan Manager'},m:{t:'📋 Proyek',s:'Kelola semua proyek'},d:{t:'💰 Dana',s:'Kesehatan & konfigurasi dana'},e:{t:'🔗 Eksternal',s:'Pinjaman & investor'},r:{t:'📄 Dokumen',s:'Generate dokumen legal'}};
   document.getElementById('HT').textContent=ti[p].t;
   document.getElementById('HS').textContent=ti[p].s;
   document.getElementById('HA').innerHTML=p==='d'?`<button class="hdr-icon" onclick="oFund()">⚙️</button><button class="hdr-icon" onclick="exportJ()">⬆️</button><button class="hdr-icon" onclick="importJ()">⬇️</button>`:'';
   document.getElementById('fab').style.display=['m','e'].includes(p)?'flex':'none';
-  if(p==='b')rB();else if(p==='m')rM();else if(p==='d')rD();else if(p==='e')rE();else rR();
+  if(p==='b')rB();else if(p==='m')rM();else if(p==='d')rD();else if(p==='e')rE();else rDoc();
 }
 function fabAct(){ if(CP==='m') oPM(); else if(CP==='e') oEM(); }
 let _tt;
@@ -613,7 +614,57 @@ function rD(){
     <div class="st mb12">💾 Backup Data</div>
     <div style="display:flex;gap:9px"><button class="btn ou fw" onclick="exportJ()">⬆️ Export JSON</button><button class="btn gh fw" onclick="importJ()">⬇️ Import JSON</button></div>
   </div>`;
+  // ── LAPORAN & ANALITIK (merged) ──
+  const potP=act.reduce((s,p)=>s+profP(p),0);
+  const done=S.projects.filter(p=>p.status==='selesai');
+  const upD=S.projects.filter(p=>(p.status==='aktif'||p.status==='terlambat')&&(()=>{const d2=du(p.tanggalJT);return d2!==null&&d2<=30;})()).sort((a,b)=>new Date(a.tanggalJT)-new Date(b.tanggalJT));
+  const pOpts=[['3m','3 Bln'],['6m','6 Bln'],['ytd','YTD'],['1y','1 Thn'],['all','All Time'],['custom','Kustom']];
+  h+=`
+  <div style="margin-top:16px;padding-top:16px;border-top:3px solid var(--bdr)">
+    <div style="font-size:18px;font-weight:900;color:var(--txt);margin-bottom:12px">📊 Laporan & Analitik</div>
+  </div>
+  <div class="mg">
+    <div class="mc grn"><div class="ml">Total Profit</div><div class="mv">${fj(st.tp)}</div><div class="ms">Diterima</div></div>
+    <div class="mc vio"><div class="ml">Potensi</div><div class="mv">${fj(potP)}</div><div class="ms">Dari aktif</div></div>
+    <div class="mc org"><div class="ml">Selesai</div><div class="mv">${done.length}</div><div class="ms">dari ${S.projects.length}</div></div>
+    <div class="mc ${dpct>=70?'grn':dpct>=40?'vio':'org'}"><div class="ml">Efisiensi</div><div class="mv">${dpct.toFixed(0)}%</div><div class="ms">Modal bekerja</div></div>
+  </div>
+  <div class="card"><div class="st mb8">💰 Alokasi Dana</div><div class="cw" style="height:175px"><canvas id="ch-a"></canvas></div></div>
+  <div class="card">
+    <div class="fb mb8">
+      <span class="st">📈 Profit</span>
+      <select class="fi fs" id="pp-sel" style="width:auto;padding:6px 28px 6px 10px;font-size:11px;border-radius:8px" onchange="swPP(this.value)">
+        ${pOpts.map(([v,l])=>`<option value="${v}"${profPeriod===v?' selected':''}>${l}</option>`).join('')}
+      </select>
+    </div>
+    <div id="pp-custom" style="display:${profPeriod==='custom'?'flex':'none'};gap:8px;margin-bottom:10px">
+      <input class="fi" id="pp-from" type="date" value="${profCFrom}" style="font-size:11px;padding:7px 10px">
+      <input class="fi" id="pp-to" type="date" value="${profCTo}" style="font-size:11px;padding:7px 10px">
+      <button class="btn gh sm" onclick="swPP('custom')">OK</button>
+    </div>
+    <div class="cw"><canvas id="ch-p"></canvas></div>
+  </div>
+  ${(f.kurEnabled!==false&&f.kurAmount>0)?`<div class="card">
+    <div class="fb mb8"><span class="st">🏦 Progress KUR</span><span class="txs tbold tvio">${kurPct.toFixed(1)}%</span></div>
+    <div class="pw mb8"><div class="pb vio" style="width:${kurPct}%"></div></div>
+    <div class="fb txx tg"><span>Bulan ke-${st.ms} dari 60</span><span>Sisa ~${Math.max(0,60-st.ms)} bln</span></div>
+  </div>`:''}
+  <div class="card">
+    <div class="st mb12">⏰ Jatuh Tempo 30 Hari</div>
+    ${upD.length===0?`<div style="text-align:center;padding:14px;color:var(--sub);font-size:12px;font-weight:700">✅ Tidak ada dalam 30 hari</div>`:
+      upD.map(p=>{const d2=du(p.tanggalJT);return`<div class="pi"><div><div style="font-weight:800;font-size:12px">${p.peminjam}</div><div class="txx tg">${fd(p.tanggalJT)} · ${fj(p.jumlah)}</div></div><div class="tr"><div class="tvio tbold">${fj(ret(p.jumlah))}</div><div style="font-size:10px;color:${gc(d2)};font-weight:800">${gl(d2)}</div></div></div>`;}).join('')}
+  </div>
+  <div class="card"><div class="st mb12">🔗 Kewajiban Eksternal</div>
+    <div class="ir"><span class="ik">💙 Cicilan Pinjaman/bln</span><span class="iv tblu">${fj(st.pinjCic)}</span></div>
+    <div class="ir"><span class="ik">🟠 Investor Aktif</span><span class="iv torg">${S.external.filter(e=>e.tipe==='investor'&&e.status!=='selesai').length} orang</span></div>
+  </div>
+  <div class="card"><div class="st mb12">❤️ Kesehatan Proyek</div>
+    <div class="mg" style="margin-bottom:0">
+      ${[['AKTIF','aktif','var(--p-l)','var(--p)'],['TERLAMBAT','terlambat','var(--r-l)','var(--r)'],['SELESAI','selesai','var(--g-l)','#0B8F46'],['TOTAL','semua','var(--o-l)','#B56B00']].map(([lbl,st2,bg,col])=>`<div class="card-s" style="background:${bg}"><div style="font-size:9px;font-weight:800;color:var(--sub);margin-bottom:3px">${lbl}</div><div style="font-size:20px;font-weight:900;color:${col}">${st2==='semua'?S.projects.length:S.projects.filter(p=>p.status===st2).length}</div></div>`).join('')}
+    </div>
+  </div>`;
   document.getElementById('p-d').innerHTML=h;
+  requestAnimationFrame(()=>{ buildAChart(st); buildPChartPeriod(); });
 }
 
 // ── EKSTERNAL ─────────────────────────────────────────────────────────
@@ -669,59 +720,576 @@ function extCard(e){
   </div>`;
 }
 
-// ── LAPORAN ───────────────────────────────────────────────────────────
-function rR(){
-  const st=stats(), f=S.fund;
-  const act=S.projects.filter(p=>p.status==='aktif'||p.status==='terlambat');
-  const done=S.projects.filter(p=>p.status==='selesai');
-  const potP=act.reduce((s,p)=>s+profP(p),0);
-  const dpct=st.avail>0?Math.min(100,(st.dep/st.avail)*100):0;
-  const kurPct=Math.min(100,(st.ms/60)*100);
-  const up=S.projects.filter(p=>(p.status==='aktif'||p.status==='terlambat')&&(()=>{const d=du(p.tanggalJT);return d!==null&&d<=30;})()).sort((a,b)=>new Date(a.tanggalJT)-new Date(b.tanggalJT));
-  const pOpts=[['3m','3 Bln'],['6m','6 Bln'],['ytd','YTD'],['1y','1 Thn'],['all','All Time'],['custom','Kustom']];
+// ── DOKUMEN ───────────────────────────────────────────────────────────
+let _docView='list', _docForm={}, _docTipe='proyek', _sigInvestor=null, _sigPengelola=null;
+// Pre-load pengelola signature
+fetch('ttd-pengelola.png').then(r=>r.blob()).then(b=>{const r=new FileReader();r.onload=e=>{_sigPengelola=e.target.result;};r.readAsDataURL(b);}).catch(()=>{});
+let PIHAK2={nama:'Gde Dharma Ardyansyah',nik:'3577030804010001',alamat:'Perumahan Bumi Mas Blok B no. 4 Madiun',hp:'081230374388'};
+
+function getNextDocNum(prefix){
+  const now=new Date();const yr=now.getFullYear();const mo=String(now.getMonth()+1).padStart(2,'0');
+  const docs=(S.generatedDocs||[]).filter(d=>(d.prefix||'INV')===prefix);
+  const n=docs.length+1;
+  return `${prefix||'INV'}/${yr}/${mo}/${String(n).padStart(3,'0')}`;
+}
+function dataUrlToUint8(dataUrl){
+  const b64=dataUrl.split(',')[1];const bin=atob(b64);const arr=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);return arr;
+}
+function uploadSig(which){
+  const inp=document.createElement('input');inp.type='file';inp.accept='image/*';
+  inp.onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();
+    r.onload=ev=>{if(which==='investor')_sigInvestor=ev.target.result;else _sigPengelola=ev.target.result;
+      const prev=document.getElementById('sig-prev-'+which);
+      if(prev)prev.innerHTML=`<img src="${ev.target.result}" style="max-height:60px;max-width:150px;border:1px solid var(--bdr);border-radius:8px;padding:4px">`;
+    };r.readAsDataURL(f);};inp.click();
+}
+
+function rDoc(){
+  if(_docView==='form') return rDocForm();
+  if(_docView==='realisasi') return rDocRealisasi();
+  const invs=S.external.filter(e=>e.tipe==='investor');
   let h=`
-  <div class="mg">
-    <div class="mc grn"><div class="ml">Total Profit</div><div class="mv">${fj(st.tp)}</div><div class="ms">Diterima</div></div>
-    <div class="mc vio"><div class="ml">Potensi</div><div class="mv">${fj(potP)}</div><div class="ms">Dari aktif</div></div>
-    <div class="mc org"><div class="ml">Selesai</div><div class="mv">${done.length}</div><div class="ms">dari ${S.projects.length}</div></div>
-    <div class="mc ${dpct>=70?'grn':dpct>=40?'vio':'org'}"><div class="ml">Efisiensi</div><div class="mv">${dpct.toFixed(0)}%</div><div class="ms">Modal bekerja</div></div>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div style="font-size:18px;font-weight:900;color:var(--txt)">📄 Dokumen</div>
   </div>
-  <div class="card"><div class="st mb8">💰 Alokasi Dana</div><div class="cw" style="height:175px"><canvas id="ch-a"></canvas></div></div>
-  <div class="card">
-    <div class="fb mb8">
-      <span class="st">📈 Profit</span>
-      <select class="fi fs" id="pp-sel" style="width:auto;padding:6px 28px 6px 10px;font-size:11px;border-radius:8px" onchange="swPP(this.value)">
-        ${pOpts.map(([v,l])=>`<option value="${v}"${profPeriod===v?' selected':''}>${l}</option>`).join('')}
+  <div style="background:var(--p-l);border-radius:12px;padding:11px 13px;margin-bottom:16px;font-size:11px;color:var(--p);font-weight:700">Generate dokumen legal otomatis dari data proyek & investor.</div>
+  <div class="card" style="cursor:pointer" onclick="showDocForm('investasi')">
+    <div class="fb">
+      <div>
+        <div style="font-weight:900;font-size:14px">📝 Kontrak Investasi</div>
+        <div style="font-size:11px;color:var(--sub);font-weight:600;margin-top:3px">Perjanjian investasi dana talangan</div>
+      </div>
+      <span class="bdg aktif">Aktif</span>
+    </div>
+    <div class="mt6 txx tg">${invs.length} investor terdaftar</div>
+  </div>
+  <div class="card" style="cursor:pointer" onclick="_docView='realisasi';rDoc()">
+    <div class="fb">
+      <div>
+        <div style="font-weight:900;font-size:14px">📊 Laporan Realisasi</div>
+        <div style="font-size:11px;color:var(--sub);font-weight:600;margin-top:3px">Laporan progress & bagi hasil untuk investor</div>
+      </div>
+      <span class="bdg aktif">Aktif</span>
+    </div>
+    <div class="mt6 txx tg">Transparansi penggunaan dana investor</div>
+  </div>`;
+  ['📋 Kontrak Peminjam','🧾 Kwitansi','📎 Addendum'].forEach(t=>{
+    h+=`<div class="card" style="opacity:.5;cursor:not-allowed"><div class="fb"><div><div style="font-weight:900;font-size:14px">${t}</div><div style="font-size:11px;color:var(--sub);font-weight:600;margin-top:3px">Template segera hadir</div></div><span class="bdg warn">Segera</span></div></div>`;
+  });
+  const docs=S.generatedDocs||[];
+  if(docs.length>0){
+    h+=`<div style="font-weight:900;font-size:14px;margin:16px 0 10px">📋 Riwayat Dokumen (${docs.length})</div>`;
+    docs.slice().reverse().forEach((dc,i)=>{
+      const idx=docs.length-1-i;
+      h+=`<div class="card-s" style="margin-bottom:8px">
+        <div class="fb"><span style="font-weight:800;font-size:12px">${dc.nomor}</span><span class="txx tg">${fd(dc.tanggal)}</span></div>
+        <div class="txx tg mt6">${dc.p1?.nama||dc.investor||'—'} — ${dc.proyekNama||dc.proyek||'Kelola Penuh'} — ${fj(dc.jumlah)}</div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <button class="btn sm pr" onclick="redownloadDocx(${idx})" style="font-size:10px;padding:3px 8px">📥 DOCX</button>
+          <button class="btn sm gh" onclick="redownloadPdf(${idx})" style="font-size:10px;padding:3px 8px">🖨️ PDF</button>
+          <button class="btn sm dn" onclick="deleteDoc(${idx})" style="font-size:10px;padding:3px 8px">🗑️</button>
+        </div>
+      </div>`;
+    });
+  }
+  document.getElementById('p-r').innerHTML=h;
+}
+
+function showDocForm(type){
+  _docView='form';_docTipe='proyek';
+  _docForm={type,nomor:getNextDocNum('INV'),tanggal:new Date().toISOString().split('T')[0]};
+  rDocForm();
+}
+
+function rDocForm(){
+  const invs=S.external.filter(e=>e.tipe==='investor');
+  const ff=_docForm;const isKP=_docTipe==='kelola';
+  let h=`
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+    <button onclick="_docView='list';rDoc()" style="background:var(--bdr);border:none;border-radius:50%;width:32px;height:32px;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--sub)">←</button>
+    <div style="font-size:17px;font-weight:900">📝 Kontrak Investasi</div>
+  </div>
+  <div class="fg"><label class="fl">Nomor Surat</label><input class="fi" id="doc-nomor" value="${ff.nomor}"></div>
+  <div class="fg"><label class="fl">Tanggal Perjanjian</label><input class="fi" id="doc-tanggal" type="date" value="${ff.tanggal}"></div>
+
+  <div style="background:var(--o-l);border-radius:12px;padding:14px;margin-bottom:13px">
+    <div style="font-size:12px;font-weight:900;color:#B56B00;margin-bottom:10px">🟠 Pihak Pertama (Investor)</div>
+    <div class="fg"><label class="fl">Pilih Investor</label>
+      <select class="fi fs" id="doc-inv-sel" onchange="docInvChange()">
+        <option value="">-- Pilih dari database --</option>
+        <option value="_new">✏️ Input manual</option>
+        ${invs.map(i=>`<option value="${i.id}">${i.nama} (${fj(i.jumlah)})</option>`).join('')}
       </select>
     </div>
-    <div id="pp-custom" style="display:${profPeriod==='custom'?'flex':'none'};gap:8px;margin-bottom:10px">
-      <input class="fi" id="pp-from" type="date" value="${profCFrom}" style="font-size:11px;padding:7px 10px">
-      <input class="fi" id="pp-to" type="date" value="${profCTo}" style="font-size:11px;padding:7px 10px">
-      <button class="btn gh sm" onclick="swPP('custom')">OK</button>
+    <div class="fg"><label class="fl">Nama Lengkap *</label><input class="fi" id="doc-p1-nama" value="" placeholder="Nama investor"></div>
+    <div class="fg"><label class="fl">NIK *</label><input class="fi" id="doc-p1-nik" value="" placeholder="Nomor KTP"></div>
+    <div class="fg"><label class="fl">Alamat *</label><input class="fi" id="doc-p1-alamat" value="" placeholder="Alamat lengkap"></div>
+    <div class="fg"><label class="fl">No. HP *</label><input class="fi" id="doc-p1-hp" value="" placeholder="08xxx"></div>
+  </div>
+
+  <div style="background:var(--p-l);border-radius:12px;padding:14px;margin-bottom:13px">
+    <div style="font-size:12px;font-weight:900;color:var(--p);margin-bottom:10px">🔵 Pihak Kedua (Pengelola)</div>
+    <div class="fg"><label class="fl">Nama *</label><input class="fi" id="doc-p2-nama" value="${PIHAK2.nama}"></div>
+    <div class="fg"><label class="fl">NIK *</label><input class="fi" id="doc-p2-nik" value="${PIHAK2.nik}"></div>
+    <div class="fg"><label class="fl">Alamat *</label><input class="fi" id="doc-p2-alamat" value="${PIHAK2.alamat}"></div>
+    <div class="fg"><label class="fl">No. HP *</label><input class="fi" id="doc-p2-hp" value="${PIHAK2.hp}"></div>
+  </div>
+
+  <div style="background:var(--g-l);border-radius:12px;padding:14px;margin-bottom:13px">
+    <div style="font-size:12px;font-weight:900;color:#0B8F46;margin-bottom:10px">💰 Detail Investasi</div>
+    <div style="display:flex;gap:6px;margin-bottom:12px">
+      <button type="button" class="btn sm ${!isKP?'pr':'ou'}" id="doc-tipe-proyek" style="flex:1" onclick="_docTipe='proyek';rDocForm()">🎯 Alokasi Proyek</button>
+      <button type="button" class="btn sm ${isKP?'pr':'ou'}" id="doc-tipe-kelola" style="flex:1" onclick="_docTipe='kelola';rDocForm()">🤝 Dana Kelola Penuh</button>
     </div>
-    <div class="cw"><canvas id="ch-p"></canvas></div>
-  </div>
-  ${(f.kurEnabled!==false&&f.kurAmount>0)?`<div class="card">
-    <div class="fb mb8"><span class="st">🏦 Progress KUR</span><span class="txs tbold tvio">${kurPct.toFixed(1)}%</span></div>
-    <div class="pw mb8"><div class="pb vio" style="width:${kurPct}%"></div></div>
-    <div class="fb txx tg"><span>Bulan ke-${st.ms} dari 60</span><span>Sisa ~${Math.max(0,60-st.ms)} bln</span></div>
-  </div>`:''}
-  <div class="card">
-    <div class="st mb12">⏰ Jatuh Tempo 30 Hari</div>
-    ${up.length===0?`<div style="text-align:center;padding:14px;color:var(--sub);font-size:12px;font-weight:700">✅ Tidak ada dalam 30 hari</div>`:
-      up.map(p=>{const d=du(p.tanggalJT);return`<div class="pi"><div><div style="font-weight:800;font-size:12px">${p.peminjam}</div><div class="txx tg">${fd(p.tanggalJT)} · ${fj(p.jumlah)}</div></div><div class="tr"><div class="tvio tbold">${fj(ret(p.jumlah))}</div><div style="font-size:10px;color:${gc(d)};font-weight:800">${gl(d)}</div></div></div>`;}).join('')}
-  </div>
-  <div class="card"><div class="st mb12">🔗 Kewajiban Eksternal</div>
-    <div class="ir"><span class="ik">💙 Cicilan Pinjaman/bln</span><span class="iv tblu">${fj(st.pinjCic)}</span></div>
-    <div class="ir"><span class="ik">🟠 Investor Aktif</span><span class="iv torg">${S.external.filter(e=>e.tipe==='investor'&&e.status!=='selesai').length} orang</span></div>
-  </div>
-  <div class="card"><div class="st mb12">❤️ Kesehatan Proyek</div>
-    <div class="mg" style="margin-bottom:0">
-      ${[['AKTIF','aktif','var(--p-l)','var(--p)'],['TERLAMBAT','terlambat','var(--r-l)','var(--r)'],['SELESAI','selesai','var(--g-l)','#0B8F46'],['TOTAL','semua','var(--o-l)','#B56B00']].map(([lbl,st2,bg,col])=>`<div class="card-s" style="background:${bg}"><div style="font-size:9px;font-weight:800;color:var(--sub);margin-bottom:3px">${lbl}</div><div style="font-size:20px;font-weight:900;color:${col}">${st2==='semua'?S.projects.length:S.projects.filter(p=>p.status===st2).length}</div></div>`).join('')}
+    <div class="fh mb8" style="margin-top:-6px">${isKP?'Investor mempercayakan dana sepenuhnya kepada pengelola tanpa alokasi proyek tertentu.':'Investor mengetahui proyek spesifik yang dimasuki.'}</div>
+    ${!isKP?`<div class="fg"><label class="fl">Pilih Proyek</label>
+      <select class="fi fs" id="doc-proj-sel" onchange="docProjChange()">
+        <option value="">-- Pilih proyek --</option>
+        ${S.projects.filter(p=>p.status!=='selesai').map(p=>`<option value="${p.id}">${p.peminjam} (${fj(kontrakP(p))})</option>`).join('')}
+      </select></div>
+    <div class="fr">
+      <div class="fg"><label class="fl">Jumlah Investasi (jt) *</label><input class="fi" id="doc-jumlah" type="number" step="0.01" value="" placeholder="50"></div>
+      <div class="fg"><label class="fl">% Kepemilikan</label><input class="fi" id="doc-pct" type="number" step="0.1" value="" placeholder="50"></div>
+    </div>`:`<div class="fg"><label class="fl">Jumlah Investasi (jt) *</label><input class="fi" id="doc-jumlah" type="number" step="0.01" value="" placeholder="50"></div>`}
+    <div class="fr">
+      <div class="fg"><label class="fl">Bagi Hasil (%/siklus) *</label><input class="fi" id="doc-bh" type="number" step="0.1" value="" placeholder="2"></div>
+      <div class="fg"><label class="fl">Siklus (bulan)</label><input class="fi" id="doc-siklus" type="number" value="1" min="1" onchange="docCalcSiklus()"><div class="fh">1 siklus = 1× pembayaran</div></div>
     </div>
+    <div class="fr">
+      <div class="fg"><label class="fl">Durasi Kontrak (bulan) *</label><input class="fi" id="doc-durasi" type="number" value="" placeholder="3" onchange="docCalcSiklus()"></div>
+      <div class="fg"><label class="fl">Jumlah Pembayaran</label><input class="fi" id="doc-jmlbayar" type="number" value="" readonly style="background:#F1F5F9;cursor:default"><div class="fh">Otomatis: durasi / siklus</div></div>
+    </div>
+    <div class="fr">
+      <div class="fg"><label class="fl">Tanggal Mulai</label><input class="fi" id="doc-mulai" type="date" value=""></div>
+      <div class="fg"><label class="fl">Tanggal Berakhir</label><input class="fi" id="doc-akhir" type="date" value=""></div>
+    </div>
+    <div id="doc-siklus-info" class="fc-note" style="display:none"></div>
+  </div>
+
+  <div style="background:#FFF7ED;border-radius:12px;padding:14px;margin-bottom:13px">
+    <div style="font-size:12px;font-weight:900;color:#9A3412;margin-bottom:10px">📜 Ketentuan Kontrak</div>
+    <div class="fg"><label class="fl">Batas Bayar Setelah Jatuh Tempo</label>
+      <div style="display:flex;align-items:center;gap:6px"><input class="fi" id="doc-batas-bayar" type="number" value="7" style="width:80px"> <span class="fh" style="margin:0;white-space:nowrap">hari kerja</span></div>
+      <div class="fh">Pasal 1: Pembayaran bagi hasil dilakukan selambat-lambatnya X hari kerja setelah jatuh tempo siklus.</div>
+    </div>
+    <div style="font-size:11px;font-weight:800;color:#9A3412;margin:10px 0 6px">Wanprestasi (Pasal 6)</div>
+    <div class="fg"><label class="fl">Teguran Setelah Keterlambatan</label>
+      <div style="display:flex;align-items:center;gap:6px"><input class="fi" id="doc-wp-teguran" type="number" value="14" style="width:80px"> <span class="fh" style="margin:0;white-space:nowrap">hari</span></div>
+    </div>
+    <div class="fg"><label class="fl">Batas Perbaikan Setelah Teguran</label>
+      <div style="display:flex;align-items:center;gap:6px"><input class="fi" id="doc-wp-perbaikan" type="number" value="14" style="width:80px"> <span class="fh" style="margin:0;white-space:nowrap">hari</span></div>
+    </div>
+    <div class="fg"><label class="fl">Denda Keterlambatan (opsional)</label>
+      <div style="display:flex;align-items:center;gap:6px"><input class="fi" id="doc-wp-denda" type="number" step="0.1" value="" placeholder="0" style="width:80px"> <span class="fh" style="margin:0;white-space:nowrap">% per bulan</span></div>
+    </div>
+  </div>
+
+  <div style="background:#F0FDF4;border-radius:12px;padding:14px;margin-bottom:13px">
+    <div style="font-size:12px;font-weight:900;color:#166534;margin-bottom:10px">✍️ Tanda Tangan (Opsional)</div>
+    <div class="fr">
+      <div class="fg">
+        <label class="fl">TTD Investor</label>
+        <button type="button" class="btn sm ou" onclick="uploadSig('investor')" style="width:100%">📷 Upload</button>
+        <div id="sig-prev-investor" class="mt6"></div>
+      </div>
+      <div class="fg">
+        <label class="fl">TTD Pengelola</label>
+        <button type="button" class="btn sm ou" onclick="uploadSig('pengelola')" style="width:100%">📷 Upload</button>
+        <div id="sig-prev-pengelola" class="mt6"></div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:9px;margin-top:4px">
+    <button class="btn fw" onclick="saveDoc()" style="background:var(--ok);color:#fff;font-weight:800">💾 Simpan</button>
+    <button class="btn pr fw" onclick="downloadDocx()">📥 DOCX</button>
+    <button class="btn gh fw" onclick="downloadDocPdf()">🖨️ PDF</button>
   </div>`;
   document.getElementById('p-r').innerHTML=h;
-  requestAnimationFrame(()=>{ buildAChart(st); buildPChartPeriod(); });
+  if(_sigPengelola){const prev=document.getElementById('sig-prev-pengelola');if(prev)prev.innerHTML=`<img src="${_sigPengelola}" style="max-height:60px;max-width:150px;border:1px solid var(--bdr);border-radius:8px;padding:4px">`;}
+  if(_sigInvestor){const prev=document.getElementById('sig-prev-investor');if(prev)prev.innerHTML=`<img src="${_sigInvestor}" style="max-height:60px;max-width:150px;border:1px solid var(--bdr);border-radius:8px;padding:4px">`;}
+  docCalcSiklus();
+}
+
+function docCalcSiklus(){
+  const dur=parseInt(document.getElementById('doc-durasi')?.value||0);
+  const sik=parseInt(document.getElementById('doc-siklus')?.value||1)||1;
+  const bh=parseFloat(document.getElementById('doc-bh')?.value||0);
+  const jml=document.getElementById('doc-jmlbayar');
+  const info=document.getElementById('doc-siklus-info');
+  if(jml&&dur>0) jml.value=Math.ceil(dur/sik);
+  if(info&&dur>0&&bh>0){
+    const nPay=Math.ceil(dur/sik);
+    const totalPct=bh*nPay;
+    info.style.display='block';
+    info.innerHTML=`💡 ${bh}% per ${sik} bulan × ${nPay} pembayaran = <b>${totalPct}% total bagi hasil</b>`;
+  } else if(info) info.style.display='none';
+}
+
+function docInvChange(){
+  const sel=document.getElementById('doc-inv-sel')?.value;
+  if(!sel||sel==='_new'){
+    ['doc-p1-nama','doc-p1-nik','doc-p1-alamat','doc-p1-hp'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+    return;
+  }
+  const inv=S.external.find(e=>e.id===sel);
+  if(inv){
+    document.getElementById('doc-p1-nama').value=inv.nama||'';
+    document.getElementById('doc-p1-nik').value=inv.nik||'';
+    document.getElementById('doc-p1-alamat').value=inv.alamat||'';
+    document.getElementById('doc-p1-hp').value=inv.hp||'';
+    const pid=document.getElementById('doc-proj-sel')?.value;
+    if(pid){const alloc=(inv.alokasi||[]).find(a=>a.pid===pid);if(alloc){document.getElementById('doc-jumlah').value=alloc.jumlah||'';const pe=document.getElementById('doc-pct');if(pe)pe.value=alloc.pctProyek||'';}}
+  }
+}
+
+function docProjChange(){
+  const pid=document.getElementById('doc-proj-sel')?.value;if(!pid)return;
+  const p=S.projects.find(x=>x.id===pid);if(!p)return;
+  document.getElementById('doc-durasi').value=p.durasiReturn||'';
+  document.getElementById('doc-mulai').value=p.tanggalMulai||'';
+  document.getElementById('doc-akhir').value=p.tanggalJT||'';
+  if(p.returnModeUmum==='persen') document.getElementById('doc-bh').value=p.returnPersenUmum||'';
+  else if(kontrakP(p)>0) document.getElementById('doc-bh').value=((parseFloat(p.returnBulananUmum||0)/kontrakP(p))*100).toFixed(1);
+  const invId=document.getElementById('doc-inv-sel')?.value;
+  if(invId&&invId!=='_new'){const inv=S.external.find(e=>e.id===invId);if(inv){const alloc=(inv.alokasi||[]).find(a=>a.pid===pid);if(alloc){document.getElementById('doc-jumlah').value=alloc.jumlah||'';const pe=document.getElementById('doc-pct');if(pe)pe.value=alloc.pctProyek||'';}}}
+  docCalcSiklus();
+}
+
+function getDocFormData(){
+  const isKP=_docTipe==='kelola';
+  return {
+    nomor:document.getElementById('doc-nomor')?.value||'',
+    tanggal:document.getElementById('doc-tanggal')?.value||'',
+    p1:{nama:document.getElementById('doc-p1-nama')?.value||'',nik:document.getElementById('doc-p1-nik')?.value||'',alamat:document.getElementById('doc-p1-alamat')?.value||'',hp:document.getElementById('doc-p1-hp')?.value||''},
+    p2:{nama:document.getElementById('doc-p2-nama')?.value||'',nik:document.getElementById('doc-p2-nik')?.value||'',alamat:document.getElementById('doc-p2-alamat')?.value||'',hp:document.getElementById('doc-p2-hp')?.value||''},
+    tipe:_docTipe,
+    jumlah:parseFloat(document.getElementById('doc-jumlah')?.value||0),
+    pct:isKP?0:parseFloat(document.getElementById('doc-pct')?.value||0),
+    bh:parseFloat(document.getElementById('doc-bh')?.value||0),
+    siklus:parseInt(document.getElementById('doc-siklus')?.value||1)||1,
+    durasi:parseInt(document.getElementById('doc-durasi')?.value||0),
+    jmlBayar:parseInt(document.getElementById('doc-jmlbayar')?.value||0),
+    mulai:document.getElementById('doc-mulai')?.value||'',
+    akhir:document.getElementById('doc-akhir')?.value||'',
+    proyek:isKP?'':document.getElementById('doc-proj-sel')?.value||'',
+    batasBayar:parseInt(document.getElementById('doc-batas-bayar')?.value||7),
+    wpTeguran:parseInt(document.getElementById('doc-wp-teguran')?.value||14),
+    wpPerbaikan:parseInt(document.getElementById('doc-wp-perbaikan')?.value||14),
+    wpDenda:parseFloat(document.getElementById('doc-wp-denda')?.value||0),
+    sigInvestor:_sigInvestor,sigPengelola:_sigPengelola
+  };
+}
+
+function validateDocForm(d){
+  if(!d.p1.nama) return 'Nama investor wajib diisi';
+  if(!d.p1.nik) return 'NIK investor wajib diisi';
+  if(!d.jumlah) return 'Jumlah investasi wajib diisi';
+  if(!d.p2.nama) return 'Nama pengelola wajib diisi';
+  return null;
+}
+
+function saveDocHistory(d){
+  if(!S.generatedDocs) S.generatedDocs=[];
+  const projName=d.tipe==='kelola'?'Dana Kelola Penuh':S.projects.find(p=>p.id===d.proyek)?.peminjam||'—';
+  // Check if this nomor already exists (re-download case)
+  const existing=S.generatedDocs.find(x=>x.nomor===d.nomor);
+  if(existing) return;
+  // Store full form data for re-download (exclude signature base64 to save space)
+  const saved={...d, prefix:'INV', proyekNama:projName, savedAt:new Date().toISOString()};
+  delete saved.sigInvestor; delete saved.sigPengelola;
+  S.generatedDocs.push(saved);
+  save();
+}
+
+function saveDoc(){
+  const d=getDocFormData();const err=validateDocForm(d);if(err){toast('❌ '+err);return;}
+  saveDocHistory(d);
+  toast('💾 Dokumen tersimpan!');
+  _docView='list';rDoc();
+}
+
+function buildDocParagraphs(d){
+  const tgl=fd(d.tanggal),tglM=fd(d.mulai),tglA=fd(d.akhir);
+  const jmlRp='Rp '+(d.jumlah*1000000).toLocaleString('id-ID');
+  const isKP=d.tipe==='kelola';
+  const siklusLbl=d.siklus===1?'per bulan':`per ${d.siklus} bulan (1 siklus)`;
+  const nPay=d.jmlBayar||Math.ceil(d.durasi/(d.siklus||1));
+  const dendaLbl=d.wpDenda>0?` Denda keterlambatan sebesar ${d.wpDenda}% per bulan dari jumlah yang tertunggak.`:'';
+  return {tgl,tglM,tglA,jmlRp,isKP,siklusLbl,nPay,dendaLbl};
+}
+
+async function downloadDocx(savedData){
+  const d=savedData||getDocFormData();
+  if(!savedData){const err=validateDocForm(d);if(err){toast('❌ '+err);return;}saveDocHistory(d);}
+  const v=buildDocParagraphs(d);
+  try{
+    const {Document,Paragraph,TextRun,Table,TableRow,TableCell,WidthType,AlignmentType,BorderStyle,Packer,ImageRun}=docx;
+    const bNone={top:{style:BorderStyle.NONE},bottom:{style:BorderStyle.NONE},left:{style:BorderStyle.NONE},right:{style:BorderStyle.NONE}};
+    function pr(text,opts={}){
+      return new Paragraph({alignment:opts.center?AlignmentType.CENTER:AlignmentType.LEFT,spacing:{after:opts.after||120,before:opts.before||0},
+        children:[new TextRun({text,bold:opts.bold||false,size:opts.size||22,font:'Calibri',italics:opts.italic||false})]});
+    }
+    function infoRow(label,value){
+      return new TableRow({children:[
+        new TableCell({width:{size:2500,type:WidthType.DXA},borders:bNone,children:[pr(label,{bold:true})]}),
+        new TableCell({width:{size:300,type:WidthType.DXA},borders:bNone,children:[pr(':')]}),
+        new TableCell({width:{size:6200,type:WidthType.DXA},borders:bNone,children:[pr(value)]})
+      ]});
+    }
+    function sigCell(label,name,sigData){
+      const children=[pr(label,{bold:true,center:true})];
+      if(sigData){try{children.push(new Paragraph({alignment:AlignmentType.CENTER,children:[new ImageRun({data:dataUrlToUint8(sigData),transformation:{width:150,height:75}})]}));}catch(e){children.push(pr('',{after:800}));}}
+      else children.push(pr('',{after:800}));
+      children.push(pr('('+name+')',{center:true,bold:true}));
+      return new TableCell({width:{size:4500,type:WidthType.DXA},borders:bNone,children});
+    }
+    // Pasal 1 content
+    const p1Items=[
+      pr(`1. Pihak Pertama menyerahkan dana investasi sebesar ${v.jmlRp} (${fj(d.jumlah)}) kepada Pihak Kedua.`),
+      pr(v.isKP?'2. Dana tersebut dikelola sepenuhnya oleh Pihak Kedua untuk keperluan dana talangan tanpa alokasi proyek tertentu. Pihak Kedua berhak menentukan dan memindahkan alokasi dana sesuai kebutuhan operasional.':'2. Dana tersebut akan dikelola oleh Pihak Kedua untuk keperluan dana talangan proyek.'),
+    ];
+    if(!v.isKP) p1Items.push(pr(`3. Pihak Pertama memiliki ${d.pct}% kepemilikan atas proyek yang dialokasikan.`));
+    p1Items.push(pr(`${v.isKP?'3':'4'}. Pembayaran bagi hasil dilakukan selambat-lambatnya ${d.batasBayar} hari kerja setelah jatuh tempo setiap siklus pembayaran.`,{after:200}));
+
+    const doc2=new Document({sections:[{
+      properties:{page:{margin:{top:1134,bottom:1134,left:1134,right:1134}}},
+      children:[
+        pr('PERJANJIAN INVESTASI DANA TALANGAN',{bold:true,size:28,center:true,after:60}),
+        pr('Nomor: '+d.nomor,{center:true,after:200}),
+        pr('Pada hari ini, '+v.tgl+', bertempat di Madiun, Jawa Timur, yang bertanda tangan di bawah ini:',{after:200}),
+        pr('PIHAK PERTAMA (Investor)',{bold:true,after:100}),
+        new Table({rows:[infoRow('Nama',d.p1.nama),infoRow('NIK',d.p1.nik),infoRow('Alamat',d.p1.alamat),infoRow('No. HP',d.p1.hp)],width:{size:9000,type:WidthType.DXA}}),
+        pr('Selanjutnya disebut "Pihak Pertama".',{italic:true,after:200}),
+        pr('PIHAK KEDUA (Pengelola)',{bold:true,after:100}),
+        new Table({rows:[infoRow('Nama',d.p2.nama),infoRow('NIK',d.p2.nik),infoRow('Alamat',d.p2.alamat),infoRow('No. HP',d.p2.hp)],width:{size:9000,type:WidthType.DXA}}),
+        pr('Selanjutnya disebut "Pihak Kedua".',{italic:true,after:200}),
+        pr('Kedua belah pihak sepakat untuk mengadakan perjanjian investasi dana talangan dengan ketentuan sebagai berikut:',{after:200}),
+        pr('PASAL 1 - POKOK PERJANJIAN',{bold:true,after:100}),
+        ...p1Items,
+        pr('PASAL 2 - BAGI HASIL',{bold:true,after:100}),
+        pr(`1. Pihak Pertama berhak atas bagi hasil sebesar ${d.bh}% ${v.siklusLbl}${v.isKP?' dari jumlah investasi':' dari nilai kontrak proyek, proporsional terhadap kepemilikan'}.`),
+        pr(`2. Pembayaran bagi hasil dilakukan setiap ${d.siklus} bulan selama periode investasi (${v.nPay} kali pembayaran).`),
+        pr(v.isKP?'3. Bagi hasil dihitung berdasarkan jumlah investasi Pihak Pertama.':'3. Bagi hasil dihitung berdasarkan nilai kontrak proyek, bukan dari jumlah dana yang diinvestasikan.',{after:200}),
+        pr('PASAL 3 - JANGKA WAKTU',{bold:true,after:100}),
+        pr(`1. Perjanjian ini berlaku selama ${d.durasi} bulan, terhitung sejak ${v.tglM} sampai dengan ${v.tglA}.`),
+        pr('2. Perpanjangan perjanjian dapat dilakukan berdasarkan kesepakatan kedua belah pihak.',{after:200}),
+        pr('PASAL 4 - HAK DAN KEWAJIBAN',{bold:true,after:100}),
+        pr('Hak Pihak Pertama:',{bold:true}),
+        pr('a. Menerima bagi hasil sesuai ketentuan Pasal 2.'),
+        pr('b. Mendapatkan laporan penggunaan dana secara berkala.'),
+        pr('c. Menerima pengembalian pokok investasi di akhir periode.'),
+        pr('Kewajiban Pihak Kedua:',{bold:true}),
+        pr('a. Mengelola dana investasi dengan itikad baik dan penuh tanggung jawab.'),
+        pr('b. Memberikan laporan penggunaan dana kepada Pihak Pertama.'),
+        pr('c. Membayar bagi hasil tepat waktu sesuai jadwal.'),
+        pr('d. Mengembalikan pokok investasi di akhir periode perjanjian.',{after:200}),
+        pr('PASAL 5 - RISIKO',{bold:true,after:100}),
+        pr('1. Pihak Kedua bertanggung jawab penuh atas pengelolaan dana dan menanggung segala risiko kerugian akibat kelalaian Pihak Kedua.'),
+        pr('2. Dalam hal terjadi kerugian bukan karena kelalaian Pihak Kedua (force majeure), kerugian ditanggung bersama secara proporsional.',{after:200}),
+        pr('PASAL 6 - WANPRESTASI',{bold:true,after:100}),
+        pr(`1. Apabila salah satu pihak tidak memenuhi kewajibannya selama ${d.wpTeguran} hari, pihak yang dirugikan berhak memberikan teguran tertulis.`),
+        pr(`2. Jika dalam ${d.wpPerbaikan} hari setelah teguran tidak ada perbaikan, perjanjian dapat diputus dan dilakukan penyelesaian.${v.dendaLbl}`,{after:200}),
+        pr('PASAL 7 - FORCE MAJEURE',{bold:true,after:100}),
+        pr('Kedua belah pihak dibebaskan dari tanggung jawab apabila terjadi keadaan memaksa (force majeure) seperti bencana alam, wabah, kebijakan pemerintah, atau keadaan lain di luar kendali manusia.',{after:200}),
+        pr('PASAL 8 - KERAHASIAAN',{bold:true,after:100}),
+        pr('Kedua belah pihak wajib menjaga kerahasiaan seluruh informasi terkait perjanjian ini dan tidak mengungkapkan kepada pihak ketiga tanpa persetujuan tertulis.',{after:200}),
+        pr('PASAL 9 - PENYELESAIAN SENGKETA',{bold:true,after:100}),
+        pr('1. Segala sengketa diselesaikan secara musyawarah untuk mufakat.'),
+        pr('2. Apabila musyawarah tidak tercapai, diselesaikan melalui jalur hukum yang berlaku di Indonesia.',{after:200}),
+        pr('PASAL 10 - KETENTUAN LAIN',{bold:true,after:100}),
+        pr('1. Perjanjian ini dibuat dalam 2 (dua) rangkap bermaterai cukup yang masing-masing memiliki kekuatan hukum yang sama.'),
+        pr('2. Hal-hal yang belum diatur akan diatur kemudian berdasarkan kesepakatan bersama.',{after:300}),
+        pr('Demikian perjanjian ini dibuat dengan penuh kesadaran dan tanpa paksaan dari pihak manapun.',{after:300}),
+        pr('Madiun, '+v.tgl,{after:300}),
+        new Table({rows:[new TableRow({children:[sigCell('Pihak Pertama,',d.p1.nama,d.sigInvestor),sigCell('Pihak Kedua,',d.p2.nama,d.sigPengelola)]})],width:{size:9000,type:WidthType.DXA}})
+      ]
+    }]});
+    const blob=await Packer.toBlob(doc2);const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;
+    a.download=`Kontrak_Investasi_${d.p1.nama.replace(/\s+/g,'_')}_${d.nomor.replace(/\//g,'-')}.docx`;
+    a.click();URL.revokeObjectURL(url);toast('📥 DOCX berhasil didownload!');
+  }catch(e){console.error('DOCX error:',e);toast('❌ Gagal generate DOCX: '+e.message);}
+}
+
+function downloadDocPdf(savedData){
+  const d=savedData||getDocFormData();
+  if(!savedData){const err=validateDocForm(d);if(err){toast('❌ '+err);return;}saveDocHistory(d);}
+  const v=buildDocParagraphs(d);
+  const sigHtml=(src)=>src?`<img src="${src}" style="max-height:70px;max-width:150px">`:'<div class="sig-space"></div>';
+  const p1_3=v.isKP?'':`<p>3. Pihak Pertama memiliki ${d.pct}% kepemilikan atas proyek yang dialokasikan.</p>`;
+  const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Kontrak Investasi ${d.nomor}</title>
+<style>body{font-family:Calibri,sans-serif;max-width:700px;margin:40px auto;padding:0 20px;font-size:13px;line-height:1.6;color:#333}
+h1{text-align:center;font-size:18px;margin-bottom:2px}h2{font-size:14px;margin-top:20px;margin-bottom:8px}.center{text-align:center}
+table.info{border-collapse:collapse;margin:8px 0 12px}table.info td{padding:2px 8px;vertical-align:top}table.info td:first-child{font-weight:bold;width:100px}
+.sig-table{width:100%;margin-top:40px}.sig-table td{width:50%;text-align:center;vertical-align:top;padding:10px}.sig-space{height:80px}.italic{font-style:italic}
+@media print{body{margin:0;padding:15px}}</style></head><body>
+<h1>PERJANJIAN INVESTASI DANA TALANGAN</h1>
+<p class="center">Nomor: ${d.nomor}</p>
+<p>Pada hari ini, ${v.tgl}, bertempat di Madiun, Jawa Timur, yang bertanda tangan di bawah ini:</p>
+<h2>PIHAK PERTAMA (Investor)</h2>
+<table class="info"><tr><td>Nama</td><td>: ${d.p1.nama}</td></tr><tr><td>NIK</td><td>: ${d.p1.nik}</td></tr><tr><td>Alamat</td><td>: ${d.p1.alamat}</td></tr><tr><td>No. HP</td><td>: ${d.p1.hp}</td></tr></table>
+<p class="italic">Selanjutnya disebut "Pihak Pertama".</p>
+<h2>PIHAK KEDUA (Pengelola)</h2>
+<table class="info"><tr><td>Nama</td><td>: ${d.p2.nama}</td></tr><tr><td>NIK</td><td>: ${d.p2.nik}</td></tr><tr><td>Alamat</td><td>: ${d.p2.alamat}</td></tr><tr><td>No. HP</td><td>: ${d.p2.hp}</td></tr></table>
+<p class="italic">Selanjutnya disebut "Pihak Kedua".</p>
+<p>Kedua belah pihak sepakat untuk mengadakan perjanjian investasi dana talangan dengan ketentuan sebagai berikut:</p>
+<h2>PASAL 1 - POKOK PERJANJIAN</h2>
+<p>1. Pihak Pertama menyerahkan dana investasi sebesar ${v.jmlRp} (${fj(d.jumlah)}) kepada Pihak Kedua.</p>
+<p>2. ${v.isKP?'Dana tersebut dikelola sepenuhnya oleh Pihak Kedua untuk keperluan dana talangan tanpa alokasi proyek tertentu. Pihak Kedua berhak menentukan dan memindahkan alokasi dana sesuai kebutuhan operasional.':'Dana tersebut akan dikelola oleh Pihak Kedua untuk keperluan dana talangan proyek.'}</p>
+${p1_3}
+<p>${v.isKP?'3':'4'}. Pembayaran bagi hasil dilakukan selambat-lambatnya ${d.batasBayar} hari kerja setelah jatuh tempo setiap siklus pembayaran.</p>
+<h2>PASAL 2 - BAGI HASIL</h2>
+<p>1. Pihak Pertama berhak atas bagi hasil sebesar ${d.bh}% ${v.siklusLbl}${v.isKP?' dari jumlah investasi':' dari nilai kontrak proyek, proporsional terhadap kepemilikan'}.</p>
+<p>2. Pembayaran bagi hasil dilakukan setiap ${d.siklus} bulan selama periode investasi (${v.nPay} kali pembayaran).</p>
+<p>3. ${v.isKP?'Bagi hasil dihitung berdasarkan jumlah investasi Pihak Pertama.':'Bagi hasil dihitung berdasarkan nilai kontrak proyek, bukan dari jumlah dana yang diinvestasikan.'}</p>
+<h2>PASAL 3 - JANGKA WAKTU</h2>
+<p>1. Perjanjian ini berlaku selama ${d.durasi} bulan, terhitung sejak ${v.tglM} sampai dengan ${v.tglA}.</p>
+<p>2. Perpanjangan perjanjian dapat dilakukan berdasarkan kesepakatan kedua belah pihak.</p>
+<h2>PASAL 4 - HAK DAN KEWAJIBAN</h2>
+<p><b>Hak Pihak Pertama:</b></p><p>a. Menerima bagi hasil sesuai ketentuan Pasal 2.</p><p>b. Mendapatkan laporan penggunaan dana secara berkala.</p><p>c. Menerima pengembalian pokok investasi di akhir periode.</p>
+<p><b>Kewajiban Pihak Kedua:</b></p><p>a. Mengelola dana investasi dengan itikad baik dan penuh tanggung jawab.</p><p>b. Memberikan laporan penggunaan dana kepada Pihak Pertama.</p><p>c. Membayar bagi hasil tepat waktu sesuai jadwal.</p><p>d. Mengembalikan pokok investasi di akhir periode perjanjian.</p>
+<h2>PASAL 5 - RISIKO</h2>
+<p>1. Pihak Kedua bertanggung jawab penuh atas pengelolaan dana dan menanggung segala risiko kerugian akibat kelalaian Pihak Kedua.</p>
+<p>2. Dalam hal terjadi kerugian bukan karena kelalaian Pihak Kedua (force majeure), kerugian ditanggung bersama secara proporsional.</p>
+<h2>PASAL 6 - WANPRESTASI</h2>
+<p>1. Apabila salah satu pihak tidak memenuhi kewajibannya selama ${d.wpTeguran} hari, pihak yang dirugikan berhak memberikan teguran tertulis.</p>
+<p>2. Jika dalam ${d.wpPerbaikan} hari setelah teguran tidak ada perbaikan, perjanjian dapat diputus dan dilakukan penyelesaian.${v.dendaLbl}</p>
+<h2>PASAL 7 - FORCE MAJEURE</h2>
+<p>Kedua belah pihak dibebaskan dari tanggung jawab apabila terjadi keadaan memaksa (force majeure) seperti bencana alam, wabah, kebijakan pemerintah, atau keadaan lain di luar kendali manusia.</p>
+<h2>PASAL 8 - KERAHASIAAN</h2>
+<p>Kedua belah pihak wajib menjaga kerahasiaan seluruh informasi terkait perjanjian ini dan tidak mengungkapkan kepada pihak ketiga tanpa persetujuan tertulis.</p>
+<h2>PASAL 9 - PENYELESAIAN SENGKETA</h2>
+<p>1. Segala sengketa diselesaikan secara musyawarah untuk mufakat.</p>
+<p>2. Apabila musyawarah tidak tercapai, diselesaikan melalui jalur hukum yang berlaku di Indonesia.</p>
+<h2>PASAL 10 - KETENTUAN LAIN</h2>
+<p>1. Perjanjian ini dibuat dalam 2 (dua) rangkap bermaterai cukup yang masing-masing memiliki kekuatan hukum yang sama.</p>
+<p>2. Hal-hal yang belum diatur akan diatur kemudian berdasarkan kesepakatan bersama.</p>
+<p>Demikian perjanjian ini dibuat dengan penuh kesadaran dan tanpa paksaan dari pihak manapun.</p>
+<p>Madiun, ${v.tgl}</p>
+<table class="sig-table"><tr><td><b>Pihak Pertama,</b>${sigHtml(d.sigInvestor)}<b>(${d.p1.nama})</b></td><td><b>Pihak Kedua,</b>${sigHtml(d.sigPengelola)}<b>(${d.p2.nama})</b></td></tr></table>
+</body></html>`;
+  const w=window.open('','_blank');
+  if(w){w.document.write(html);w.document.close();setTimeout(()=>w.print(),500);}
+  else toast('❌ Pop-up blocked! Izinkan pop-up untuk download PDF.');
+  toast('🖨️ PDF siap diprint!');
+}
+
+function redownloadDocx(idx){
+  const dc=S.generatedDocs[idx];if(!dc){toast('❌ Dokumen tidak ditemukan');return;}
+  // Reconstruct with current signatures
+  const d={...dc,sigInvestor:_sigInvestor,sigPengelola:_sigPengelola};
+  downloadDocx(d);
+}
+function redownloadPdf(idx){
+  const dc=S.generatedDocs[idx];if(!dc){toast('❌ Dokumen tidak ditemukan');return;}
+  const d={...dc,sigInvestor:_sigInvestor,sigPengelola:_sigPengelola};
+  downloadDocPdf(d);
+}
+function deleteDoc(idx){
+  if(!confirm('Hapus dokumen '+S.generatedDocs[idx]?.nomor+'?')) return;
+  S.generatedDocs.splice(idx,1);save();rDoc();toast('🗑️ Dokumen dihapus');
+}
+
+// ── LAPORAN REALISASI ────────────────────────────────────────────────
+function rDocRealisasi(){
+  const invs=S.external.filter(e=>e.tipe==='investor');
+  let h=`
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+    <button onclick="_docView='list';rDoc()" style="background:var(--bdr);border:none;border-radius:50%;width:32px;height:32px;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--sub)">←</button>
+    <div style="font-size:17px;font-weight:900">📊 Laporan Realisasi</div>
+  </div>
+  <div style="background:var(--p-l);border-radius:12px;padding:11px 13px;margin-bottom:14px;font-size:11px;color:var(--p);font-weight:700">
+    Laporan transparansi untuk investor: menunjukkan status proyek yang dialokasikan, pembayaran bagi hasil yang sudah diterima, dan sisa yang belum dibayar. Cocok dikirim berkala ke investor sebagai bukti pengelolaan dana.
+  </div>
+  <div class="fg"><label class="fl">Pilih Investor</label>
+    <select class="fi fs" id="real-inv" onchange="buildRealisasi()">
+      <option value="">-- Pilih investor --</option>
+      ${invs.map(i=>`<option value="${i.id}">${i.nama} (${fj(i.jumlah)})</option>`).join('')}
+    </select>
+  </div>
+  <div class="fg"><label class="fl">Tanggal Laporan</label><input class="fi" id="real-tgl" type="date" value="${new Date().toISOString().split('T')[0]}"></div>
+  <div id="real-content"></div>`;
+  document.getElementById('p-r').innerHTML=h;
+}
+
+function buildRealisasi(){
+  const invId=document.getElementById('real-inv')?.value;
+  const el=document.getElementById('real-content');if(!el)return;
+  if(!invId){el.innerHTML='';return;}
+  const inv=S.external.find(e=>e.id===invId);if(!inv){el.innerHTML='';return;}
+  const allocs=(inv.alokasi||[]).map(a=>{const p=S.projects.find(x=>x.id===a.pid);return p?{...a,project:p}:null;}).filter(Boolean);
+  let totalInvested=0,totalPaid=0,totalPending=0;
+  let rows='';
+  allocs.forEach(a=>{
+    const p=a.project;const k=kontrakP(p);const pctOwn=k>0?((a.jumlah||0)/k*100).toFixed(1):0;
+    totalInvested+=parseFloat(a.jumlah||0);
+    const invReturn=calcInvestorReturn(p,a.jumlah||0);
+    // paid from schedule
+    let paid=0;
+    if((p.returnType||'sekali')==='bulanan'&&p.schedule){
+      const umumPerMonth=p.returnModeUmum==='persen'?k*parseFloat(p.returnPersenUmum||0)/100:parseFloat(p.returnBulananUmum||0);
+      const invShare=k>0?umumPerMonth*(a.jumlah/k):0;
+      paid=p.schedule.filter(s=>s.status==='paid').length*invShare;
+    }
+    const pending=invReturn-paid;
+    totalPaid+=paid;totalPending+=pending;
+    rows+=`<div class="card-s mb8">
+      <div class="fb"><span style="font-weight:900;font-size:12px">${p.peminjam}</span><span class="bdg ${p.status}">${p.status}</span></div>
+      <div class="ir"><span class="ik">Alokasi</span><span class="iv">${fj(a.jumlah)} (${pctOwn}%)</span></div>
+      <div class="ir"><span class="ik">Total Bagi Hasil</span><span class="iv">${fj(invReturn)}</span></div>
+      <div class="ir"><span class="ik">Sudah Dibayar</span><span class="iv tgrn">${fj(paid)}</span></div>
+      <div class="ir"><span class="ik">Sisa</span><span class="iv torg">${fj(pending)}</span></div>
+    </div>`;
+  });
+  if(allocs.length===0) rows=`<div style="text-align:center;padding:14px;color:var(--sub);font-size:11px;font-weight:700">Investor ini belum memiliki alokasi proyek.</div>`;
+  el.innerHTML=`
+    <div class="mg" style="margin-top:12px">
+      <div class="mc vio"><div class="ml">Total Investasi</div><div class="mv">${fj(totalInvested)}</div></div>
+      <div class="mc grn"><div class="ml">Sudah Dibayar</div><div class="mv">${fj(totalPaid)}</div></div>
+      <div class="mc org"><div class="ml">Sisa Pending</div><div class="mv">${fj(totalPending)}</div></div>
+      <div class="mc blu"><div class="ml">Proyek</div><div class="mv">${allocs.length}</div></div>
+    </div>
+    <div style="font-weight:900;font-size:13px;margin-bottom:10px">📌 Detail Per Proyek</div>
+    ${rows}
+    <button class="btn pr fw" onclick="downloadRealisasiPdf()" style="margin-top:8px">🖨️ Download PDF Laporan</button>`;
+}
+
+function downloadRealisasiPdf(){
+  const invId=document.getElementById('real-inv')?.value;
+  const tgl=document.getElementById('real-tgl')?.value||'';
+  if(!invId){toast('❌ Pilih investor');return;}
+  const inv=S.external.find(e=>e.id===invId);if(!inv)return;
+  const allocs=(inv.alokasi||[]).map(a=>{const p=S.projects.find(x=>x.id===a.pid);return p?{...a,project:p}:null;}).filter(Boolean);
+  let tableRows='';let totalInv=0,totalPaid=0,totalPend=0;
+  allocs.forEach(a=>{
+    const p=a.project;const k=kontrakP(p);const invRet=calcInvestorReturn(p,a.jumlah||0);
+    let paid=0;
+    if((p.returnType||'sekali')==='bulanan'&&p.schedule){
+      const upm=p.returnModeUmum==='persen'?k*parseFloat(p.returnPersenUmum||0)/100:parseFloat(p.returnBulananUmum||0);
+      paid=p.schedule.filter(s=>s.status==='paid').length*(k>0?upm*(a.jumlah/k):0);
+    }
+    totalInv+=parseFloat(a.jumlah||0);totalPaid+=paid;totalPend+=invRet-paid;
+    tableRows+=`<tr><td>${p.peminjam}</td><td>${p.status}</td><td>${fj(a.jumlah)}</td><td>${fj(invRet)}</td><td>${fj(paid)}</td><td>${fj(invRet-paid)}</td></tr>`;
+  });
+  const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Laporan Realisasi - ${inv.nama}</title>
+<style>body{font-family:Calibri,sans-serif;max-width:700px;margin:40px auto;padding:0 20px;font-size:13px;line-height:1.6}
+h1{text-align:center;font-size:18px}table{width:100%;border-collapse:collapse;margin:12px 0}th,td{border:1px solid #ddd;padding:6px 8px;text-align:left;font-size:12px}th{background:#f5f3ff;font-weight:bold}
+.summary{display:flex;gap:20px;margin:16px 0}.summary div{flex:1;text-align:center;padding:12px;background:#f8f7ff;border-radius:8px}
+.summary div b{display:block;font-size:16px;color:#6c47ff;margin-top:4px}
+@media print{body{margin:0;padding:15px}}</style></head><body>
+<h1>LAPORAN REALISASI INVESTASI</h1>
+<p style="text-align:center">Tanggal: ${fd(tgl)}</p>
+<table><tr><td><b>Nama Investor</b></td><td>${inv.nama}</td></tr><tr><td><b>Total Dana</b></td><td>${fj(inv.jumlah)}</td></tr><tr><td><b>Jumlah Proyek</b></td><td>${allocs.length} proyek</td></tr></table>
+<div class="summary"><div>Total Investasi<b>${fj(totalInv)}</b></div><div>Sudah Dibayar<b>${fj(totalPaid)}</b></div><div>Sisa Pending<b>${fj(totalPend)}</b></div></div>
+<h2 style="font-size:14px">Detail Per Proyek</h2>
+<table><thead><tr><th>Proyek</th><th>Status</th><th>Alokasi</th><th>Total BH</th><th>Dibayar</th><th>Sisa</th></tr></thead><tbody>${tableRows}</tbody></table>
+<p style="margin-top:30px;font-size:11px;color:#666">Dokumen ini digenerate otomatis oleh DanaTrack pada ${fd(tgl)}.</p>
+</body></html>`;
+  const w=window.open('','_blank');
+  if(w){w.document.write(html);w.document.close();setTimeout(()=>w.print(),500);}
+  else toast('❌ Pop-up blocked!');
 }
 
 function swPP(v){
@@ -1598,7 +2166,7 @@ function saveFund(){
 
 // ── RENDER ALL ────────────────────────────────────────────────────────
 function rAll(){
-  if(CP==='b') rB(); else if(CP==='m') rM(); else if(CP==='d') rD(); else if(CP==='e') rE(); else rR();
+  if(CP==='b') rB(); else if(CP==='m') rM(); else if(CP==='d') rD(); else if(CP==='e') rE(); else rDoc();
 }
 
 // ── PIN & ADMIN ──────────────────────────────────────────────────────
