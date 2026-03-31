@@ -472,7 +472,29 @@ function rB(){
   if(list.length===0){
     h+=`<div class="es"><div class="ei">🌱</div><div class="et">Belum ada proyek</div><div class="esb">Buka tab Proyek dan tap + untuk mulai</div></div>`;
   } else {
-    list.forEach(p=>{ h+=pCard(p, _adminUnlocked); });
+    if(_bSort==='default'){
+      const groups=[
+        {key:'aktif',label:'Aktif',sub:'sedang berjalan',icon:'🟢',color:'#10B981',bg:'#ECFDF5'},
+        {key:'tersedia',label:'Tersedia',sub:'menunggu investor',icon:'🟡',color:'#F59E0B',bg:'#FFFBEB'},
+        {key:'selesai',label:'Selesai',sub:'proyek selesai',icon:'✅',color:'#16A34A',bg:'#F0FDF4'}
+      ];
+      groups.forEach(g=>{
+        const items=list.filter(p=>g.key==='aktif'?(p.status==='aktif'||p.status==='terlambat'):(g.key==='selesai'?p.status==='selesai':p.status===g.key));
+        if(items.length===0) return;
+        h+=`<div style="display:flex;align-items:center;gap:10px;margin:18px 0 10px">
+          <div style="flex:1;height:1.5px;background:linear-gradient(90deg,${g.color}22,${g.color}66)"></div>
+          <div style="display:flex;align-items:center;gap:6px;padding:4px 14px;border-radius:20px;background:${g.bg};border:1.5px solid ${g.color}33">
+            <span style="font-size:12px">${g.icon}</span>
+            <span style="font-size:11px;font-weight:900;color:${g.color}">${g.label}</span>
+            <span style="font-size:10px;font-weight:600;color:${g.color}99">– ${g.sub}</span>
+          </div>
+          <div style="flex:1;height:1.5px;background:linear-gradient(90deg,${g.color}66,${g.color}22)"></div>
+        </div>`;
+        items.forEach(p=>{ h+=pCard(p, _adminUnlocked); });
+      });
+    } else {
+      list.forEach(p=>{ h+=pCard(p, _adminUnlocked); });
+    }
   }
   document.getElementById('p-b').innerHTML=h;
 }
@@ -496,7 +518,7 @@ function pCard(p, isAdmin){
   const prog=p.tanggalMulai&&p.tanggalJT ? Math.max(0,Math.min(100,((new Date()-new Date(p.tanggalMulai+'T00:00:00'))/(new Date(p.tanggalJT+'T00:00:00')-new Date(p.tanggalMulai+'T00:00:00')))*100)) : 0;
   const invAlloc=S.external.filter(e=>e.tipe==='investor'&&e.status!=='selesai'&&(e.alokasi||[]).some(a=>a.pid===p.id));
   const pyc=(p.payments||[]).length;
-  const pbcls=p.status==='terlambat'?'red':p.status==='tersedia'?'grn':'vio';
+  const pbcls=p.status==='selesai'?'vio':p.status==='terlambat'?'red':p.status==='tersedia'?'grn':'vio';
   const _retLbl=isAdmin?retLabel(p):retLabelUmum(p);
   const _prof=isAdmin?profP(p):profUmum(p);
   const _sCls=statusCls(p,isAdmin);
@@ -514,7 +536,7 @@ function pCard(p, isAdmin){
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:9px">
       <span style="font-size:10px;color:var(--sub);font-weight:700">📅 ${fd(p.tanggalMulai)}</span>
       <span style="font-size:10px;color:var(--sub);font-weight:700">⏰ ${fd(p.tanggalJT)}</span>
-      <span style="font-size:10px;font-weight:700;color:${gc(d)}">⌛ ${gl(d)||'—'}</span>
+      ${p.status!=='selesai'?`<span style="font-size:10px;font-weight:700;color:${gc(d)}">⌛ ${gl(d)||'—'}</span>`:''}
       ${isAdmin&&pyc>0?`<span style="font-size:10px;color:var(--sub);font-weight:700">💳 ${pyc}×</span>`:''}
     </div>
     ${isAdmin&&invAlloc.length>0?`<div style="margin-bottom:8px">${invAlloc.map(e=>`<span class="at">👤 ${e.nama}</span>`).join('')}</div>`:''}
