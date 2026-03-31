@@ -1011,13 +1011,39 @@ function saveDoc(){
 }
 
 function buildDocParagraphs(d){
-  const tgl=fd(d.tanggal),tglM=fd(d.mulai),tglA=fd(d.akhir);
-  const jmlRp='Rp '+(d.jumlah*1000000).toLocaleString('id-ID');
+  const fdd=s=>{if(!s)return '—';const dt=new Date(s+'T00:00:00');const dd=String(dt.getDate()).padStart(2,'0');const mm=String(dt.getMonth()+1).padStart(2,'0');return `${dd}/${mm}/${dt.getFullYear()}`;};
+  const tgl=fdd(d.tanggal),tglM=fdd(d.mulai),tglA=fdd(d.akhir);
+  const nominal=d.jumlah*1000000;
+  const jmlRp='Rp '+(nominal).toLocaleString('id-ID');
   const isKP=d.tipe==='kelola';
-  const siklusLbl=d.siklus===1?'per bulan':`per ${d.siklus} bulan (1 siklus)`;
-  const nPay=d.jmlBayar||Math.ceil(d.durasi/(d.siklus||1));
   const dendaLbl=d.wpDenda>0?` Denda keterlambatan sebesar ${d.wpDenda}% per bulan dari jumlah yang tertunggak.`:'';
-  return {tgl,tglM,tglA,jmlRp,isKP,siklusLbl,nPay,dendaLbl};
+  // terbilang helper
+  const terbilang=(n)=>{
+    const satuan=['','satu','dua','tiga','empat','lima','enam','tujuh','delapan','sembilan','sepuluh','sebelas'];
+    if(n<0) return 'minus '+terbilang(-n);
+    if(n<12) return satuan[n];
+    if(n<20) return satuan[n-10]+' belas';
+    if(n<100) return satuan[Math.floor(n/10)]+' puluh'+(n%10?' '+satuan[n%10]:'');
+    if(n<200) return 'seratus'+(n%100?' '+terbilang(n%100):'');
+    if(n<1000) return satuan[Math.floor(n/100)]+' ratus'+(n%100?' '+terbilang(n%100):'');
+    if(n<2000) return 'seribu'+(n%1000?' '+terbilang(n%1000):'');
+    if(n<1000000) return terbilang(Math.floor(n/1000))+' ribu'+(n%1000?' '+terbilang(n%1000):'');
+    if(n<1000000000) return terbilang(Math.floor(n/1000000))+' juta'+(n%1000000?' '+terbilang(n%1000000):'');
+    if(n<1000000000000) return terbilang(Math.floor(n/1000000000))+' miliar'+(n%1000000000?' '+terbilang(n%1000000000):'');
+    return terbilang(Math.floor(n/1000000000000))+' triliun'+(n%1000000000000?' '+terbilang(n%1000000000000):'');
+  };
+  const nominalHuruf=terbilang(nominal)+' rupiah';
+  // project info
+  const proj=!isKP&&d.proyek?S.projects.find(p=>p.id===d.proyek):null;
+  const projNama=proj?proj.peminjam:(d.proyekNama||'—');
+  const projJumlah=proj?'Rp '+(parseFloat(proj.jumlah||0)*1000000).toLocaleString('id-ID'):jmlRp;
+  const projPeriode=proj?`bulan ke-1 s.d. ${d.durasi}`:`bulan ke-1 s.d. ${d.durasi}`;
+  // bagi hasil illustration
+  const danaNum=nominal;
+  const estReturn=danaNum*d.bh/100;
+  const estReturnRp='Rp '+estReturn.toLocaleString('id-ID');
+  const danaRpFmt='Rp '+danaNum.toLocaleString('id-ID');
+  return {tgl,tglM,tglA,jmlRp,isKP,dendaLbl,nominal,nominalHuruf,proj,projNama,projJumlah,projPeriode,danaRpFmt,estReturn,estReturnRp,fdd};
 }
 
 async function downloadDocx(savedData){
@@ -1025,85 +1051,178 @@ async function downloadDocx(savedData){
   if(!savedData){const err=validateDocForm(d);if(err){toast('❌ '+err);return;}saveDocHistory(d);}
   const v=buildDocParagraphs(d);
   try{
-    const {Document,Paragraph,TextRun,Table,TableRow,TableCell,WidthType,AlignmentType,BorderStyle,Packer,ImageRun}=docx;
-    const bNone={top:{style:BorderStyle.NONE},bottom:{style:BorderStyle.NONE},left:{style:BorderStyle.NONE},right:{style:BorderStyle.NONE}};
-    function pr(text,opts={}){
-      return new Paragraph({alignment:opts.center?AlignmentType.CENTER:AlignmentType.LEFT,spacing:{after:opts.after||120,before:opts.before||0},
-        children:[new TextRun({text,bold:opts.bold||false,size:opts.size||22,font:'Calibri',italics:opts.italic||false})]});
+    const {Document,Paragraph,TextRun,Table,TableRow,TableCell,WidthType,AlignmentType,BorderStyle,Packer,ImageRun,LevelFormat}=docx;
+    const FONT='Arial';
+    const bNone={top:{style:BorderStyle.NONE,size:0},bottom:{style:BorderStyle.NONE,size:0},left:{style:BorderStyle.NONE,size:0},right:{style:BorderStyle.NONE,size:0}};
+
+    // Helper: multi-run paragraph
+    function mp(runs,opts={}){
+      return new Paragraph({
+        alignment:opts.center?AlignmentType.CENTER:AlignmentType.BOTH,
+        spacing:{after:opts.after!==undefined?opts.after:120,before:opts.before||0},
+        numbering:opts.numbering||undefined,
+        children:runs
+      });
     }
-    function infoRow(label,value){
+    function tr(text,opts={}){
+      return new TextRun({text,font:FONT,size:opts.size||22,bold:opts.bold||false,italics:opts.italic||false,color:opts.color||undefined});
+    }
+    function pr(text,opts={}){
+      return mp([tr(text,opts)],opts);
+    }
+    function emptyP(){return new Paragraph({spacing:{after:0},children:[]});}
+
+    // Info row for party details
+    function infoRow(label,value,valueBold){
       return new TableRow({children:[
-        new TableCell({width:{size:2500,type:WidthType.DXA},borders:bNone,children:[pr(label,{bold:true})]}),
-        new TableCell({width:{size:300,type:WidthType.DXA},borders:bNone,children:[pr(':')]}),
-        new TableCell({width:{size:6200,type:WidthType.DXA},borders:bNone,children:[pr(value)]})
+        new TableCell({width:{size:2500,type:WidthType.DXA},borders:bNone,children:[mp([tr(label,{size:22})])]}),
+        new TableCell({width:{size:300,type:WidthType.DXA},borders:bNone,children:[mp([tr(':',{size:22})])]}),
+        new TableCell({width:{size:6200,type:WidthType.DXA},borders:bNone,children:[mp([tr(value,{size:22,bold:!!valueBold})])]})
       ]});
     }
-    function sigCell(label,name,sigData){
-      const children=[pr(label,{bold:true,center:true})];
-      if(sigData){try{children.push(new Paragraph({alignment:AlignmentType.CENTER,children:[new ImageRun({data:dataUrlToUint8(sigData),transformation:{width:150,height:75}})]}));}catch(e){children.push(pr('',{after:800}));}}
-      else children.push(pr('',{after:800}));
-      children.push(pr('('+name+')',{center:true,bold:true}));
+
+    // Signature cell
+    function sigCell(roleLabel,roleSuffix,name,sigData,nameBold){
+      const children=[
+        mp([tr(roleLabel,{bold:true,size:22}),tr(' ('+roleSuffix+')',{bold:true,size:22})],{center:true}),
+        mp([tr('(tanda tangan + materai Rp10.000)',{size:20,color:'888888'})],{center:true,after:40})
+      ];
+      if(sigData){
+        try{children.push(new Paragraph({alignment:AlignmentType.CENTER,spacing:{after:40},children:[new ImageRun({data:dataUrlToUint8(sigData),transformation:{width:150,height:75}})]}));}
+        catch(e){children.push(pr('',{after:800,center:true}));}
+      } else {
+        children.push(pr('',{after:800,center:true}));
+      }
+      children.push(mp([tr(nameBold?name.toUpperCase():name,{bold:!!nameBold,size:22})],{center:true}));
       return new TableCell({width:{size:4500,type:WidthType.DXA},borders:bNone,children});
     }
-    // Pasal 1 content
-    const p1Items=[
-      pr(`1. Pihak Pertama menyerahkan dana investasi sebesar ${v.jmlRp} (${fj(d.jumlah)}) kepada Pihak Kedua.`),
-      pr(v.isKP?'2. Dana tersebut dikelola sepenuhnya oleh Pihak Kedua untuk keperluan dana talangan tanpa alokasi proyek tertentu. Pihak Kedua berhak menentukan dan memindahkan alokasi dana sesuai kebutuhan operasional.':'2. Dana tersebut akan dikelola oleh Pihak Kedua untuk keperluan dana talangan proyek.'),
-    ];
-    if(!v.isKP) p1Items.push(pr(`3. Pihak Pertama memiliki ${d.pct}% kepemilikan atas proyek yang dialokasikan.`));
-    p1Items.push(pr(`${v.isKP?'3':'4'}. Pembayaran bagi hasil dilakukan selambat-lambatnya ${d.batasBayar} hari kerja setelah jatuh tempo setiap siklus pembayaran.`,{after:200}));
 
-    const doc2=new Document({sections:[{
+    // Numbering config for lettered lists
+    const numberingConfig={
+      config:[{
+        reference:'letter-list',
+        levels:[{level:0,format:LevelFormat.LOWER_LETTER,text:'%1.',alignment:AlignmentType.LEFT,style:{paragraph:{indent:{left:720,hanging:360}}}}]
+      }]
+    };
+    function letterItem(text){
+      return mp([tr(text,{size:22})],{numbering:{reference:'letter-list',level:0}});
+    }
+
+    // Pasal 1 content
+    const pasal1Children=[
+      mp([tr('Pihak Pertama menyerahkan dana investasi kepada Pihak Kedua sejumlah ',{size:22}),tr(v.jmlRp,{size:22,bold:true}),tr(` (${v.nominalHuruf}) untuk dikelola dalam kegiatan usaha `,{size:22}),tr('dana talangan',{size:22,bold:true}),tr(', yaitu penyaluran pinjaman jangka pendek kepada pihak ketiga.',{size:22})]),
+      emptyP()
+    ];
+    if(!v.isKP){
+      pasal1Children.push(pr('Dana tersebut akan dialokasikan ke proyek berikut (dapat diperbarui melalui addendum):',{size:22}));
+      pasal1Children.push(pr(`Nama proyek/peminjam: ${v.projNama}  |  Jumlah: ${v.projJumlah}  |  Periode: ${v.projPeriode}`,{size:22}));
+    } else {
+      pasal1Children.push(pr('Dana tersebut dipercayakan sepenuhnya kepada Pihak Kedua untuk dikelola dalam kegiatan usaha dana talangan. Pihak Kedua berhak menentukan dan memindahkan alokasi dana ke proyek-proyek sesuai kebutuhan operasional tanpa perlu persetujuan Pihak Pertama terlebih dahulu (dapat diperbarui melalui addendum).',{size:22}));
+    }
+
+    // Pasal 6 content
+    const pasal6Children=[
+      mp([tr('Apabila Pihak Kedua terlambat membayarkan bagi hasil melebihi ',{size:22}),tr(`${d.wpTeguran}`,{size:22,bold:true}),tr(' hari kalender dari jadwal yang disepakati, maka Pihak Pertama berhak memberikan teguran tertulis.',{size:22})]),
+      emptyP(),
+      mp([tr('Apabila dalam ',{size:22}),tr(`${d.wpPerbaikan}`,{size:22,bold:true}),tr(' hari setelah teguran tidak ada penyelesaian, Para Pihak sepakat untuk menyelesaikan melalui musyawarah terlebih dahulu, dan jika tidak tercapai kesepakatan, melalui jalur hukum yang berlaku.',{size:22}),
+        ...(d.wpDenda>0?[tr(` Denda keterlambatan sebesar ${d.wpDenda}% per bulan dari jumlah yang tertunggak.`,{size:22})]:[])
+      ])
+    ];
+
+    const doc2=new Document({
+      numbering:numberingConfig,
+      sections:[{
       properties:{page:{margin:{top:1134,bottom:1134,left:1134,right:1134}}},
       children:[
-        pr('PERJANJIAN INVESTASI DANA TALANGAN',{bold:true,size:28,center:true,after:60}),
-        pr('Nomor: '+d.nomor,{center:true,after:200}),
-        pr('Pada hari ini, '+v.tgl+', bertempat di Madiun, Jawa Timur, yang bertanda tangan di bawah ini:',{after:200}),
-        pr('PIHAK PERTAMA (Investor)',{bold:true,after:100}),
-        new Table({rows:[infoRow('Nama',d.p1.nama),infoRow('NIK',d.p1.nik),infoRow('Alamat',d.p1.alamat),infoRow('No. HP',d.p1.hp)],width:{size:9000,type:WidthType.DXA}}),
-        pr('Selanjutnya disebut "Pihak Pertama".',{italic:true,after:200}),
-        pr('PIHAK KEDUA (Pengelola)',{bold:true,after:100}),
-        new Table({rows:[infoRow('Nama',d.p2.nama),infoRow('NIK',d.p2.nik),infoRow('Alamat',d.p2.alamat),infoRow('No. HP',d.p2.hp)],width:{size:9000,type:WidthType.DXA}}),
-        pr('Selanjutnya disebut "Pihak Kedua".',{italic:true,after:200}),
-        pr('Kedua belah pihak sepakat untuk mengadakan perjanjian investasi dana talangan dengan ketentuan sebagai berikut:',{after:200}),
-        pr('PASAL 1 - POKOK PERJANJIAN',{bold:true,after:100}),
-        ...p1Items,
-        pr('PASAL 2 - BAGI HASIL',{bold:true,after:100}),
-        pr(`1. Pihak Pertama berhak atas bagi hasil sebesar ${d.bh}% ${v.siklusLbl}${v.isKP?' dari jumlah investasi':' dari nilai kontrak proyek, proporsional terhadap kepemilikan'}.`),
-        pr(`2. Pembayaran bagi hasil dilakukan setiap ${d.siklus} bulan selama periode investasi (${v.nPay} kali pembayaran).`),
-        pr(v.isKP?'3. Bagi hasil dihitung berdasarkan jumlah investasi Pihak Pertama.':'3. Bagi hasil dihitung berdasarkan nilai kontrak proyek, bukan dari jumlah dana yang diinvestasikan.',{after:200}),
-        pr('PASAL 3 - JANGKA WAKTU',{bold:true,after:100}),
-        pr(`1. Perjanjian ini berlaku selama ${d.durasi} bulan, terhitung sejak ${v.tglM} sampai dengan ${v.tglA}.`),
-        pr('2. Perpanjangan perjanjian dapat dilakukan berdasarkan kesepakatan kedua belah pihak.',{after:200}),
-        pr('PASAL 4 - HAK DAN KEWAJIBAN',{bold:true,after:100}),
-        pr('Hak Pihak Pertama:',{bold:true}),
-        pr('a. Menerima bagi hasil sesuai ketentuan Pasal 2.'),
-        pr('b. Mendapatkan laporan penggunaan dana secara berkala.'),
-        pr('c. Menerima pengembalian pokok investasi di akhir periode.'),
-        pr('Kewajiban Pihak Kedua:',{bold:true}),
-        pr('a. Mengelola dana investasi dengan itikad baik dan penuh tanggung jawab.'),
-        pr('b. Memberikan laporan penggunaan dana kepada Pihak Pertama.'),
-        pr('c. Membayar bagi hasil tepat waktu sesuai jadwal.'),
-        pr('d. Mengembalikan pokok investasi di akhir periode perjanjian.',{after:200}),
-        pr('PASAL 5 - RISIKO',{bold:true,after:100}),
-        pr('1. Pihak Kedua bertanggung jawab penuh atas pengelolaan dana dan menanggung segala risiko kerugian akibat kelalaian Pihak Kedua.'),
-        pr('2. Dalam hal terjadi kerugian bukan karena kelalaian Pihak Kedua (force majeure), kerugian ditanggung bersama secara proporsional.',{after:200}),
-        pr('PASAL 6 - WANPRESTASI',{bold:true,after:100}),
-        pr(`1. Apabila salah satu pihak tidak memenuhi kewajibannya selama ${d.wpTeguran} hari, pihak yang dirugikan berhak memberikan teguran tertulis.`),
-        pr(`2. Jika dalam ${d.wpPerbaikan} hari setelah teguran tidak ada perbaikan, perjanjian dapat diputus dan dilakukan penyelesaian.${v.dendaLbl}`,{after:200}),
-        pr('PASAL 7 - FORCE MAJEURE',{bold:true,after:100}),
-        pr('Kedua belah pihak dibebaskan dari tanggung jawab apabila terjadi keadaan memaksa (force majeure) seperti bencana alam, wabah, kebijakan pemerintah, atau keadaan lain di luar kendali manusia.',{after:200}),
-        pr('PASAL 8 - KERAHASIAAN',{bold:true,after:100}),
-        pr('Kedua belah pihak wajib menjaga kerahasiaan seluruh informasi terkait perjanjian ini dan tidak mengungkapkan kepada pihak ketiga tanpa persetujuan tertulis.',{after:200}),
-        pr('PASAL 9 - PENYELESAIAN SENGKETA',{bold:true,after:100}),
-        pr('1. Segala sengketa diselesaikan secara musyawarah untuk mufakat.'),
-        pr('2. Apabila musyawarah tidak tercapai, diselesaikan melalui jalur hukum yang berlaku di Indonesia.',{after:200}),
-        pr('PASAL 10 - KETENTUAN LAIN',{bold:true,after:100}),
-        pr('1. Perjanjian ini dibuat dalam 2 (dua) rangkap bermaterai cukup yang masing-masing memiliki kekuatan hukum yang sama.'),
-        pr('2. Hal-hal yang belum diatur akan diatur kemudian berdasarkan kesepakatan bersama.',{after:300}),
-        pr('Demikian perjanjian ini dibuat dengan penuh kesadaran dan tanpa paksaan dari pihak manapun.',{after:300}),
-        pr('Madiun, '+v.tgl,{after:300}),
-        new Table({rows:[new TableRow({children:[sigCell('Pihak Pertama,',d.p1.nama,d.sigInvestor),sigCell('Pihak Kedua,',d.p2.nama,d.sigPengelola)]})],width:{size:9000,type:WidthType.DXA}})
+        // Title
+        pr('SURAT PERJANJIAN KERJASAMA INVESTASI',{bold:true,size:30,center:true,after:60}),
+        pr('DANA TALANGAN',{bold:true,size:26,center:true,after:120}),
+        // Nomor & Tanggal
+        mp([tr(`Nomor: ${d.nomor}       Tanggal: ${v.tgl}`,{size:22})],{center:true,after:200}),
+        // Intro
+        mp([tr('Perjanjian kerjasama investasi ini (\u201CPerjanjian\u201D) dibuat dan ditandatangani oleh pihak-pihak berikut:',{size:22})],{after:200}),
+        // Pihak Pertama
+        mp([tr('Pihak Pertama (Investor)',{bold:true,size:22,color:'2B5797'})],{after:100}),
+        new Table({rows:[infoRow('Nama Lengkap',d.p1.nama,false),infoRow('NIK / KTP',d.p1.nik,false),infoRow('Alamat',d.p1.alamat,false),infoRow('Nomor HP',d.p1.hp,false)],width:{size:9000,type:WidthType.DXA}}),
+        // Pihak Kedua
+        mp([tr('Pihak Kedua (Pengelola Dana)',{bold:true,size:22,color:'2B5797'})],{before:200,after:100}),
+        new Table({rows:[infoRow('Nama Lengkap',d.p2.nama,true),infoRow('NIK / KTP',d.p2.nik,true),infoRow('Alamat',d.p2.alamat,true),infoRow('Nomor HP',d.p2.hp,true)],width:{size:9000,type:WidthType.DXA}}),
+        // Para Pihak intro
+        mp([tr('Pihak Pertama dan Pihak Kedua selanjutnya secara bersama-sama disebut \u201CPara Pihak\u201D, yang telah sepakat untuk mengadakan perjanjian kerjasama ini dengan ketentuan sebagai berikut:',{size:22})],{before:200,after:200}),
+
+        // PASAL 1
+        pr('PASAL 1 \u2014 POKOK PERJANJIAN',{bold:true,center:true,after:120}),
+        ...pasal1Children,
+
+        // PASAL 2
+        pr('PASAL 2 \u2014 BAGI HASIL',{bold:true,center:true,before:200,after:120}),
+        pr(`Pihak Kedua akan memberikan bagi hasil kepada Pihak Pertama sebesar ${d.bh}% dari profit bersih proyek yang dialokasikan, per siklus ${d.siklus} bulan.`,{size:22}),
+        pr(`Pembayaran bagi hasil dilakukan selambat-lambatnya ${d.batasBayar} hari kerja setelah proyek yang bersangkutan selesai/lunas.`,{size:22}),
+        emptyP(),
+        pr(`Contoh ilustrasi (bukan jaminan): Dana ${v.danaRpFmt} menghasilkan return ${v.estReturnRp}, bagi hasil investor ${d.bh}% = ${v.estReturnRp} per siklus.`,{size:22}),
+
+        // PASAL 3
+        pr('PASAL 3 \u2014 JANGKA WAKTU',{bold:true,center:true,before:200,after:120}),
+        pr(`Perjanjian ini berlaku selama ${d.durasi} bulan, terhitung sejak tanggal ${v.tglM} hingga ${v.tglA}, dan dapat diperpanjang atas kesepakatan tertulis Para Pihak.`,{size:22}),
+        emptyP(),
+        mp([tr('Pihak Pertama dapat menarik kembali dana pokok setelah pemberitahuan tertulis minimal ',{size:22}),tr('14',{size:22,bold:true}),tr(' hari kalender, dan hanya dapat dilakukan setelah siklus proyek yang sedang berjalan selesai.',{size:22})]),
+
+        // PASAL 4
+        pr('PASAL 4 \u2014 HAK DAN KEWAJIBAN',{bold:true,center:true,before:200,after:120}),
+        mp([tr('Pihak Pertama berhak',{bold:true,size:23})],{after:60}),
+        letterItem('Menerima bagi hasil sesuai Pasal 2.'),
+        letterItem('Mendapatkan laporan realisasi proyek minimal satu kali per siklus.'),
+        letterItem('Menarik kembali dana pokok sesuai ketentuan Pasal 3.'),
+        mp([tr('Pihak Kedua berkewajiban',{bold:true,size:23})],{before:120,after:60}),
+        letterItem('Mengelola dana dengan itikad baik dan penuh tanggung jawab.'),
+        letterItem('Membayarkan bagi hasil tepat waktu sesuai Pasal 2.'),
+        letterItem('Memberikan laporan realisasi kepada Pihak Pertama secara berkala.'),
+        letterItem('Mengembalikan dana pokok investasi sesuai ketentuan yang berlaku.'),
+
+        // PASAL 5
+        pr('PASAL 5 \u2014 RISIKO DAN PERNYATAAN INVESTOR',{bold:true,center:true,before:200,after:120}),
+        pr('Pihak Pertama memahami dan menyetujui bahwa:',{size:22}),
+        letterItem('Perjanjian ini adalah kerjasama langsung antar individu, bukan produk investasi resmi atau perbankan.'),
+        letterItem('Terdapat risiko gagal bayar dari pihak peminjam yang berada di luar kendali Pihak Kedua.'),
+        letterItem('Pihak Pertama berpartisipasi atas dasar keputusan sendiri dan tidak dalam keadaan terpaksa.'),
+        letterItem('Jika terjadi gagal bayar dari peminjam, Pihak Kedua akan berupaya maksimal untuk menagih namun tidak menjamin pengembalian penuh dalam waktu tertentu.'),
+
+        // PASAL 6
+        pr('PASAL 6 \u2014 WANPRESTASI',{bold:true,center:true,before:200,after:120}),
+        ...pasal6Children,
+
+        // PASAL 7
+        pr('PASAL 7 \u2014 FORCE MAJEURE',{bold:true,center:true,before:200,after:120}),
+        mp([tr('Dalam hal terjadi force majeure yang menyebabkan peminjam tidak dapat memenuhi kewajibannya, Pihak Kedua akan segera memproses jaminan yang dipegang atas nama peminjam (berupa aset fisik sesuai perjanjian dengan pihak ketiga). Hasil dari proses jaminan tersebut akan dibagikan kepada Pihak Pertama secara proporsional setelah dikurangi biaya-biaya yang timbul dalam proses tersebut, dengan catatan nilai realisasi jaminan bergantung pada kondisi dan proses yang berlaku saat itu. Pihak Kedua tidak menanggung kerugian di luar nilai jaminan yang berhasil dicairkan. Pihak yang terdampak wajib memberitahukan pihak lainnya selambat-lambatnya ',{size:22}),tr('14',{size:22,bold:true}),tr(' hari kalender setelah kejadian tersebut berlangsung.',{size:22})]),
+
+        // PASAL 8
+        pr('PASAL 8 \u2014 KERAHASIAAN',{bold:true,center:true,before:200,after:120}),
+        pr('Para Pihak sepakat untuk menjaga kerahasiaan informasi yang diperoleh dalam rangka perjanjian ini, termasuk identitas peminjam, detail proyek, dan kondisi keuangan masing-masing pihak, dan tidak mengungkapkannya kepada pihak ketiga tanpa persetujuan tertulis dari pihak lainnya.',{size:22}),
+
+        // PASAL 9
+        pr('PASAL 9 \u2014 PENYELESAIAN SENGKETA',{bold:true,center:true,before:200,after:120}),
+        mp([tr('Segala perselisihan yang timbul dari perjanjian ini akan diselesaikan secara musyawarah. Apabila tidak tercapai kesepakatan dalam ',{size:22}),tr('14',{size:22,bold:true}),tr(' hari, maka Para Pihak sepakat untuk menyelesaikannya melalui Pengadilan Negeri setempat.',{size:22})]),
+
+        // PASAL 10
+        pr('PASAL 10 \u2014 KETENTUAN LAIN',{bold:true,center:true,before:200,after:120}),
+        pr('Perjanjian ini dibuat dalam 2 (dua) rangkap asli, masing-masing bermaterai cukup dan memiliki kekuatan hukum yang sama.',{size:22}),
+        pr('Hal-hal yang belum diatur dalam perjanjian ini akan dituangkan dalam addendum yang merupakan bagian tidak terpisahkan dari perjanjian ini.',{size:22}),
+        pr('Perjanjian ini berlaku dan mengikat sejak ditandatangani oleh Para Pihak.',{size:22,after:200}),
+
+        // Closing
+        pr(`Demikian perjanjian ini dibuat dengan penuh kesadaran, tanpa paksaan dari pihak mana pun, di Madiun, pada tanggal ${v.tgl}.`,{size:22,after:200}),
+        emptyP(),
+
+        // Signature table
+        new Table({rows:[new TableRow({children:[
+          sigCell('Pihak Pertama','Investor',d.p1.nama,d.sigInvestor,false),
+          sigCell('Pihak Kedua','Pengelola',d.p2.nama,d.sigPengelola,true)
+        ]})],width:{size:9000,type:WidthType.DXA}}),
+
+        // Saksi section
+        emptyP(),
+        mp([tr('Saksi:',{bold:true,size:22}),tr('  (opsional, dianjurkan)',{size:20,color:'888888'})],{after:100}),
+        pr('Nama: _______________       NIK: _______________       Tanda Tangan: _______________',{size:22})
       ]
     }]});
     const blob=await Packer.toBlob(doc2);const url=URL.createObjectURL(blob);
@@ -1118,57 +1237,100 @@ function downloadDocPdf(savedData){
   if(!savedData){const err=validateDocForm(d);if(err){toast('❌ '+err);return;}saveDocHistory(d);}
   const v=buildDocParagraphs(d);
   const sigHtml=(src)=>src?`<img src="${src}" style="max-height:70px;max-width:150px">`:'<div class="sig-space"></div>';
-  const p1_3=v.isKP?'':`<p>3. Pihak Pertama memiliki ${d.pct}% kepemilikan atas proyek yang dialokasikan.</p>`;
+
+  // Pasal 1 content
+  let pasal1Html=`<p>Pihak Pertama menyerahkan dana investasi kepada Pihak Kedua sejumlah <b>${v.jmlRp}</b> (${v.nominalHuruf}) untuk dikelola dalam kegiatan usaha <b>dana talangan</b>, yaitu penyaluran pinjaman jangka pendek kepada pihak ketiga.</p><p>&nbsp;</p>`;
+  if(!v.isKP){
+    pasal1Html+=`<p>Dana tersebut akan dialokasikan ke proyek berikut (dapat diperbarui melalui addendum):</p>`;
+    pasal1Html+=`<p>Nama proyek/peminjam: ${v.projNama} &nbsp;|&nbsp; Jumlah: ${v.projJumlah} &nbsp;|&nbsp; Periode: ${v.projPeriode}</p>`;
+  } else {
+    pasal1Html+=`<p>Dana tersebut dipercayakan sepenuhnya kepada Pihak Kedua untuk dikelola dalam kegiatan usaha dana talangan. Pihak Kedua berhak menentukan dan memindahkan alokasi dana ke proyek-proyek sesuai kebutuhan operasional tanpa perlu persetujuan Pihak Pertama terlebih dahulu (dapat diperbarui melalui addendum).</p>`;
+  }
+
+  // Pasal 6 content
+  let pasal6Html=`<p>Apabila Pihak Kedua terlambat membayarkan bagi hasil melebihi <b>${d.wpTeguran}</b> hari kalender dari jadwal yang disepakati, maka Pihak Pertama berhak memberikan teguran tertulis.</p><p>&nbsp;</p>`;
+  pasal6Html+=`<p>Apabila dalam <b>${d.wpPerbaikan}</b> hari setelah teguran tidak ada penyelesaian, Para Pihak sepakat untuk menyelesaikan melalui musyawarah terlebih dahulu, dan jika tidak tercapai kesepakatan, melalui jalur hukum yang berlaku.${d.wpDenda>0?` Denda keterlambatan sebesar ${d.wpDenda}% per bulan dari jumlah yang tertunggak.`:''}</p>`;
+
   const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Kontrak Investasi ${d.nomor}</title>
-<style>body{font-family:Calibri,sans-serif;max-width:700px;margin:40px auto;padding:0 20px;font-size:13px;line-height:1.6;color:#333}
-h1{text-align:center;font-size:18px;margin-bottom:2px}h2{font-size:14px;margin-top:20px;margin-bottom:8px}.center{text-align:center}
-table.info{border-collapse:collapse;margin:8px 0 12px}table.info td{padding:2px 8px;vertical-align:top}table.info td:first-child{font-weight:bold;width:100px}
-.sig-table{width:100%;margin-top:40px}.sig-table td{width:50%;text-align:center;vertical-align:top;padding:10px}.sig-space{height:80px}.italic{font-style:italic}
+<style>body{font-family:Arial,sans-serif;max-width:700px;margin:40px auto;padding:0 20px;font-size:11pt;line-height:1.6;color:#333}
+h1{text-align:center;font-size:15pt;margin-bottom:2px;font-weight:bold}
+h1.sub{font-size:13pt;margin-top:2px}
+h2{font-size:11pt;font-weight:bold;margin-top:20px;margin-bottom:8px;text-align:center}
+.center{text-align:center}
+p{text-align:justify}
+.party-header{color:#2B5797;font-weight:bold;font-size:11pt;margin-top:16px;margin-bottom:6px}
+table.info{border-collapse:collapse;margin:8px 0 12px}table.info td{padding:2px 8px;vertical-align:top;font-size:11pt}table.info td:first-child{font-weight:bold;width:130px}
+table.info .val-bold{font-weight:bold}
+.sig-table{width:100%;margin-top:40px}.sig-table td{width:50%;text-align:center;vertical-align:top;padding:10px}
+.sig-space{height:80px}
+.sig-note{font-size:10pt;color:#888}
+.saksi{margin-top:30px;font-size:11pt}
+.saksi .note{font-size:10pt;color:#888}
+ol.letter{list-style-type:lower-alpha;padding-left:24px;text-align:justify}
+ol.letter li{margin-bottom:4px}
+.sub-header{font-weight:bold;font-size:11.5pt}
 @media print{body{margin:0;padding:15px}}</style></head><body>
-<h1>PERJANJIAN INVESTASI DANA TALANGAN</h1>
-<p class="center">Nomor: ${d.nomor}</p>
-<p>Pada hari ini, ${v.tgl}, bertempat di Madiun, Jawa Timur, yang bertanda tangan di bawah ini:</p>
-<h2>PIHAK PERTAMA (Investor)</h2>
-<table class="info"><tr><td>Nama</td><td>: ${d.p1.nama}</td></tr><tr><td>NIK</td><td>: ${d.p1.nik}</td></tr><tr><td>Alamat</td><td>: ${d.p1.alamat}</td></tr><tr><td>No. HP</td><td>: ${d.p1.hp}</td></tr></table>
-<p class="italic">Selanjutnya disebut "Pihak Pertama".</p>
-<h2>PIHAK KEDUA (Pengelola)</h2>
-<table class="info"><tr><td>Nama</td><td>: ${d.p2.nama}</td></tr><tr><td>NIK</td><td>: ${d.p2.nik}</td></tr><tr><td>Alamat</td><td>: ${d.p2.alamat}</td></tr><tr><td>No. HP</td><td>: ${d.p2.hp}</td></tr></table>
-<p class="italic">Selanjutnya disebut "Pihak Kedua".</p>
-<p>Kedua belah pihak sepakat untuk mengadakan perjanjian investasi dana talangan dengan ketentuan sebagai berikut:</p>
-<h2>PASAL 1 - POKOK PERJANJIAN</h2>
-<p>1. Pihak Pertama menyerahkan dana investasi sebesar ${v.jmlRp} (${fj(d.jumlah)}) kepada Pihak Kedua.</p>
-<p>2. ${v.isKP?'Dana tersebut dikelola sepenuhnya oleh Pihak Kedua untuk keperluan dana talangan tanpa alokasi proyek tertentu. Pihak Kedua berhak menentukan dan memindahkan alokasi dana sesuai kebutuhan operasional.':'Dana tersebut akan dikelola oleh Pihak Kedua untuk keperluan dana talangan proyek.'}</p>
-${p1_3}
-<p>${v.isKP?'3':'4'}. Pembayaran bagi hasil dilakukan selambat-lambatnya ${d.batasBayar} hari kerja setelah jatuh tempo setiap siklus pembayaran.</p>
-<h2>PASAL 2 - BAGI HASIL</h2>
-<p>1. Pihak Pertama berhak atas bagi hasil sebesar ${d.bh}% ${v.siklusLbl}${v.isKP?' dari jumlah investasi':' dari nilai kontrak proyek, proporsional terhadap kepemilikan'}.</p>
-<p>2. Pembayaran bagi hasil dilakukan setiap ${d.siklus} bulan selama periode investasi (${v.nPay} kali pembayaran).</p>
-<p>3. ${v.isKP?'Bagi hasil dihitung berdasarkan jumlah investasi Pihak Pertama.':'Bagi hasil dihitung berdasarkan nilai kontrak proyek, bukan dari jumlah dana yang diinvestasikan.'}</p>
-<h2>PASAL 3 - JANGKA WAKTU</h2>
-<p>1. Perjanjian ini berlaku selama ${d.durasi} bulan, terhitung sejak ${v.tglM} sampai dengan ${v.tglA}.</p>
-<p>2. Perpanjangan perjanjian dapat dilakukan berdasarkan kesepakatan kedua belah pihak.</p>
-<h2>PASAL 4 - HAK DAN KEWAJIBAN</h2>
-<p><b>Hak Pihak Pertama:</b></p><p>a. Menerima bagi hasil sesuai ketentuan Pasal 2.</p><p>b. Mendapatkan laporan penggunaan dana secara berkala.</p><p>c. Menerima pengembalian pokok investasi di akhir periode.</p>
-<p><b>Kewajiban Pihak Kedua:</b></p><p>a. Mengelola dana investasi dengan itikad baik dan penuh tanggung jawab.</p><p>b. Memberikan laporan penggunaan dana kepada Pihak Pertama.</p><p>c. Membayar bagi hasil tepat waktu sesuai jadwal.</p><p>d. Mengembalikan pokok investasi di akhir periode perjanjian.</p>
-<h2>PASAL 5 - RISIKO</h2>
-<p>1. Pihak Kedua bertanggung jawab penuh atas pengelolaan dana dan menanggung segala risiko kerugian akibat kelalaian Pihak Kedua.</p>
-<p>2. Dalam hal terjadi kerugian bukan karena kelalaian Pihak Kedua (force majeure), kerugian ditanggung bersama secara proporsional.</p>
-<h2>PASAL 6 - WANPRESTASI</h2>
-<p>1. Apabila salah satu pihak tidak memenuhi kewajibannya selama ${d.wpTeguran} hari, pihak yang dirugikan berhak memberikan teguran tertulis.</p>
-<p>2. Jika dalam ${d.wpPerbaikan} hari setelah teguran tidak ada perbaikan, perjanjian dapat diputus dan dilakukan penyelesaian.${v.dendaLbl}</p>
-<h2>PASAL 7 - FORCE MAJEURE</h2>
-<p>Kedua belah pihak dibebaskan dari tanggung jawab apabila terjadi keadaan memaksa (force majeure) seperti bencana alam, wabah, kebijakan pemerintah, atau keadaan lain di luar kendali manusia.</p>
-<h2>PASAL 8 - KERAHASIAAN</h2>
-<p>Kedua belah pihak wajib menjaga kerahasiaan seluruh informasi terkait perjanjian ini dan tidak mengungkapkan kepada pihak ketiga tanpa persetujuan tertulis.</p>
-<h2>PASAL 9 - PENYELESAIAN SENGKETA</h2>
-<p>1. Segala sengketa diselesaikan secara musyawarah untuk mufakat.</p>
-<p>2. Apabila musyawarah tidak tercapai, diselesaikan melalui jalur hukum yang berlaku di Indonesia.</p>
-<h2>PASAL 10 - KETENTUAN LAIN</h2>
-<p>1. Perjanjian ini dibuat dalam 2 (dua) rangkap bermaterai cukup yang masing-masing memiliki kekuatan hukum yang sama.</p>
-<p>2. Hal-hal yang belum diatur akan diatur kemudian berdasarkan kesepakatan bersama.</p>
-<p>Demikian perjanjian ini dibuat dengan penuh kesadaran dan tanpa paksaan dari pihak manapun.</p>
-<p>Madiun, ${v.tgl}</p>
-<table class="sig-table"><tr><td><b>Pihak Pertama,</b>${sigHtml(d.sigInvestor)}<b>(${d.p1.nama})</b></td><td><b>Pihak Kedua,</b>${sigHtml(d.sigPengelola)}<b>(${d.p2.nama})</b></td></tr></table>
+<h1>SURAT PERJANJIAN KERJASAMA INVESTASI</h1>
+<h1 class="sub">DANA TALANGAN</h1>
+<p class="center" style="font-size:11pt">Nomor: ${d.nomor} &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Tanggal: ${v.tgl}</p>
+<p>Perjanjian kerjasama investasi ini (\u201CPerjanjian\u201D) dibuat dan ditandatangani oleh pihak-pihak berikut:</p>
+<div class="party-header">Pihak Pertama (Investor)</div>
+<table class="info"><tr><td>Nama Lengkap</td><td>: ${d.p1.nama}</td></tr><tr><td>NIK / KTP</td><td>: ${d.p1.nik}</td></tr><tr><td>Alamat</td><td>: ${d.p1.alamat}</td></tr><tr><td>Nomor HP</td><td>: ${d.p1.hp}</td></tr></table>
+<div class="party-header">Pihak Kedua (Pengelola Dana)</div>
+<table class="info"><tr><td>Nama Lengkap</td><td class="val-bold">: ${d.p2.nama}</td></tr><tr><td>NIK / KTP</td><td class="val-bold">: ${d.p2.nik}</td></tr><tr><td>Alamat</td><td class="val-bold">: ${d.p2.alamat}</td></tr><tr><td>Nomor HP</td><td class="val-bold">: ${d.p2.hp}</td></tr></table>
+<p>Pihak Pertama dan Pihak Kedua selanjutnya secara bersama-sama disebut \u201CPara Pihak\u201D, yang telah sepakat untuk mengadakan perjanjian kerjasama ini dengan ketentuan sebagai berikut:</p>
+
+<h2>PASAL 1 \u2014 POKOK PERJANJIAN</h2>
+${pasal1Html}
+
+<h2>PASAL 2 \u2014 BAGI HASIL</h2>
+<p>Pihak Kedua akan memberikan bagi hasil kepada Pihak Pertama sebesar ${d.bh}% dari profit bersih proyek yang dialokasikan, per siklus ${d.siklus} bulan.</p>
+<p>Pembayaran bagi hasil dilakukan selambat-lambatnya ${d.batasBayar} hari kerja setelah proyek yang bersangkutan selesai/lunas.</p>
+<p>&nbsp;</p>
+<p>Contoh ilustrasi (bukan jaminan): Dana ${v.danaRpFmt} menghasilkan return ${v.estReturnRp}, bagi hasil investor ${d.bh}% = ${v.estReturnRp} per siklus.</p>
+
+<h2>PASAL 3 \u2014 JANGKA WAKTU</h2>
+<p>Perjanjian ini berlaku selama ${d.durasi} bulan, terhitung sejak tanggal ${v.tglM} hingga ${v.tglA}, dan dapat diperpanjang atas kesepakatan tertulis Para Pihak.</p>
+<p>&nbsp;</p>
+<p>Pihak Pertama dapat menarik kembali dana pokok setelah pemberitahuan tertulis minimal <b>14</b> hari kalender, dan hanya dapat dilakukan setelah siklus proyek yang sedang berjalan selesai.</p>
+
+<h2>PASAL 4 \u2014 HAK DAN KEWAJIBAN</h2>
+<p class="sub-header">Pihak Pertama berhak</p>
+<ol class="letter"><li>Menerima bagi hasil sesuai Pasal 2.</li><li>Mendapatkan laporan realisasi proyek minimal satu kali per siklus.</li><li>Menarik kembali dana pokok sesuai ketentuan Pasal 3.</li></ol>
+<p class="sub-header">Pihak Kedua berkewajiban</p>
+<ol class="letter"><li>Mengelola dana dengan itikad baik dan penuh tanggung jawab.</li><li>Membayarkan bagi hasil tepat waktu sesuai Pasal 2.</li><li>Memberikan laporan realisasi kepada Pihak Pertama secara berkala.</li><li>Mengembalikan dana pokok investasi sesuai ketentuan yang berlaku.</li></ol>
+
+<h2>PASAL 5 \u2014 RISIKO DAN PERNYATAAN INVESTOR</h2>
+<p>Pihak Pertama memahami dan menyetujui bahwa:</p>
+<ol class="letter"><li>Perjanjian ini adalah kerjasama langsung antar individu, bukan produk investasi resmi atau perbankan.</li><li>Terdapat risiko gagal bayar dari pihak peminjam yang berada di luar kendali Pihak Kedua.</li><li>Pihak Pertama berpartisipasi atas dasar keputusan sendiri dan tidak dalam keadaan terpaksa.</li><li>Jika terjadi gagal bayar dari peminjam, Pihak Kedua akan berupaya maksimal untuk menagih namun tidak menjamin pengembalian penuh dalam waktu tertentu.</li></ol>
+
+<h2>PASAL 6 \u2014 WANPRESTASI</h2>
+${pasal6Html}
+
+<h2>PASAL 7 \u2014 FORCE MAJEURE</h2>
+<p>Dalam hal terjadi force majeure yang menyebabkan peminjam tidak dapat memenuhi kewajibannya, Pihak Kedua akan segera memproses jaminan yang dipegang atas nama peminjam (berupa aset fisik sesuai perjanjian dengan pihak ketiga). Hasil dari proses jaminan tersebut akan dibagikan kepada Pihak Pertama secara proporsional setelah dikurangi biaya-biaya yang timbul dalam proses tersebut, dengan catatan nilai realisasi jaminan bergantung pada kondisi dan proses yang berlaku saat itu. Pihak Kedua tidak menanggung kerugian di luar nilai jaminan yang berhasil dicairkan. Pihak yang terdampak wajib memberitahukan pihak lainnya selambat-lambatnya <b>14</b> hari kalender setelah kejadian tersebut berlangsung.</p>
+
+<h2>PASAL 8 \u2014 KERAHASIAAN</h2>
+<p>Para Pihak sepakat untuk menjaga kerahasiaan informasi yang diperoleh dalam rangka perjanjian ini, termasuk identitas peminjam, detail proyek, dan kondisi keuangan masing-masing pihak, dan tidak mengungkapkannya kepada pihak ketiga tanpa persetujuan tertulis dari pihak lainnya.</p>
+
+<h2>PASAL 9 \u2014 PENYELESAIAN SENGKETA</h2>
+<p>Segala perselisihan yang timbul dari perjanjian ini akan diselesaikan secara musyawarah. Apabila tidak tercapai kesepakatan dalam <b>14</b> hari, maka Para Pihak sepakat untuk menyelesaikannya melalui Pengadilan Negeri setempat.</p>
+
+<h2>PASAL 10 \u2014 KETENTUAN LAIN</h2>
+<p>Perjanjian ini dibuat dalam 2 (dua) rangkap asli, masing-masing bermaterai cukup dan memiliki kekuatan hukum yang sama.</p>
+<p>Hal-hal yang belum diatur dalam perjanjian ini akan dituangkan dalam addendum yang merupakan bagian tidak terpisahkan dari perjanjian ini.</p>
+<p>Perjanjian ini berlaku dan mengikat sejak ditandatangani oleh Para Pihak.</p>
+
+<p>Demikian perjanjian ini dibuat dengan penuh kesadaran, tanpa paksaan dari pihak mana pun, di Madiun, pada tanggal ${v.tgl}.</p>
+<p>&nbsp;</p>
+
+<table class="sig-table"><tr>
+<td><b>Pihak Pertama</b> (Investor)<br><span class="sig-note">(tanda tangan + materai Rp10.000)</span><br>${sigHtml(d.sigInvestor)}<br>${d.p1.nama}</td>
+<td><b>Pihak Kedua</b> (<b>Pengelola</b>)<br><span class="sig-note">(tanda tangan + materai Rp10.000)</span><br>${sigHtml(d.sigPengelola)}<br><b>${d.p2.nama.toUpperCase()}</b></td>
+</tr></table>
+
+<div class="saksi"><b>Saksi:</b> <span class="note">(opsional, dianjurkan)</span><br>
+Nama: _______________ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; NIK: _______________ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Tanda Tangan: _______________</div>
 </body></html>`;
   const w=window.open('','_blank');
   if(w){w.document.write(html);w.document.close();setTimeout(()=>w.print(),500);}
