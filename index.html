@@ -1413,7 +1413,7 @@ function buildRealisasi(){
   let totalInvested=0,totalPaid=0,totalPending=0;
   let rows='';
   allocs.forEach(a=>{
-    const p=a.project;const k=kontrakP(p);const pctOwn=k>0?((a.jumlah||0)/k*100).toFixed(1):0;
+    const p=a.project;const dep=parseFloat(p.jumlah||0);const pctOwn=dep>0?((a.jumlah||0)/dep*100).toFixed(1):0;
     totalInvested+=parseFloat(a.jumlah||0);
     const invReturn=calcInvestorReturn(p,a.jumlah||0);
     // paid from schedule
@@ -2198,11 +2198,11 @@ function addInvRowData(pid,jumlah,pct){
   projSel.innerHTML=`<option value="">-- Proyek --</option>${S.projects.map(p=>`<option value="${p.id}"${p.id===pid?' selected':''}>${p.peminjam} (${fj(kontrakP(p))})</option>`).join('')}`;
   const jmlIn=document.createElement('input');jmlIn.className='fi inv-jml';jmlIn.type='number';jmlIn.step='0.01';jmlIn.placeholder='jt';jmlIn.value=jumlah||'';jmlIn.style.fontSize='11px';
   const pctIn=document.createElement('input');pctIn.className='fi inv-pct';pctIn.type='number';pctIn.step='0.1';pctIn.placeholder='%';pctIn.value=pct||'';pctIn.style.fontSize='11px';
-  // Auto-calc: nominal ↔ % kepemilikan
-  function getKontrak(){ const sel=projSel.value; const pp=S.projects.find(x=>x.id===sel); return pp?kontrakP(pp):0; }
-  jmlIn.addEventListener('input',()=>{ const k=getKontrak(); if(k>0){pctIn.value=((parseFloat(jmlIn.value||0)/k)*100).toFixed(1);} updInvIdle(); });
-  pctIn.addEventListener('input',()=>{ const k=getKontrak(); if(k>0){jmlIn.value=((parseFloat(pctIn.value||0)/100)*k).toFixed(2);} updInvIdle(); });
-  projSel.addEventListener('change',()=>{ const k=getKontrak(); if(k>0&&jmlIn.value){pctIn.value=((parseFloat(jmlIn.value||0)/k)*100).toFixed(1);} updInvIdle(); });
+  // Auto-calc: nominal ↔ % kepemilikan (based on deploy value, not contract value)
+  function getDeploy(){ const sel=projSel.value; const pp=S.projects.find(x=>x.id===sel); return pp?parseFloat(pp.jumlah||0):0; }
+  jmlIn.addEventListener('input',()=>{ const dep=getDeploy(); if(dep>0){pctIn.value=((parseFloat(jmlIn.value||0)/dep)*100).toFixed(1);} updInvIdle(); });
+  pctIn.addEventListener('input',()=>{ const dep=getDeploy(); if(dep>0){jmlIn.value=((parseFloat(pctIn.value||0)/100)*dep).toFixed(2);} updInvIdle(); });
+  projSel.addEventListener('change',()=>{ const dep=getDeploy(); if(dep>0&&jmlIn.value){pctIn.value=((parseFloat(jmlIn.value||0)/dep)*100).toFixed(1);} updInvIdle(); });
   const rmBtn=document.createElement('button');rmBtn.type='button';rmBtn.style.cssText='background:var(--r-l);color:var(--r);border:none;border-radius:8px;width:30px;height:36px;font-size:14px;cursor:pointer';rmBtn.textContent='×';
   rmBtn.onclick=()=>{row.remove();updInvIdle();};
   row.appendChild(projSel);row.appendChild(jmlIn);row.appendChild(pctIn);row.appendChild(rmBtn);
