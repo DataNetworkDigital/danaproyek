@@ -45,11 +45,12 @@ body.modal-open .pages{pointer-events:none}
 .pc:active{transform:scale(.97);box-shadow:0 1px 6px rgba(139,92,246,.08)}
 .pc:nth-child(2){animation-delay:.05s}.pc:nth-child(3){animation-delay:.1s}.pc:nth-child(4){animation-delay:.15s}.pc:nth-child(5){animation-delay:.2s}
 .pc.aktif{background:#ECFDF5;border:1.5px solid #A7F3D0}.pc.terlambat{background:#FEF2F2;border:1.5px solid #FECACA}
-.pc.selesai{background:#F5F3FF;border:1.5px solid #DDD6FE;opacity:.6}.pc.tersedia{background:#FEFCE8;border:1.5px solid #FDE68A}
+.pc.selesai{background:#F0FDF4;border:1.5px solid #BBF7D0;opacity:.6}.pc.tidak-terambil{background:#F5F3FF;border:1.5px solid #DDD6FE;opacity:.5}.pc.tersedia{background:#FEFCE8;border:1.5px solid #FDE68A}
 .hlt{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:4px}
-.hlt.g{background:#10B981}.hlt.o{background:#F59E0B}.hlt.r{background:var(--r)}.hlt.v{background:#8B5CF6}
+.hlt.g{background:#10B981}.hlt.o{background:#F59E0B}.hlt.r{background:var(--r)}.hlt.v{background:#16A34A}.hlt.vi{background:#8B5CF6}
 .bdg{display:inline-flex;align-items:center;gap:3px;padding:4px 12px;border-radius:20px;font-size:10px;font-weight:800}
 .bdg.aktif{background:var(--p-l);color:var(--p)}.bdg.terlambat{background:var(--r-l);color:var(--r)}.bdg.selesai{background:var(--g-l);color:#0B8F46}
+.bdg.tidak-terambil{background:#EDE9FE;color:#7C3AED}
 .bdg.tersedia{background:#F0FDF4;color:#16A34A}.bdg.warn{background:var(--o-l);color:#B56B00}
 .bdg.pinjaman{background:var(--b-l);color:#0369A1}.bdg.investor{background:var(--o-l);color:#B56B00}
 .pw{background:#F1F5F9;border-radius:20px;height:10px;overflow:hidden}
@@ -344,9 +345,11 @@ function getNextDue(project){
   return {month:1, dueDate:project.tanggalJT, status:'pending', paidDate:null, amount:kontrakP(project), isFinal:true};
 }
 
-function hsc(p){ if(p.status==='terlambat') return 'r'; if(p.status==='tersedia') return 'o'; if(p.status==='selesai') return 'v'; return 'g'; }
+function hsc(p){ if(p.status==='terlambat') return 'r'; if(p.status==='tersedia') return 'o'; if(p.status==='selesai') return isTidakTerambil(p)?'vi':'v'; return 'g'; }
 function wasTaken(p){ return !!(p.tanggalAktif || (p.schedule && p.schedule.some(s=>s.status==='paid'))); }
-function statusLabel(s,p){ if(s==='selesai'&&p&&!wasTaken(p)) return '⏭️ Tidak Terambil'; return s==='aktif'?'🟢 Aktif':s==='terlambat'?'🔴 Terlambat':s==='tersedia'?'🟡 Tersedia':'✅ Selesai'; }
+function isTidakTerambil(p){ return p.status==='selesai'&&!wasTaken(p); }
+function statusLabel(s,p,adminView){ if(s==='selesai'&&p&&isTidakTerambil(p)&&adminView) return '⏭️ Tidak Terambil'; return s==='aktif'?'🟢 Aktif':s==='terlambat'?'🔴 Terlambat':s==='tersedia'?'🟡 Tersedia':'✅ Selesai'; }
+function statusCls(p,adminView){ if(isTidakTerambil(p)&&adminView) return 'tidak-terambil'; return p.status; }
 function stats(){
   const f=S.fund, kurOn=f.kurEnabled!==false&&f.kurAmount>0;
   const buf=kurOn?f.angsuran*f.bufferMonths:0;
@@ -496,7 +499,8 @@ function pCard(p, isAdmin){
   const pbcls=p.status==='terlambat'?'red':p.status==='tersedia'?'grn':'vio';
   const _retLbl=isAdmin?retLabel(p):retLabelUmum(p);
   const _prof=isAdmin?profP(p):profUmum(p);
-  return `<div class="pc ${p.status}" onclick="oDet('${p.id}')">
+  const _sCls=statusCls(p,isAdmin);
+  return `<div class="pc ${_sCls}" onclick="oDet('${p.id}')">
     <div class="fb" style="margin-bottom:9px">
       <div>
         <div style="display:flex;align-items:center"><span class="hlt ${hsc(p)}"></span><span style="font-size:${p.catatan?'14':'16'}px;font-weight:900">${p.peminjam}</span></div>
@@ -504,7 +508,7 @@ function pCard(p, isAdmin){
       </div>
       <div class="tr">
         <div style="font-size:13px;font-weight:800;color:var(--p)">${fj(kontrakP(p))}</div>
-        <span class="bdg ${p.status}">${statusLabel(p.status,p)}</span>
+        <span class="bdg ${_sCls}">${statusLabel(p.status,p,isAdmin)}</span>
       </div>
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:9px">
@@ -1824,7 +1828,7 @@ function oDet(id){
       <div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button onclick="cm('mo-det')" style="background:var(--bdr);border:none;border-radius:50%;width:32px;height:32px;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--sub)">✕</button></div>
       <div class="fb mb12">
         <div style="font-size:17px;font-weight:900">${p.peminjam}</div>
-        <span class="bdg ${p.status}">${statusLabel(p.status,p)}</span>
+        <span class="bdg ${statusCls(p,false)}">${statusLabel(p.status,p,false)}</span>
       </div>
       <div class="ir"><span class="ik">Nilai Kontrak</span><span class="iv">${fj(kontrakP(p))}</span></div>
       <div class="ir"><span class="ik">Tipe Return</span><span class="iv">${(p.returnType||'sekali')==='bulanan'?'📅 Bulanan':'💰 Sekali (Akhir)'}</span></div>
@@ -1845,7 +1849,7 @@ function oDet(id){
     <div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button onclick="cm('mo-det')" style="background:var(--bdr);border:none;border-radius:50%;width:32px;height:32px;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--sub)">✕</button></div>
     <div class="fb mb12">
       <div style="font-size:17px;font-weight:900">${p.peminjam}</div>
-      <span class="bdg ${p.status}">${statusLabel(p.status,p)}</span>
+      <span class="bdg ${statusCls(p,true)}">${statusLabel(p.status,p,true)}</span>
     </div>
     <div class="ir"><span class="ik">Nilai Kontrak</span><span class="iv">${fj(kontrakP(p))}</span></div>
     <div class="ir"><span class="ik">Jumlah Deploy</span><span class="iv tvio">${fj(p.jumlah)}</span></div>
