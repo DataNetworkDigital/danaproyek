@@ -232,8 +232,7 @@ function retLabel(p){
   return `${fj(kontrakP(p))} (1×)`;
 }
 function profUmum(p){
-  // tersedia → selesai without being taken = no profit
-  if(p.status === 'selesai' && !wasTaken(p)) return 0;
+  // Public view: show profit for all projects (including tidak-terambil shown as "selesai")
   const rt=p.returnType||'sekali';
   if(rt==='bulanan'){
     const dur=parseInt(p.durasiReturn||0);
