@@ -198,8 +198,8 @@ function prof(j){ return parseFloat((parseFloat(j)*15/85).toFixed(2)); }
 // Profit = kontrak - deploy (or for bulanan: returnBulanan × durasi)
 function kontrakP(p){ return parseFloat(p.kontrak||0) || parseFloat(p.jumlah||0); }
 function profP(p){
-  // tersedia → selesai without being aktif = no profit
-  if(p.status === 'selesai' && !p.tanggalAktif) return 0;
+  // tersedia → selesai without being taken = no profit
+  if(p.status === 'selesai' && !wasTaken(p)) return 0;
   const rt=p.returnType||'sekali';
   if(rt==='bulanan'){
     // returnBulanan bisa dalam Rp atau % dari kontrak
@@ -230,8 +230,8 @@ function retLabel(p){
   return `${fj(kontrakP(p))} (1×)`;
 }
 function profUmum(p){
-  // tersedia → selesai without being aktif = no profit
-  if(p.status === 'selesai' && !p.tanggalAktif) return 0;
+  // tersedia → selesai without being taken = no profit
+  if(p.status === 'selesai' && !wasTaken(p)) return 0;
   const rt=p.returnType||'sekali';
   if(rt==='bulanan'){
     const dur=parseInt(p.durasiReturn||0);
@@ -345,7 +345,8 @@ function getNextDue(project){
 }
 
 function hsc(p){ if(p.status==='terlambat') return 'r'; if(p.status==='tersedia') return 'o'; if(p.status==='selesai') return 'v'; return 'g'; }
-function statusLabel(s,p){ if(s==='selesai'&&p&&!p.tanggalAktif) return '⏭️ Tidak Terambil'; return s==='aktif'?'🟢 Aktif':s==='terlambat'?'🔴 Terlambat':s==='tersedia'?'🟡 Tersedia':'✅ Selesai'; }
+function wasTaken(p){ return !!(p.tanggalAktif || (p.schedule && p.schedule.some(s=>s.status==='paid'))); }
+function statusLabel(s,p){ if(s==='selesai'&&p&&!wasTaken(p)) return '⏭️ Tidak Terambil'; return s==='aktif'?'🟢 Aktif':s==='terlambat'?'🔴 Terlambat':s==='tersedia'?'🟡 Tersedia':'✅ Selesai'; }
 function stats(){
   const f=S.fund, kurOn=f.kurEnabled!==false&&f.kurAmount>0;
   const buf=kurOn?f.angsuran*f.bufferMonths:0;
