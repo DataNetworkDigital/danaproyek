@@ -57,6 +57,7 @@ body.modal-open .pages{pointer-events:none}
 .pb{height:100%;border-radius:20px;transition:width .6s cubic-bezier(.34,1.56,.64,1)}
 .pb.vio{background:linear-gradient(90deg,var(--p),#A78BFA)}.pb.grn{background:linear-gradient(90deg,#0B8F46,var(--g))}
 .pb.org{background:linear-gradient(90deg,#B56B00,var(--o))}.pb.red{background:linear-gradient(90deg,var(--r),#FF6B9D)}
+.pb.done{background:repeating-linear-gradient(135deg,#94A3B8,#94A3B8 4px,#CBD5E1 4px,#CBD5E1 8px)}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:10px 16px;border-radius:14px;font-size:13px;font-weight:800;cursor:pointer;border:none;font-family:'Nunito',sans-serif;transition:transform .12s cubic-bezier(.34,1.56,.64,1),opacity .12s}
 .btn:active{transform:scale(.93);opacity:.9}
 .btn.pr{background:var(--p);color:#fff}.btn.gr{background:var(--g);color:#fff}.btn.ou{background:#fff;color:var(--p);border:2px solid var(--p)}
@@ -518,7 +519,7 @@ function pCard(p, isAdmin){
   const prog=p.tanggalMulai&&p.tanggalJT ? Math.max(0,Math.min(100,((new Date()-new Date(p.tanggalMulai+'T00:00:00'))/(new Date(p.tanggalJT+'T00:00:00')-new Date(p.tanggalMulai+'T00:00:00')))*100)) : 0;
   const invAlloc=S.external.filter(e=>e.tipe==='investor'&&e.status!=='selesai'&&(e.alokasi||[]).some(a=>a.pid===p.id));
   const pyc=(p.payments||[]).length;
-  const pbcls=p.status==='selesai'?'vio':p.status==='terlambat'?'red':p.status==='tersedia'?'grn':'vio';
+  const pbcls=p.status==='selesai'?'done':p.status==='terlambat'?'red':p.status==='tersedia'?'grn':'vio';
   const _retLbl=isAdmin?retLabel(p):retLabelUmum(p);
   const _prof=isAdmin?profP(p):profUmum(p);
   const _sCls=statusCls(p,isAdmin);
