@@ -199,13 +199,18 @@ function prof(j){ return parseFloat((parseFloat(j)*15/85).toFixed(2)); }
 // Project-aware: kontrak = nilai kontrak, jumlah = deploy
 // Profit = kontrak - deploy (or for bulanan: returnBulanan × durasi)
 function kontrakP(p){ return parseFloat(p.kontrak||0) || parseFloat(p.jumlah||0); }
+// Public-facing value: for deployBasis projects, investors see deploy amount
+function publicKontrakP(p){ return p.deployBasis ? parseFloat(p.jumlah||0) : kontrakP(p); }
+function activeDur(p){
+  generateSchedule(p);
+  const sched=p.schedule||[];
+  return sched.length>0?sched.filter(s=>s.status!=='skipped').length:parseInt(p.durasiReturn||0);
+}
 function profP(p){
-  // tersedia → selesai without being taken = no profit
   if(p.status === 'selesai' && !wasTaken(p)) return 0;
   const rt=p.returnType||'sekali';
   if(rt==='bulanan'){
-    // returnBulanan bisa dalam Rp atau % dari kontrak
-    const dur=parseInt(p.durasiReturn||0);
+    const dur=activeDur(p);
     let rb;
     if(p.returnMode==='persen'){
       rb=kontrakP(p)*parseFloat(p.returnPersen||0)/100;
@@ -214,7 +219,6 @@ function profP(p){
     }
     return parseFloat((rb*dur).toFixed(2));
   }
-  // sekali: profit = kontrak - deploy
   return parseFloat((kontrakP(p)-parseFloat(p.jumlah)).toFixed(2));
 }
 function retBulananRp(p){
@@ -225,68 +229,65 @@ function retLabel(p){
   const rt=p.returnType||'sekali';
   if(rt==='bulanan'){
     const rb=retBulananRp(p);
-    const dur=parseInt(p.durasiReturn||1);
+    const dur=activeDur(p);
     const pct=p.returnMode==='persen'?` (${p.returnPersen}%)`:'';
     return `${fj(rb)}/bln${pct} × ${dur} bln`;
   }
   return `${fj(kontrakP(p))} (1×)`;
 }
 function profUmum(p){
-  // Public view: show profit for all projects (including tidak-terambil shown as "selesai")
+  const base=publicKontrakP(p);
   const rt=p.returnType||'sekali';
   if(rt==='bulanan'){
-    const dur=parseInt(p.durasiReturn||0);
+    const dur=activeDur(p);
     let rb;
     if(p.returnModeUmum==='persen'){
-      rb=kontrakP(p)*parseFloat(p.returnPersenUmum||0)/100;
+      rb=base*parseFloat(p.returnPersenUmum||0)/100;
     } else {
       rb=parseFloat(p.returnBulananUmum||0);
     }
     return parseFloat((rb*dur).toFixed(2));
   }
-  // sekali: umum profit from sekaliUmum fields
   if(p.sekaliModeUmum==='rupiah') return parseFloat(p.sekaliUmumRp||0);
-  if(p.sekaliUmumPersen) return parseFloat((kontrakP(p)*parseFloat(p.sekaliUmumPersen||0)/100).toFixed(2));
+  if(p.sekaliUmumPersen) return parseFloat((base*parseFloat(p.sekaliUmumPersen||0)/100).toFixed(2));
   return 0;
 }
 function retLabelUmum(p){
+  const base=publicKontrakP(p);
   const rt=p.returnType||'sekali';
   if(rt==='bulanan'){
     let rb;
     if(p.returnModeUmum==='persen'){
-      rb=parseFloat((kontrakP(p)*parseFloat(p.returnPersenUmum||0)/100).toFixed(2));
+      rb=parseFloat((base*parseFloat(p.returnPersenUmum||0)/100).toFixed(2));
     } else {
       rb=parseFloat(p.returnBulananUmum||0);
     }
-    const dur=parseInt(p.durasiReturn||1);
+    const dur=activeDur(p);
     const pct=p.returnModeUmum==='persen'?` (${p.returnPersenUmum}%)`:'';
     return `${fj(rb)}/bln${pct} × ${dur} bln`;
   }
-  // sekali umum
   const pu=profUmum(p);
   const pctLbl=p.sekaliUmumPersen?` (${p.sekaliUmumPersen}%)`:'';
-  return `${fj(kontrakP(p)+pu)}${pctLbl} (1×)`;
+  return `${fj(base+pu)}${pctLbl} (1×)`;
 }
 // ── INVESTOR & SCHEDULE HELPERS ──────────────────────────────────────
 // Calculate investor's total return based on UMUM rate for their allocated amount
 function calcInvestorReturn(project, allocAmount){
   const rt=project.returnType||'sekali';
   const amt=parseFloat(allocAmount||0);
-  const k=kontrakP(project);
+  const base=publicKontrakP(project);
   if(rt==='bulanan'){
-    const dur=parseInt(project.durasiReturn||0);
+    const dur=activeDur(project);
     let umumPerMonth;
     if(project.returnModeUmum==='persen'){
-      umumPerMonth=k*parseFloat(project.returnPersenUmum||0)/100;
+      umumPerMonth=base*parseFloat(project.returnPersenUmum||0)/100;
     } else {
       umumPerMonth=parseFloat(project.returnBulananUmum||0);
     }
-    // investor gets umum rate proportional to their amount
-    return parseFloat((umumPerMonth * (amt/k) * dur).toFixed(2));
+    return parseFloat((umumPerMonth * (amt/base) * dur).toFixed(2));
   }
-  // sekali: investor gets umum profit proportional to their amount
   const totalUmumProfit=profUmum(project);
-  return parseFloat((totalUmumProfit * (amt/k)).toFixed(2));
+  return parseFloat((totalUmumProfit * (amt/base)).toFixed(2));
 }
 
 // Calculate admin's net profit after paying all investors
@@ -315,15 +316,22 @@ function generateSchedule(project){
   if(existing.length===dur&&amtMatch) return; // already correct
   // Build new schedule, preserving paid statuses from existing
   const monthlyAmt=monthlyAmt0;
+  const aktifDate=project.tanggalAktif||null;
   const newSched=[];
   for(let i=0;i<dur;i++){
     const dueDate=am(project.tanggalMulai, i+1);
     const old=existing[i]||null;
+    // Skip periods before project was taken (tanggalAktif)
+    const isBeforeEntry=aktifDate && dueDate<=aktifDate;
+    let st='pending';
+    if(old&&old.status==='paid') st='paid';
+    else if(old&&old.status==='skipped') st='skipped';
+    else if(isBeforeEntry) st='skipped';
     newSched.push({
       month: i+1,
       dueDate: dueDate,
-      status: old&&old.status==='paid'?'paid':'pending',
-      paidDate: old&&old.status==='paid'?(old.paidDate||null):null,
+      status: st,
+      paidDate: st==='paid'?(old?.paidDate||null):null,
       amount: monthlyAmt,
       isFinal: i===dur-1
     });
@@ -337,7 +345,7 @@ function getNextDue(project){
   if(rt==='bulanan'){
     generateSchedule(project);
     const sched=project.schedule||[];
-    return sched.find(s=>s.status!=='paid')||null;
+    return sched.find(s=>s.status!=='paid'&&s.status!=='skipped')||null;
   }
   // sekali: single payment at tanggalJT
   const paid=(project.payments||[]).length>0;
@@ -529,7 +537,7 @@ function pCard(p, isAdmin){
         ${p.catatan?`<div style="font-size:10px;color:var(--sub);font-weight:600;margin-top:2px">${p.catatan.slice(0,40)+(p.catatan.length>40?'…':'')}</div>`:''}
       </div>
       <div class="tr">
-        <div style="font-size:13px;font-weight:800;color:var(--p)">${fj(kontrakP(p))}</div>
+        <div style="font-size:13px;font-weight:800;color:var(--p)">${fj(isAdmin?kontrakP(p):publicKontrakP(p))}</div>
         <span class="bdg ${_sCls}">${statusLabel(p.status,p,isAdmin)}</span>
       </div>
     </div>
@@ -1785,6 +1793,7 @@ function savePrj(){
   const kontrak=k;
   const deployPersen=dm==='persen'?parseFloat(document.getElementById('fp-jpct')?.value||0):0;
   const data={peminjam:n,kontrak,jumlah:parseFloat(j.toFixed(2)),deployMode:dm,deployPersen,returnType:rt,tanggalMulai:m,tanggalJT:jt,status:s,catatan:ct};
+  if(!eP) data.deployBasis=true;
   if(rt==='bulanan'){
     const dur=parseInt(document.getElementById('fp-dur')?.value||0);
     const mode=window._getRetMode?window._getRetMode():'rupiah';
@@ -1894,10 +1903,16 @@ function oDet(id){
   if(rt==='bulanan'){
     generateSchedule(p);
     const sched=p.schedule||[];
-    const paidCount=sched.filter(s=>s.status==='paid').length;
+    const activeSched=sched.filter(s=>s.status!=='skipped');
+    const skippedSched=sched.filter(s=>s.status==='skipped');
+    const paidCount=activeSched.filter(s=>s.status==='paid').length;
     const today=new Date().toISOString().split('T')[0];
-    h+=`<div style="font-weight:900;font-size:13px;margin-bottom:10px">📅 Jadwal Pembayaran (${paidCount}/${sched.length} terbayar)</div>`;
+    h+=`<div style="font-weight:900;font-size:13px;margin-bottom:10px">📅 Jadwal Pembayaran (${paidCount}/${activeSched.length} terbayar)</div>`;
+    if(skippedSched.length>0){
+      h+=`<div style="background:#F1F5F9;border-radius:10px;padding:8px 12px;margin-bottom:10px;font-size:10px;color:#64748B;font-weight:700">⏭️ ${skippedSched.length} periode dilewati (sebelum tanggal masuk ${fd(p.tanggalAktif)})</div>`;
+    }
     sched.forEach(s=>{
+      if(s.status==='skipped') return;
       const isPaid=s.status==='paid';
       const isDue=!isPaid && s.dueDate<=today;
       const isLocked=!isPaid && s.dueDate>today;
