@@ -313,10 +313,12 @@ function generateSchedule(project){
   const existing=project.schedule||[];
   const monthlyAmt0=retBulananRp(project);
   const amtMatch=existing.length>0&&Math.abs(parseFloat(existing[0].amount||0)-monthlyAmt0)<0.001;
-  if(existing.length===dur&&amtMatch) return; // already correct
+  // Also regenerate if skipped items need updating (tanggalAktif changed or newly added)
+  const aktifDate=project.tanggalAktif||null;
+  const needsSkipUpdate=aktifDate&&existing.some(s=>s.status!=='paid'&&s.status!=='skipped'&&s.dueDate<=aktifDate);
+  if(existing.length===dur&&amtMatch&&!needsSkipUpdate) return;
   // Build new schedule, preserving paid statuses from existing
   const monthlyAmt=monthlyAmt0;
-  const aktifDate=project.tanggalAktif||null;
   const newSched=[];
   for(let i=0;i<dur;i++){
     const dueDate=am(project.tanggalMulai, i+1);
