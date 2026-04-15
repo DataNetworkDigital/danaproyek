@@ -561,8 +561,7 @@ function rM(){
   const cnt=t=>t==='semua'?S.projects.length:S.projects.filter(p=>p.status===t).length;
   // urgent alerts (admin only)
   const urg=S.projects.filter(p=>{
-    if(p.status==='terlambat') return true;
-    if(p.status==='aktif'){
+    if(p.status==='aktif'||p.status==='terlambat'){
       const nd=getNextDue(p);
       if(nd){const d=du(nd.dueDate);return d!==null&&d<=7;}
       const d=du(p.tanggalJT);return d!==null&&d<=7;
@@ -2369,7 +2368,21 @@ function saveFund(){
 }
 
 // ── RENDER ALL ────────────────────────────────────────────────────────
+function fixProjectStatuses(){
+  let changed=false;
+  S.projects.forEach(p=>{
+    if(p.status!=='aktif'&&p.status!=='terlambat') return;
+    const nd=getNextDue(p);
+    if(nd){
+      const d=du(nd.dueDate);
+      if(d!==null&&d<0&&p.status==='aktif'){p.status='terlambat';changed=true;}
+      else if((d===null||d>=0)&&p.status==='terlambat'){p.status='aktif';changed=true;}
+    }
+  });
+  if(changed) save();
+}
 function rAll(){
+  fixProjectStatuses();
   if(CP==='b') rB(); else if(CP==='m') rM(); else if(CP==='d') rD(); else if(CP==='e') rE(); else rDoc();
 }
 
