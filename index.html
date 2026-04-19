@@ -355,11 +355,11 @@ function getNextDue(project){
   return {month:1, dueDate:project.tanggalJT, status:'pending', paidDate:null, amount:kontrakP(project), isFinal:true};
 }
 
-function hsc(p){ if(p.status==='terlambat') return 'r'; if(p.status==='tersedia') return 'o'; if(p.status==='selesai') return isTidakTerambil(p)?'vi':'v'; return 'g'; }
+function hsc(p,adminView){ if(p.status==='terlambat') return adminView?'r':'g'; if(p.status==='tersedia') return 'o'; if(p.status==='selesai') return isTidakTerambil(p)?'vi':'v'; return 'g'; }
 function wasTaken(p){ return !!(p.tanggalAktif || (p.schedule && p.schedule.some(s=>s.status==='paid'))); }
 function isTidakTerambil(p){ return p.status==='selesai'&&!wasTaken(p); }
-function statusLabel(s,p,adminView){ if(s==='selesai'&&p&&isTidakTerambil(p)&&adminView) return '⏭️ Tidak Terambil'; return s==='aktif'?'🟢 Aktif':s==='terlambat'?'🔴 Terlambat':s==='tersedia'?'🟡 Tersedia':'✅ Selesai'; }
-function statusCls(p,adminView){ if(isTidakTerambil(p)&&adminView) return 'tidak-terambil'; return p.status; }
+function statusLabel(s,p,adminView){ if(s==='selesai'&&p&&isTidakTerambil(p)&&adminView) return '⏭️ Tidak Terambil'; if(s==='terlambat'&&!adminView) return '🟢 Aktif'; return s==='aktif'?'🟢 Aktif':s==='terlambat'?'🔴 Terlambat':s==='tersedia'?'🟡 Tersedia':'✅ Selesai'; }
+function statusCls(p,adminView){ if(isTidakTerambil(p)&&adminView) return 'tidak-terambil'; if(p.status==='terlambat'&&!adminView) return 'aktif'; return p.status; }
 function stats(){
   const f=S.fund, kurOn=f.kurEnabled!==false&&f.kurAmount>0;
   const buf=kurOn?f.angsuran*f.bufferMonths:0;
@@ -528,14 +528,14 @@ function pCard(p, isAdmin){
   const prog=p.tanggalMulai&&p.tanggalJT ? Math.max(0,Math.min(100,((new Date()-new Date(p.tanggalMulai+'T00:00:00'))/(new Date(p.tanggalJT+'T00:00:00')-new Date(p.tanggalMulai+'T00:00:00')))*100)) : 0;
   const invAlloc=S.external.filter(e=>e.tipe==='investor'&&e.status!=='selesai'&&(e.alokasi||[]).some(a=>a.pid===p.id));
   const pyc=(p.payments||[]).length;
-  const pbcls=p.status==='selesai'?'done':p.status==='terlambat'?'red':p.status==='tersedia'?'grn':'vio';
+  const pbcls=p.status==='selesai'?'done':(p.status==='terlambat'&&isAdmin)?'red':p.status==='tersedia'?'grn':'vio';
   const _retLbl=isAdmin?retLabel(p):retLabelUmum(p);
   const _prof=isAdmin?profP(p):profUmum(p);
   const _sCls=statusCls(p,isAdmin);
   return `<div class="pc ${_sCls}" onclick="oDet('${p.id}')">
     <div class="fb" style="margin-bottom:9px">
       <div>
-        <div style="display:flex;align-items:center"><span class="hlt ${hsc(p)}"></span><span style="font-size:${p.catatan?'14':'16'}px;font-weight:900">${p.peminjam}</span></div>
+        <div style="display:flex;align-items:center"><span class="hlt ${hsc(p,isAdmin)}"></span><span style="font-size:${p.catatan?'14':'16'}px;font-weight:900">${p.peminjam}</span></div>
         ${p.catatan?`<div style="font-size:10px;color:var(--sub);font-weight:600;margin-top:2px">${p.catatan.slice(0,40)+(p.catatan.length>40?'…':'')}</div>`:''}
       </div>
       <div class="tr">
@@ -546,7 +546,7 @@ function pCard(p, isAdmin){
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:9px">
       <span style="font-size:10px;color:var(--sub);font-weight:700">📅 ${fd(p.tanggalMulai)}</span>
       <span style="font-size:10px;color:var(--sub);font-weight:700">⏰ ${fd(p.tanggalJT)}</span>
-      ${p.status!=='selesai'?`<span style="font-size:10px;font-weight:700;color:${gc(d)}">⌛ ${gl(d)||'—'}</span>`:''}
+      ${p.status!=='selesai'&&(isAdmin||d===null||d>=0)?`<span style="font-size:10px;font-weight:700;color:${gc(d)}">⌛ ${gl(d)||'—'}</span>`:''}
       ${isAdmin&&pyc>0?`<span style="font-size:10px;color:var(--sub);font-weight:700">💳 ${pyc}×</span>`:''}
     </div>
     ${isAdmin&&invAlloc.length>0?`<div style="margin-bottom:8px">${invAlloc.map(e=>`<span class="at">👤 ${e.nama}</span>`).join('')}</div>`:''}
