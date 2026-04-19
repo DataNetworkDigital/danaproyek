@@ -1839,7 +1839,22 @@ function savePrj(){
       data.sekaliUmumPersen=0;
     }
   }
-  if(eP){const i=S.projects.findIndex(p=>p.id===eP);if(i>=0) S.projects[i]={...S.projects[i],...data};toast('✅ Diupdate!');}
+  if(eP){
+    const i=S.projects.findIndex(p=>p.id===eP);
+    if(i>=0){
+      const prev=S.projects[i];
+      S.projects[i]={...prev,...data};
+      // Force schedule regen if tanggalMulai/durasiReturn changed
+      if(prev.tanggalMulai!==data.tanggalMulai||prev.durasiReturn!==data.durasiReturn){
+        if(S.projects[i].schedule){
+          S.projects[i].schedule.forEach((s,idx)=>{
+            if(s.status!=='paid') s.dueDate=am(data.tanggalMulai,idx+1);
+          });
+        }
+      }
+    }
+    toast('✅ Diupdate!');
+  }
   else{S.projects.push({id:uid(),...data,payments:[]});toast('🎉 Ditambahkan!');}
   save();cm('mo-p');rAll();
 }
