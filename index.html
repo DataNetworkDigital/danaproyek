@@ -193,7 +193,12 @@ function fd(s){ if(!s) return '—'; return new Date(s+'T00:00:00').toLocaleDate
 function du(s){ if(!s) return null; const n=new Date(); n.setHours(0,0,0,0); return Math.round((new Date(s+'T00:00:00')-n)/86400000); }
 function gl(d){ if(d===null) return ''; if(d<0) return `${Math.abs(d)}h terlambat`; if(d===0) return 'Jatuh tempo hari ini!'; return `${d} hari lagi`; }
 function gc(d){ if(d===null) return 'var(--sub)'; if(d<0) return 'var(--r)'; if(d<=7) return 'var(--o)'; return 'var(--sub)'; }
-function am(s,m){ const d=new Date(s+'T00:00:00'); d.setMonth(d.getMonth()+m); return d.toISOString().split('T')[0]; }
+function am(s,m){
+  // Add m months to date string s (YYYY-MM-DD), timezone-safe
+  const [y,mo,da]=s.split('-').map(Number);
+  const d=new Date(Date.UTC(y,mo-1+m,da));
+  return d.toISOString().split('T')[0];
+}
 function ret(j){ return parseFloat((parseFloat(j)*100/85).toFixed(2)); }
 function prof(j){ return parseFloat((parseFloat(j)*15/85).toFixed(2)); }
 // Project-aware: kontrak = nilai kontrak, jumlah = deploy
@@ -313,9 +318,8 @@ function generateSchedule(project){
   const existing=project.schedule||[];
   const monthlyAmt0=retBulananRp(project);
   const amtMatch=existing.length>0&&Math.abs(parseFloat(existing[0].amount||0)-monthlyAmt0)<0.001;
-  // Also regenerate if tanggalMulai changed (first unpaid dueDate doesn't match expected)
-  const firstUnpaid=existing.find(s=>s.status!=='paid'&&s.status!=='skipped');
-  const dateMatch=!firstUnpaid||firstUnpaid.dueDate===am(project.tanggalMulai,firstUnpaid.month);
+  // Also regenerate if any unpaid dueDate doesn't match expected (tanggalMulai changed)
+  const dateMatch=existing.every((s,idx)=>s.status==='paid'||s.dueDate===am(project.tanggalMulai,idx+1));
   // Also regenerate if skipped items need updating (tanggalAktif changed or newly added)
   const aktifDate=project.tanggalAktif||null;
   const needsSkipUpdate=aktifDate&&existing.some(s=>s.status!=='paid'&&s.status!=='skipped'&&s.dueDate<=aktifDate);
@@ -2388,7 +2392,23 @@ function saveFund(){
 }
 
 // ── RENDER ALL ────────────────────────────────────────────────────────
+function fixScheduleDates(){
+  // One-time migration: realign all unpaid schedule dueDates with tanggalMulai
+  let changed=false;
+  S.projects.forEach(p=>{
+    if(!p.schedule||!p.tanggalMulai) return;
+    p.schedule.forEach((s,idx)=>{
+      const expected=am(p.tanggalMulai,idx+1);
+      if(s.dueDate!==expected&&s.status!=='paid'){
+        s.dueDate=expected;
+        changed=true;
+      }
+    });
+  });
+  if(changed) save();
+}
 function fixProjectStatuses(){
+  fixScheduleDates();
   let changed=false;
   S.projects.forEach(p=>{
     if(p.status!=='aktif'&&p.status!=='terlambat') return;
