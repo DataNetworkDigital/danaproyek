@@ -2435,7 +2435,7 @@ function buildPinPad(){
   dots.innerHTML='';pad.innerHTML='';
   for(let i=0;i<6;i++){const d=document.createElement('div');d.style.cssText='width:14px;height:14px;border-radius:50%;border:2.5px solid rgba(255,255,255,.5);transition:all .15s';d.id='dot-'+i;dots.appendChild(d);}
   let pin=[];
-  const bs='width:64px;height:64px;border-radius:50%;border:2px solid rgba(255,255,255,.25);background:rgba(255,255,255,.1);color:#fff;font-size:22px;font-weight:900;cursor:pointer;font-family:Nunito,sans-serif;transition:all .1s;-webkit-tap-highlight-color:transparent';
+  const bs='width:64px;height:64px;border-radius:50%;border:2px solid rgba(255,255,255,.25);background:rgba(255,255,255,.1);color:#fff;font-size:22px;font-weight:900;cursor:pointer;font-family:Nunito,sans-serif;transition:all .1s;-webkit-tap-highlight-color:transparent;touch-action:manipulation;user-select:none;-webkit-user-select:none';
   for(let n=1;n<=9;n++){const b=document.createElement('button');b.style.cssText=bs;b.textContent=n;b.onclick=()=>addDigit(n);pad.appendChild(b);}
   pad.appendChild(document.createElement('div'));
   const b0=document.createElement('button');b0.style.cssText=bs;b0.textContent='0';b0.onclick=()=>addDigit(0);pad.appendChild(b0);
