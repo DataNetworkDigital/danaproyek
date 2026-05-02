@@ -687,18 +687,18 @@ function rB(){
     </div>`;
   }
   // === Status pills (compact horizontal, breaks 3-col cliché) ===
-  h+=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:18px;padding:6px 4px;overflow-x:auto;scrollbar-width:none">
-    <div onclick="toggleBFilter('aktif')" style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:14px;background:linear-gradient(140deg,#fff 0%,#D1FAE5 100%);box-shadow:3px 3px 8px rgba(22,163,74,.15),-3px -3px 8px rgba(255,255,255,.95);cursor:pointer;flex-shrink:0;transition:transform var(--dur-fast) var(--ease-bounce);${!_bFilter.aktif?'opacity:.5':''}">
+  h+=`<div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:18px;padding:6px 4px;flex-wrap:wrap">
+    <div onclick="toggleBFilter('aktif')" style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:14px;background:linear-gradient(140deg,#fff 0%,#D1FAE5 100%);box-shadow:3px 3px 8px rgba(22,163,74,.15),-3px -3px 8px rgba(255,255,255,.95);cursor:pointer;transition:transform var(--dur-fast) var(--ease-bounce);${!_bFilter.aktif?'opacity:.5':''}">
       <span style="width:8px;height:8px;border-radius:50%;background:#22C55E;box-shadow:0 0 8px rgba(34,197,94,.5)"></span>
       <span style="font-size:11px;font-weight:900;color:var(--sub);text-transform:uppercase;letter-spacing:.5px">Aktif</span>
       <span style="font-size:18px;font-weight:900;color:var(--g-darker);font-variant-numeric:tabular-nums">${aktifC}</span>
     </div>
-    <div onclick="toggleBFilter('tersedia')" style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:14px;background:linear-gradient(140deg,#fff 0%,#FED7AA 100%);box-shadow:3px 3px 8px rgba(245,158,11,.15),-3px -3px 8px rgba(255,255,255,.95);cursor:pointer;flex-shrink:0;transition:transform var(--dur-fast) var(--ease-bounce);${!_bFilter.tersedia?'opacity:.5':''}">
+    <div onclick="toggleBFilter('tersedia')" style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:14px;background:linear-gradient(140deg,#fff 0%,#FED7AA 100%);box-shadow:3px 3px 8px rgba(245,158,11,.15),-3px -3px 8px rgba(255,255,255,.95);cursor:pointer;transition:transform var(--dur-fast) var(--ease-bounce);${!_bFilter.tersedia?'opacity:.5':''}">
       <span style="width:8px;height:8px;border-radius:50%;background:#F59E0B"></span>
       <span style="font-size:11px;font-weight:900;color:var(--sub);text-transform:uppercase;letter-spacing:.5px">Tersedia</span>
       <span style="font-size:18px;font-weight:900;color:var(--o-darker);font-variant-numeric:tabular-nums">${tersediaC}</span>
     </div>
-    <div onclick="toggleBFilter('selesai')" style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:14px;background:linear-gradient(140deg,#fff 0%,#EDE9FE 100%);box-shadow:3px 3px 8px rgba(124,58,237,.12),-3px -3px 8px rgba(255,255,255,.95);cursor:pointer;flex-shrink:0;transition:transform var(--dur-fast) var(--ease-bounce);${!_bFilter.selesai?'opacity:.5':''}">
+    <div onclick="toggleBFilter('selesai')" style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:14px;background:linear-gradient(140deg,#fff 0%,#EDE9FE 100%);box-shadow:3px 3px 8px rgba(124,58,237,.12),-3px -3px 8px rgba(255,255,255,.95);cursor:pointer;transition:transform var(--dur-fast) var(--ease-bounce);${!_bFilter.selesai?'opacity:.5':''}">
       <span style="width:8px;height:8px;border-radius:50%;background:#94A3B8"></span>
       <span style="font-size:11px;font-weight:900;color:var(--sub);text-transform:uppercase;letter-spacing:.5px">Selesai</span>
       <span style="font-size:18px;font-weight:900;color:#64748B;font-variant-numeric:tabular-nums">${selesaiC}</span>
