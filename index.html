@@ -76,6 +76,9 @@ body.modal-open .pages{pointer-events:none}
 .modal{background:#fff;border-radius:28px 28px 0 0;padding:20px 20px 40px;width:100%;max-height:92vh;overflow-y:auto;transform:translateY(100%);transition:transform .35s cubic-bezier(.34,1.56,.64,1)}
 .mo.op .modal{transform:translateY(0)}
 .mh{width:36px;height:4px;background:var(--bdr);border-radius:2px;margin:0 auto 14px}
+.mclose{position:absolute;top:14px;right:14px;width:36px;height:36px;border-radius:50%;background:#F1F5F9;border:none;color:var(--sub);font-size:18px;font-weight:900;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:5;font-family:Nunito,sans-serif;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+.mclose:active{transform:scale(.9)}
+.modal{position:relative}
 .mtt{font-size:17px;font-weight:900;margin-bottom:18px}
 .tabs{display:flex;background:var(--p-l);border-radius:13px;padding:4px;gap:2px;margin-bottom:13px}
 .tab{flex:1;padding:7px 4px;text-align:center;border-radius:9px;font-size:10px;font-weight:800;cursor:pointer;transition:all .18s;color:var(--p);border:none;background:none;font-family:'Nunito',sans-serif}
@@ -122,31 +125,38 @@ body.modal-open .pages{pointer-events:none}
 </div>
 <div id="app">
   <div class="hdr" id="H">
-    <div><div class="hdr-t" id="HT">💸 DanaTrack</div><div class="hdr-s" id="HS">Dana Talangan Manager</div></div>
+    <div><div class="hdr-t" id="HT">💸 DanaTrack</div><div class="hdr-s" id="HS">Dana Talangan Manager</div><div id="sync-ind" style="font-size:10px;color:rgba(255,255,255,.7);margin-top:2px;font-weight:700;display:none">☁️ Tersinkron</div></div>
     <div id="HA" style="display:flex;gap:6px"></div>
   </div>
   <div class="pages">
     <div class="page active" id="p-b"></div>
-    <div class="page" id="p-m"></div>
-    <div class="page" id="p-d"></div>
-    <div class="page" id="p-e"></div>
+    <div class="page" id="p-ops">
+      <div id="ops-subnav" style="display:none;background:#fff;border-radius:14px;padding:6px;margin-bottom:12px;box-shadow:var(--sh);position:sticky;top:0;z-index:10">
+        <div style="display:flex;gap:4px">
+          <button class="ops-tab on" onclick="goOps('m')" id="ops-m" style="flex:1;padding:10px;border:none;border-radius:10px;background:var(--p);color:#fff;font-size:12px;font-weight:800;cursor:pointer;font-family:Nunito,sans-serif;touch-action:manipulation">📋 Proyek</button>
+          <button class="ops-tab" onclick="goOps('d')" id="ops-d" style="flex:1;padding:10px;border:none;border-radius:10px;background:transparent;color:var(--sub);font-size:12px;font-weight:800;cursor:pointer;font-family:Nunito,sans-serif;touch-action:manipulation">💰 Dana</button>
+          <button class="ops-tab" onclick="goOps('e')" id="ops-e" style="flex:1;padding:10px;border:none;border-radius:10px;background:transparent;color:var(--sub);font-size:12px;font-weight:800;cursor:pointer;font-family:Nunito,sans-serif;touch-action:manipulation">🔗 Eksternal</button>
+        </div>
+      </div>
+      <div id="p-m" style="display:none"></div>
+      <div id="p-d" style="display:none"></div>
+      <div id="p-e" style="display:none"></div>
+    </div>
     <div class="page" id="p-r"></div>
   </div>
   <nav class="bnav" id="nav">
     <button class="ni on" onclick="go('b')" id="n-b"><span class="ico">🏠</span><span class="lbl">Beranda</span></button>
-    <button class="ni" onclick="go('m')" id="n-m" style="display:none"><span class="ico">📋</span><span class="lbl">Proyek</span></button>
-    <button class="ni" onclick="go('d')" id="n-d" style="display:none"><span class="ico">💰</span><span class="lbl">Dana</span></button>
-    <button class="ni" onclick="go('e')" id="n-e" style="display:none"><span class="ico">🔗</span><span class="lbl">Eksternal</span></button>
+    <button class="ni" onclick="go('ops')" id="n-ops" style="display:none"><span class="ico">📊</span><span class="lbl">Operasi</span></button>
     <button class="ni" onclick="go('r')" id="n-r" style="display:none"><span class="ico">📄</span><span class="lbl">Dokumen</span></button>
     <button class="ni" onclick="showPin()" id="n-admin"><span class="ico">🔐</span><span class="lbl">Admin</span></button>
   </nav>
 </div>
-<div class="mo" id="mo-p" onclick="cm('mo-p')"><div class="modal" onclick="event.stopPropagation()"><div class="mh"></div><div class="mtt" id="mo-p-t">Tambah Proyek</div><div id="mo-p-b"></div></div></div>
-<div class="mo" id="mo-pay" onclick="cm('mo-pay')"><div class="modal" onclick="event.stopPropagation()"><div class="mh"></div><div class="mtt">✅ Catat Pembayaran</div><div id="mo-pay-b"></div></div></div>
-<div class="mo" id="mo-ext" onclick="cm('mo-ext')"><div class="modal" onclick="event.stopPropagation()"><div class="mh"></div><div class="mtt" id="mo-ext-t">Dana Eksternal</div><div id="mo-ext-b"></div></div></div>
-<div class="mo" id="mo-det" onclick="cm('mo-det')"><div class="modal" onclick="event.stopPropagation()"><div class="mh"></div><div id="mo-det-b"></div></div></div>
-<div class="mo" id="mo-fund" onclick="cm('mo-fund')"><div class="modal" onclick="event.stopPropagation()"><div class="mh"></div><div class="mtt">⚙️ Konfigurasi KUR</div><div id="mo-fund-b"></div></div></div>
-<div class="mo" id="mo-edet" onclick="cm('mo-edet')"><div class="modal" onclick="event.stopPropagation()"><div class="mh"></div><div id="mo-edet-b"></div></div></div>
+<div class="mo" id="mo-p" onclick="cm('mo-p')"><div class="modal" onclick="event.stopPropagation()"><button class="mclose" onclick="cm('mo-p')" aria-label="Tutup">×</button><div class="mh"></div><div class="mtt" id="mo-p-t">Tambah Proyek</div><div id="mo-p-b"></div></div></div>
+<div class="mo" id="mo-pay" onclick="cm('mo-pay')"><div class="modal" onclick="event.stopPropagation()"><button class="mclose" onclick="cm('mo-pay')" aria-label="Tutup">×</button><div class="mh"></div><div class="mtt">✅ Catat Pembayaran</div><div id="mo-pay-b"></div></div></div>
+<div class="mo" id="mo-ext" onclick="cm('mo-ext')"><div class="modal" onclick="event.stopPropagation()"><button class="mclose" onclick="cm('mo-ext')" aria-label="Tutup">×</button><div class="mh"></div><div class="mtt" id="mo-ext-t">Dana Eksternal</div><div id="mo-ext-b"></div></div></div>
+<div class="mo" id="mo-det" onclick="cm('mo-det')"><div class="modal" onclick="event.stopPropagation()"><button class="mclose" onclick="cm('mo-det')" aria-label="Tutup">×</button><div class="mh"></div><div id="mo-det-b"></div></div></div>
+<div class="mo" id="mo-fund" onclick="cm('mo-fund')"><div class="modal" onclick="event.stopPropagation()"><button class="mclose" onclick="cm('mo-fund')" aria-label="Tutup">×</button><div class="mh"></div><div class="mtt">⚙️ Konfigurasi KUR</div><div id="mo-fund-b"></div></div></div>
+<div class="mo" id="mo-edet" onclick="cm('mo-edet')"><div class="modal" onclick="event.stopPropagation()"><button class="mclose" onclick="cm('mo-edet')" aria-label="Tutup">×</button><div class="mh"></div><div id="mo-edet-b"></div></div></div>
 <button class="fab" id="fab" onclick="fabAct()">＋</button>
 <div id="toast"></div>
 <script>
@@ -166,21 +176,39 @@ const DOC_ID='main_data';
 function load(){
   try{const s=localStorage.getItem('dt_v3');if(s)S={...S,...JSON.parse(s)};}catch(e){}
 }
+function setSync(state, ts){
+  const el=document.getElementById('sync-ind');if(!el)return;
+  el.style.display='block';
+  if(state==='syncing'){el.innerHTML='⏳ Menyimpan…';el.style.color='rgba(255,255,255,.85)';}
+  else if(state==='error'){el.innerHTML='⚠️ Sync gagal';el.style.color='#FFB4C8';}
+  else if(state==='synced'){
+    const t=ts?new Date(ts):new Date();
+    const fmt=t.toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'});
+    el.innerHTML=`☁️ Tersinkron · ${fmt}`;el.style.color='rgba(255,255,255,.7)';
+  }
+}
 async function loadFromFirestore(){
+  setSync('syncing');
   try{
     const snap=await db.collection('danatrack').doc(DOC_ID).get();
-    if(snap.exists){const d=snap.data();S={...S,...d.state};localStorage.setItem('dt_v3',JSON.stringify(S));}
-  }catch(e){console.warn('Firestore load:',e);}
+    if(snap.exists){const d=snap.data();S={...S,...d.state};localStorage.setItem('dt_v3',JSON.stringify(S));setSync('synced',d.updatedAt);}
+    else setSync('synced');
+  }catch(e){console.warn('Firestore load:',e);setSync('error');}
 }
 function save(){
   try{localStorage.setItem('dt_v3',JSON.stringify(S));}catch(e){}
-  if(!_adminUnlocked)return; // only admin can write to cloud
+  if(!_adminUnlocked)return;
   if(_saveTimer)clearTimeout(_saveTimer);
   _saveTimer=setTimeout(saveToFirestore,800);
 }
 async function saveToFirestore(){
   if(!_adminUnlocked||_saving)return;_saving=true;
-  try{await db.collection('danatrack').doc(DOC_ID).set({state:JSON.parse(JSON.stringify(S)),updatedAt:new Date().toISOString()},{merge:true});}catch(e){console.warn('Firestore save:',e);}
+  setSync('syncing');
+  try{
+    const ts=new Date().toISOString();
+    await db.collection('danatrack').doc(DOC_ID).set({state:JSON.parse(JSON.stringify(S)),updatedAt:ts},{merge:true});
+    setSync('synced',ts);
+  }catch(e){console.warn('Firestore save:',e);setSync('error');}
   _saving=false;
 }
 function exportJ(){const b=new Blob([JSON.stringify(S,null,2)],{type:'application/json'});const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download='danatrack-'+new Date().toISOString().split('T')[0]+'.json';a.click();URL.revokeObjectURL(u);toast('✅ Data diekspor!')}
@@ -397,23 +425,66 @@ function closeAllModals(){
   document.querySelectorAll('.mo').forEach(m=>m.classList.remove('op'));
   document.body.classList.remove('modal-open');
 }
+let OT='m'; // operasi sub-tab
 function go(p){
   closeAllModals();
   document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));
   document.querySelectorAll('.ni').forEach(x=>x.classList.remove('on'));
-  document.getElementById('p-'+p).classList.add('active');
-  document.getElementById('n-'+p).classList.add('on');
-  CP=p;
-  const ti={b:{t:'💸 DanaTrack',s:'Dana Talangan Manager'},m:{t:'📋 Proyek',s:'Kelola semua proyek'},d:{t:'💰 Dana',s:'Kesehatan & konfigurasi dana'},e:{t:'🔗 Eksternal',s:'Pinjaman & investor'},r:{t:'📄 Dokumen',s:'Generate dokumen legal'}};
+  // Map old sub-tab keys to ops
+  const isSub=['m','d','e'].includes(p);
+  const mainP=isSub?'ops':p;
+  document.getElementById('p-'+mainP).classList.add('active');
+  document.getElementById('n-'+mainP).classList.add('on');
+  CP=mainP;
+  if(mainP==='ops'){
+    document.getElementById('ops-subnav').style.display='block';
+    goOps(isSub?p:OT);
+    return;
+  } else {
+    document.getElementById('ops-subnav').style.display='none';
+  }
+  const ti={b:{t:'💸 DanaTrack',s:'Dana Talangan Manager'},r:{t:'📄 Dokumen',s:'Generate dokumen legal'}};
   document.getElementById('HT').textContent=ti[p].t;
   document.getElementById('HS').textContent=ti[p].s;
-  document.getElementById('HA').innerHTML=p==='d'?`<button class="hdr-icon" onclick="oFund()">⚙️</button><button class="hdr-icon" onclick="exportJ()">⬆️</button><button class="hdr-icon" onclick="importJ()">⬇️</button>`:'';
-  document.getElementById('fab').style.display=['m','e'].includes(p)?'flex':'none';
-  if(p==='b')rB();else if(p==='m')rM();else if(p==='d')rD();else if(p==='e')rE();else rDoc();
+  document.getElementById('HA').innerHTML='';
+  document.getElementById('fab').style.display='none';
+  if(p==='b')rB();else rDoc();
 }
-function fabAct(){ if(CP==='m') oPM(); else if(CP==='e') oEM(); }
+function goOps(sub){
+  OT=sub;
+  // Hide all ops sub-pages, show selected
+  ['m','d','e'].forEach(k=>{
+    const pg=document.getElementById('p-'+k);
+    const tab=document.getElementById('ops-'+k);
+    if(pg) pg.style.display=k===sub?'block':'none';
+    if(tab){
+      tab.style.background=k===sub?'var(--p)':'transparent';
+      tab.style.color=k===sub?'#fff':'var(--sub)';
+      tab.classList.toggle('on',k===sub);
+    }
+  });
+  const ti={m:{t:'📋 Proyek',s:'Kelola semua proyek'},d:{t:'💰 Dana',s:'Kesehatan & konfigurasi dana'},e:{t:'🔗 Eksternal',s:'Pinjaman & investor'}};
+  document.getElementById('HT').textContent=ti[sub].t;
+  document.getElementById('HS').textContent=ti[sub].s;
+  document.getElementById('HA').innerHTML=sub==='d'?`<button class="hdr-icon" onclick="oFund()">⚙️</button><button class="hdr-icon" onclick="exportJ()">⬆️</button><button class="hdr-icon" onclick="importJ()">⬇️</button>`:'';
+  document.getElementById('fab').style.display=['m','e'].includes(sub)?'flex':'none';
+  if(sub==='m')rM();else if(sub==='d')rD();else rE();
+}
+function fabAct(){ if(CP==='ops'&&OT==='m') oPM(); else if(CP==='ops'&&OT==='e') oEM(); }
 let _tt;
-function toast(m){ const t=document.getElementById('toast'); t.textContent=m; t.classList.add('show'); clearTimeout(_tt); _tt=setTimeout(()=>t.classList.remove('show'),2700); }
+function toast(m,opts){
+  const t=document.getElementById('toast');
+  const dur=(opts&&opts.duration)||2700;
+  if(opts&&opts.undo){
+    t.innerHTML=`<span>${m}</span><button id="toast-undo" style="margin-left:14px;background:rgba(255,255,255,.25);border:none;color:#fff;padding:6px 12px;border-radius:8px;font-weight:900;cursor:pointer;font-family:Nunito,sans-serif;font-size:11px;touch-action:manipulation">↩ Undo</button>`;
+    setTimeout(()=>{const b=document.getElementById('toast-undo');if(b)b.onclick=()=>{opts.undo();t.classList.remove('show');clearTimeout(_tt);};},10);
+  } else {
+    t.textContent=m;
+  }
+  t.classList.add('show');
+  clearTimeout(_tt);
+  _tt=setTimeout(()=>t.classList.remove('show'),dur);
+}
 function om(id){ document.getElementById(id).classList.add('op'); document.body.classList.add('modal-open'); }
 function cm(id){ document.getElementById(id).classList.remove('op'); if(!document.querySelector('.mo.op')) document.body.classList.remove('modal-open'); }
 
@@ -487,7 +558,7 @@ function rB(){
     list.sort((a,b)=>(order[a.status]??1)-(order[b.status]??1));
   }
   if(list.length===0){
-    h+=`<div class="es"><div class="ei">🌱</div><div class="et">Belum ada proyek</div><div class="esb">Buka tab Proyek dan tap + untuk mulai</div></div>`;
+    h+=`<div class="es"><div class="ei">🌱</div><div class="et">Belum ada proyek</div><div class="esb">Mulai tambahkan proyek pertama Anda</div>${_adminUnlocked?`<button class="btn vio" style="margin-top:14px" onclick="go('ops');setTimeout(oPM,200)">＋ Tambah Proyek Pertama</button>`:''}</div>`;
   } else {
     if(_bSort==='default'){
       const groups=[
@@ -586,7 +657,7 @@ function rM(){
   }
   h+=`<div class="tabs">${tabs.map(([t,ic])=>`<button class="tab ${MT===t?'on':''}" onclick="swMT('${t}')">${ic} ${t.charAt(0).toUpperCase()+t.slice(1)} <span style="background:${MT===t?'var(--p-l)':'#F1EFF9'};color:${MT===t?'var(--p)':'var(--sub)'};padding:1px 6px;border-radius:8px;font-size:9px">${cnt(t)}</span></button>`).join('')}</div>`;
   if(fil.length===0){
-    h+=`<div class="es"><div class="ei">${MT==='aktif'?'🌱':MT==='terlambat'?'😌':MT==='selesai'?'🎉':'📭'}</div><div class="et">Tidak ada proyek ${MT}</div><div class="esb">${MT==='aktif'||MT==='tersedia'?'Tap + untuk tambah':'Belum ada di sini'}</div></div>`;
+    h+=`<div class="es"><div class="ei">${MT==='aktif'?'🌱':MT==='terlambat'?'😌':MT==='selesai'?'🎉':'📭'}</div><div class="et">Tidak ada proyek ${MT}</div><div class="esb">${MT==='aktif'||MT==='tersedia'?'Mulai tambahkan proyek baru':'Belum ada di sini'}</div>${(MT==='aktif'||MT==='tersedia'||MT==='semua')?`<button class="btn vio" style="margin-top:14px" onclick="oPM()">＋ Tambah Proyek</button>`:''}</div>`;
   } else {
     fil.forEach(p=>{ h+=pCard(p, true); });
   }
@@ -725,11 +796,11 @@ function rE(){
   </div>`;
   if(extTab==='pinjaman'){
     h+=`<div style="background:var(--b-l);border-radius:12px;padding:11px 13px;margin-bottom:11px;font-size:11px;color:#0369A1;font-weight:700">💙 Pinjaman: kamu mengembalikan pokok + bunga secara bulanan.</div>`;
-    if(pinj.length===0) h+=`<div class="es"><div class="ei">💙</div><div class="et">Belum ada pinjaman</div><div class="esb">Tap + untuk tambah</div></div>`;
+    if(pinj.length===0) h+=`<div class="es"><div class="ei">💙</div><div class="et">Belum ada pinjaman</div><div class="esb">Catat pinjaman bank atau pribadi</div><button class="btn vio" style="margin-top:14px" onclick="oEM()">＋ Tambah Pinjaman</button></div>`;
     else pinj.forEach(e=>{ h+=extCard(e); });
   } else {
     h+=`<div style="background:var(--o-l);border-radius:12px;padding:11px 13px;margin-bottom:11px;font-size:11px;color:#B56B00;font-weight:700">🟠 Investor: mendapat bagi hasil dari profit proyek yang dialokasikan.</div>`;
-    if(inv.length===0) h+=`<div class="es"><div class="ei">🟠</div><div class="et">Belum ada investor</div><div class="esb">Tap + untuk tambah</div></div>`;
+    if(inv.length===0) h+=`<div class="es"><div class="ei">🟠</div><div class="et">Belum ada investor</div><div class="esb">Catat investor & alokasi dana mereka</div><button class="btn vio" style="margin-top:14px" onclick="oEM()">＋ Tambah Investor</button></div>`;
     else inv.forEach(e=>{ h+=extCard(e); });
   }
   document.getElementById('p-e').innerHTML=h;
@@ -1393,8 +1464,12 @@ function redownloadPdf(idx){
   downloadDocPdf(d);
 }
 function deleteDoc(idx){
-  if(!confirm('Hapus dokumen '+S.generatedDocs[idx]?.nomor+'?')) return;
-  S.generatedDocs.splice(idx,1);save();rDoc();toast('🗑️ Dokumen dihapus');
+  const removed=S.generatedDocs[idx];if(!removed)return;
+  S.generatedDocs.splice(idx,1);save();rDoc();
+  toast(`🗑️ Dokumen ${removed.nomor} dihapus`,{
+    duration:6000,
+    undo:()=>{S.generatedDocs.splice(idx,0,removed);save();rDoc();toast('↩ Dipulihkan');}
+  });
 }
 
 // ── LAPORAN REALISASI ────────────────────────────────────────────────
@@ -1863,9 +1938,15 @@ function savePrj(){
   save();cm('mo-p');rAll();
 }
 function delProj(id){
-  if(!confirm('Hapus proyek ini?')) return;
-  S.projects=S.projects.filter(p=>p.id!==id);
-  save();cm('mo-p');rAll();toast('🗑️ Dihapus');
+  const idx=S.projects.findIndex(p=>p.id===id);
+  if(idx<0) return;
+  const removed=S.projects[idx];
+  S.projects.splice(idx,1);
+  save();cm('mo-p');cm('mo-det');rAll();
+  toast(`🗑️ Proyek "${removed.peminjam}" dihapus`,{
+    duration:6000,
+    undo:()=>{S.projects.splice(idx,0,removed);save();rAll();toast('↩ Dipulihkan');}
+  });
 }
 
 // ── PROJECT DETAIL ────────────────────────────────────────────────────
@@ -2304,7 +2385,17 @@ function saveExt(tipe){
   else{S.external.push({id:uid(),...obj});toast('🎉 Ditambahkan!');}
   save();cm('mo-ext');rE();
 }
-function delExt(id){if(!confirm('Hapus?'))return;S.external=S.external.filter(e=>e.id!==id);save();cm('mo-ext');rE();toast('🗑️ Dihapus');}
+function delExt(id){
+  const idx=S.external.findIndex(e=>e.id===id);
+  if(idx<0)return;
+  const removed=S.external[idx];
+  S.external.splice(idx,1);
+  save();cm('mo-ext');cm('mo-edet');rE();
+  toast(`🗑️ "${removed.nama}" dihapus`,{
+    duration:6000,
+    undo:()=>{S.external.splice(idx,0,removed);save();rE();toast('↩ Dipulihkan');}
+  });
+}
 
 // ── EXTERNAL DETAIL ───────────────────────────────────────────────────
 function oEDet(id){
@@ -2423,7 +2514,9 @@ function fixProjectStatuses(){
 }
 function rAll(){
   fixProjectStatuses();
-  if(CP==='b') rB(); else if(CP==='m') rM(); else if(CP==='d') rD(); else if(CP==='e') rE(); else rDoc();
+  if(CP==='b') rB();
+  else if(CP==='ops'){ if(OT==='m') rM(); else if(OT==='d') rD(); else rE(); }
+  else rDoc();
 }
 
 // ── PIN & ADMIN ──────────────────────────────────────────────────────
@@ -2452,7 +2545,7 @@ function buildPinPad(){
 }
 
 function showPin(){
-  if(_adminUnlocked){go('m');return;}
+  if(_adminUnlocked){go('ops');return;}
   buildPinPad();
   om('mo-pin');
 }
@@ -2461,16 +2554,14 @@ async function unlockAdmin(){
   _adminUnlocked=true;
   cm('mo-pin');
   // Show admin tabs, hide admin button
-  document.getElementById('n-m').style.display='';
-  document.getElementById('n-d').style.display='';
-  document.getElementById('n-e').style.display='';
+  document.getElementById('n-ops').style.display='';
   document.getElementById('n-r').style.display='';
   document.getElementById('n-admin').style.display='none';
   // Load from Firestore
   await loadFromFirestore();
   rAll();
   toast('🔓 Admin unlocked!');
-  go('m');
+  go('ops');
 }
 
 // ── INIT ──────────────────────────────────────────────────────────────
