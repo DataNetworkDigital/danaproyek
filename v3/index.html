@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#FAFBFD">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>DanaTrack — Portfolio Investasi</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./styles/tokens.css">
+<link rel="stylesheet" href="./styles/base.css">
+<link rel="stylesheet" href="./styles/layout.css">
+<link rel="stylesheet" href="./styles/utilities.css">
+<link rel="stylesheet" href="./styles/components.css">
+
+<!-- Firebase (compat — same as v2) -->
+<script src="https://www.gstatic.com/firebasejs/11.1.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore-compat.js"></script>
+<script>
+firebase.initializeApp({apiKey:"AIzaSyDTB7lgEkWOsQGjdlb9RxIABxvR6VRrBCI",authDomain:"roxannecapital.firebaseapp.com",projectId:"roxannecapital",storageBucket:"roxannecapital.firebasestorage.app",messagingSenderId:"535953706506",appId:"1:535953706506:web:bd70e9908d1df34fced9f3"});
+window.__db = firebase.firestore();
+</script>
+</head>
+<body>
+
+<!-- App shell -->
+<div id="app" class="app">
+
+  <!-- Header (sticky, minimal) -->
+  <header class="hdr" id="hdr">
+    <div class="hdr__brand">
+      <span class="hdr__mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L4 7l8 5 8-5-8-5zM4 17l8 5 8-5M4 12l8 5 8-5"/></svg>
+      </span>
+      <div class="hdr__titles">
+        <h1 class="hdr__title" id="hdr-title">DanaTrack</h1>
+        <p class="hdr__sub" id="hdr-sub">Portfolio investasi</p>
+      </div>
+    </div>
+    <div class="hdr__actions" id="hdr-actions"></div>
+  </header>
+
+  <!-- Pages (one renders at a time) -->
+  <main class="pages" id="pages">
+    <section class="page page--active" id="p-beranda" data-page="beranda"></section>
+    <section class="page" id="p-ops" data-page="ops">
+      <div class="ops-tabs" id="ops-tabs" hidden></div>
+      <div class="ops-body">
+        <div class="ops-pane" id="p-proyek" data-pane="proyek" hidden></div>
+        <div class="ops-pane" id="p-dana" data-pane="dana" hidden></div>
+        <div class="ops-pane" id="p-eksternal" data-pane="eksternal" hidden></div>
+      </div>
+    </section>
+    <section class="page" id="p-doc" data-page="doc">
+      <!-- Dokumen falls back to v2 for now -->
+      <div class="empty empty--page">
+        <p class="empty__title">Dokumen</p>
+        <p class="empty__body">Modul dokumen akan tersedia di v3 berikutnya. Sementara gunakan versi sebelumnya.</p>
+        <a class="btn btn--ghost" href="../index.html#doc">Buka di v2 →</a>
+      </div>
+    </section>
+  </main>
+
+  <!-- Bottom nav -->
+  <nav class="bnav" id="bnav" aria-label="Navigasi utama">
+    <button class="bnav__item bnav__item--active" data-route="beranda" type="button">
+      <svg class="bnav__ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12l9-9 9 9M5 10v10a1 1 0 001 1h4v-7h4v7h4a1 1 0 001-1V10"/></svg>
+      <span class="bnav__lbl">Beranda</span>
+    </button>
+    <button class="bnav__item" data-route="ops" type="button" hidden>
+      <svg class="bnav__ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18M7 14l4-4 4 4 5-5"/></svg>
+      <span class="bnav__lbl">Operasi</span>
+    </button>
+    <button class="bnav__item" data-route="doc" type="button" hidden>
+      <svg class="bnav__ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z M14 2v6h6 M9 14h6 M9 18h6"/></svg>
+      <span class="bnav__lbl">Dokumen</span>
+    </button>
+    <button class="bnav__item" data-route="admin" type="button">
+      <svg class="bnav__ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+      <span class="bnav__lbl">Admin</span>
+    </button>
+  </nav>
+
+  <!-- FAB (action contextual to page) -->
+  <button class="fab" id="fab" type="button" hidden aria-label="Tambah">
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+  </button>
+</div>
+
+<!-- PIN modal -->
+<div class="modal-overlay" id="mo-pin" data-modal="pin" hidden>
+  <div class="modal modal--pin">
+    <div class="modal__handle"></div>
+    <div class="modal__head modal__head--pin">
+      <div class="pin__icon">
+        <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+      </div>
+      <h2 class="pin__title">Akses Admin</h2>
+      <p class="pin__sub">Masukkan PIN 6 digit</p>
+    </div>
+    <div class="pin__dots" id="pin-dots"></div>
+    <div class="pin__error" id="pin-error" aria-live="polite"></div>
+    <div class="pin__pad" id="pin-pad"></div>
+  </div>
+</div>
+
+<!-- Generic detail modal -->
+<div class="modal-overlay" id="mo-detail" data-modal="detail" hidden>
+  <div class="modal">
+    <button class="modal__close" data-close="detail" aria-label="Tutup">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+    <div class="modal__handle"></div>
+    <div class="modal__body" id="mo-detail-body"></div>
+  </div>
+</div>
+
+<!-- Toast region -->
+<div class="toast-region" id="toast" role="status" aria-live="polite"></div>
+
+<!-- Bootstrap module entry -->
+<script type="module" src="./scripts/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,123 @@
+/* ============================================================
+   Base — reset + typography defaults
+   ============================================================ */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  font-size: 16px;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+html,
+body {
+  height: 100%;
+  height: -webkit-fill-available;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--fs-base);
+  font-weight: var(--fw-regular);
+  line-height: var(--lh-normal);
+  color: var(--c-text);
+  background: var(--c-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "cv11" 1, "ss01" 1;
+}
+
+/* === Numbers always tabular & mono === */
+.num,
+[data-num],
+.metric__v,
+.stat__v,
+.hero__num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+}
+
+/* === Headings === */
+h1, h2, h3, h4, h5, h6 {
+  font-weight: var(--fw-bold);
+  line-height: var(--lh-tight);
+  color: var(--c-text);
+}
+
+h1 { font-size: var(--fs-2xl); letter-spacing: var(--ls-tight); }
+h2 { font-size: var(--fs-xl); letter-spacing: var(--ls-tight); }
+h3 { font-size: var(--fs-lg); }
+
+p {
+  color: var(--c-text-muted);
+  line-height: var(--lh-normal);
+}
+
+a {
+  color: var(--c-primary);
+  text-decoration: none;
+  transition: color var(--dur-1) var(--ease-out);
+}
+a:hover { color: var(--c-primary-hover); }
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+img,
+svg {
+  display: block;
+  max-width: 100%;
+}
+
+ul, ol {
+  list-style: none;
+}
+
+/* === Focus === */
+:focus-visible {
+  outline: none;
+  box-shadow: var(--sh-focus);
+  border-radius: var(--r-sm);
+}
+
+/* === Scrollbar === */
+.scroll-hidden::-webkit-scrollbar { width: 0; height: 0; }
+.scroll-hidden { scrollbar-width: none; }
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: var(--r-full); }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* === Selection === */
+::selection {
+  background: var(--c-primary-bg);
+  color: var(--c-primary-active);
+}
+
+/* === Motion utility === */
+.no-motion,
+.no-motion * {
+  animation: none !important;
+  transition: none !important;
+}
