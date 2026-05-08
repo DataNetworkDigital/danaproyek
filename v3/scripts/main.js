@@ -5,6 +5,7 @@
 
 import { S, loadLocal, loadFromFirestore, save, setAdminUnlocked, isAdmin, subscribe } from './state.js';
 import { fixProjectStatuses } from './schedule.js';
+import { renderBeranda, handleAction } from './render.js';
 
 const PIN = '110869';
 
@@ -19,10 +20,15 @@ let CP = 'beranda'; // current page
   setupPin();
   setupModalDismiss();
   setupSyncIndicator();
+  setupActionDelegation();
 
-  // Initial render (placeholder until commit 3)
-  renderPage('beranda');
   fixProjectStatuses();
+  renderPage('beranda');
+
+  // Re-render on data change
+  subscribe(() => {
+    if (CP === 'beranda') renderBeranda();
+  });
 })();
 
 // ---------- Header ----------
@@ -108,37 +114,40 @@ function navigate(route) {
 function renderPage(route) {
   if (route === 'beranda') {
     setHeader('DanaTrack', isAdmin() ? 'Mode admin' : 'Portfolio investasi');
-    renderBerandaPlaceholder();
+    renderBeranda();
   } else if (route === 'ops') {
     setHeader('Operasi', 'Kelola proyek & dana');
     renderOpsPlaceholder();
   }
 }
 
-function renderBerandaPlaceholder() {
-  const el = document.getElementById('p-beranda');
+function renderOpsPlaceholder() {
+  const el = document.getElementById('p-ops');
   if (!el) return;
-  el.innerHTML = `
+  const body = el.querySelector('.ops-body');
+  if (!body) return;
+  body.innerHTML = `
     <div class="empty empty--page">
-      <div class="empty__icon">
-        <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-      </div>
-      <p class="empty__title">v3 Beranda — sedang dibangun</p>
-      <p class="empty__body">Komponen Hero, ProjectCard, dan StatPill akan dipasang di commit berikutnya.</p>
-      <a class="btn btn--ghost" href="../index.html">← Kembali ke v2</a>
+      <p class="empty__title">Operasi — sedang dibangun</p>
+      <p class="empty__body">Tab Proyek / Dana / Eksternal akan tersedia di commit 4-6.</p>
+      <a class="btn btn--ghost" href="../index.html">Buka Operasi di v2 →</a>
     </div>
   `;
 }
 
-function renderOpsPlaceholder() {
-  const el = document.getElementById('p-ops');
-  if (!el) return;
-  el.querySelector('.ops-body').innerHTML = `
-    <div class="empty empty--page">
-      <p class="empty__title">Operasi — sedang dibangun</p>
-      <p class="empty__body">Tab Proyek / Dana / Eksternal akan tersedia di commit 4-6.</p>
-    </div>
-  `;
+// ---------- Event delegation for component actions ----------
+
+function setupActionDelegation() {
+  document.addEventListener('click', (e) => {
+    const target = e.target.closest('[data-action]');
+    if (!target) return;
+    const action = target.dataset.action;
+    const ctx = { ...target.dataset, target };
+    // Render-handled actions
+    if (handleAction(action, ctx)) return;
+    // Generic actions
+    if (action === 'goto-ops') navigate('ops');
+  });
 }
 
 // ---------- PIN ----------
