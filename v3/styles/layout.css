@@ -104,6 +104,23 @@
 .hdr__icon-btn:hover { background: var(--c-surface-muted); color: var(--c-text); }
 .hdr__icon-btn:active { background: var(--c-primary-bg); color: var(--c-primary); }
 
+/* Back to v2 link */
+.hdr__v2-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  border-radius: var(--r-md);
+  background: var(--c-surface-muted);
+  color: var(--c-text-muted);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.3px;
+  text-decoration: none;
+  transition: background var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
+}
+.hdr__v2-link:hover { background: var(--c-surface-sunken); color: var(--c-text); }
+
 /* === Sync indicator === */
 .sync {
   display: inline-flex;
