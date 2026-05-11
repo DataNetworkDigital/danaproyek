@@ -124,24 +124,19 @@ function renderPage(route) {
   if (route === 'beranda') {
     setHeader('DanaTrack', isAdmin() ? 'Mode admin' : 'Portfolio investasi');
     renderBeranda();
+    toggleFab(false);
   } else if (route === 'ops') {
     setHeader('Operasi', 'Kelola proyek & dana');
-    renderOpsPlaceholder();
+    renderOps();
+  } else if (route === 'doc') {
+    setHeader('Dokumen', 'Generate kontrak & laporan');
+    toggleFab(false);
   }
 }
 
-function renderOpsPlaceholder() {
-  const el = document.getElementById('p-ops');
-  if (!el) return;
-  const body = el.querySelector('.ops-body');
-  if (!body) return;
-  body.innerHTML = `
-    <div class="empty empty--page">
-      <p class="empty__title">Operasi — sedang dibangun</p>
-      <p class="empty__body">Tab Proyek / Dana / Eksternal akan tersedia di commit 4-6.</p>
-      <a class="btn btn--ghost" href="../index.html">Buka Operasi di v2 →</a>
-    </div>
-  `;
+function toggleFab(show) {
+  const fab = document.getElementById('fab');
+  if (fab) fab.hidden = !show;
 }
 
 // ---------- Event delegation for component actions ----------
