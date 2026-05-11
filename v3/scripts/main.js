@@ -5,7 +5,7 @@
 
 import { S, loadLocal, loadFromFirestore, save, setAdminUnlocked, isAdmin, subscribe } from './state.js';
 import { fixProjectStatuses } from './schedule.js';
-import { renderBeranda, handleAction } from './render.js';
+import { renderBeranda, renderOps, handleAction } from './render.js';
 
 const PIN = '110869';
 
@@ -13,7 +13,7 @@ let CP = 'beranda'; // current page
 
 // ---------- Bootstrap ----------
 
-(function init() {
+(async function init() {
   loadLocal();
   setupHeader();
   setupNav();
@@ -22,13 +22,22 @@ let CP = 'beranda'; // current page
   setupSyncIndicator();
   setupActionDelegation();
 
+  // Initial render from local cache (instant)
   fixProjectStatuses();
   renderPage('beranda');
 
-  // Re-render on data change
-  subscribe(() => {
-    if (CP === 'beranda') renderBeranda();
-  });
+  // Subscribe to data changes BEFORE async load so first sync triggers re-render
+  subscribe(() => renderPage(CP));
+
+  // Pull fresh data from Firestore (read-only for public, RW for admin)
+  // This makes investors see live data even on a fresh browser
+  try {
+    await loadFromFirestore();
+    fixProjectStatuses();
+    renderPage(CP);
+  } catch (e) {
+    console.warn('Firestore initial load failed', e);
+  }
 })();
 
 // ---------- Header ----------
