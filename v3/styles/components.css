@@ -718,6 +718,172 @@
   cursor: pointer;
 }
 
+/* ===== ProjectDetail ===== */
+.pdetail__head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 0 var(--s-2) var(--s-4);
+  border-bottom: 1px solid var(--c-border);
+  margin-bottom: var(--s-4);
+}
+.pdetail__title-block { flex: 1; min-width: 0; }
+.pdetail__title {
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-bold);
+  color: var(--c-text);
+  letter-spacing: var(--ls-tight);
+  margin-bottom: 4px;
+}
+.pdetail__meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.pdetail__type {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--c-text-subtle);
+}
+.pdetail__sep {
+  color: var(--c-text-subtle);
+  font-weight: var(--fw-bold);
+}
+
+.pdetail__numbers {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--s-2);
+  margin-bottom: var(--s-4);
+}
+.pdetail__num {
+  background: var(--c-surface-muted);
+  border-radius: var(--r-md);
+  padding: var(--s-3);
+  text-align: center;
+}
+.pdetail__num-l {
+  font-size: 10px;
+  font-weight: var(--fw-semibold);
+  color: var(--c-text-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-bottom: 4px;
+}
+.pdetail__num-v {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-bold);
+  color: var(--c-text);
+  letter-spacing: var(--ls-tight);
+}
+.pdetail__num-v--success { color: var(--c-success-strong); }
+
+.pdetail__section { margin-bottom: var(--s-5); }
+.pdetail__section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: var(--s-2);
+}
+.pdetail__section-title {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-bold);
+  color: var(--c-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: var(--s-2);
+}
+
+.pdetail__rows {
+  background: var(--c-surface-muted);
+  border-radius: var(--r-md);
+  padding: var(--s-2) var(--s-4);
+}
+.pdetail__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--s-2) 0;
+  font-size: var(--fs-sm);
+}
+.pdetail__row + .pdetail__row { border-top: 1px solid var(--c-border); }
+.pdetail__row-l {
+  color: var(--c-text-muted);
+  font-weight: var(--fw-medium);
+}
+.pdetail__row-v {
+  color: var(--c-text);
+  font-weight: var(--fw-semibold);
+}
+.pdetail__row-v--success { color: var(--c-success-strong); }
+.pdetail__row-v--warning { color: var(--c-warning-strong); }
+.pdetail__row-v--error   { color: var(--c-error-strong); }
+.pdetail__row--highlight {
+  border-top: 2px solid var(--c-border-strong) !important;
+  padding-top: var(--s-3);
+  margin-top: var(--s-1);
+}
+.pdetail__row--highlight .pdetail__row-l {
+  color: var(--c-text);
+  font-weight: var(--fw-bold);
+}
+
+.pdetail__skipped {
+  font-size: var(--fs-xs);
+  color: var(--c-text-subtle);
+  background: var(--c-surface-muted);
+  border-radius: var(--r-sm);
+  padding: var(--s-2) var(--s-3);
+  margin-bottom: var(--s-2);
+}
+
+.pdetail__schedule {
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.pdetail__sched-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  background: var(--c-surface);
+}
+.pdetail__sched-row + .pdetail__sched-row { border-top: 1px solid var(--c-border); }
+.pdetail__sched-row--paid { background: var(--c-success-bg); }
+.pdetail__sched-month {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-bold);
+  color: var(--c-text);
+}
+.pdetail__sched-date {
+  font-size: var(--fs-xs);
+  color: var(--c-text-subtle);
+  margin-top: 1px;
+}
+.pdetail__sched-amount {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-bold);
+  color: var(--c-text);
+}
+
+.pdetail__note {
+  font-size: var(--fs-sm);
+  color: var(--c-text-muted);
+  background: var(--c-surface-muted);
+  border-radius: var(--r-md);
+  padding: var(--s-3);
+  line-height: var(--lh-normal);
+}
+
+.pdetail__actions {
+  margin-top: var(--s-5);
+  padding-top: var(--s-4);
+  border-top: 1px solid var(--c-border);
+}
+
 /* ===== Pills row ===== */
 .pills-row {
   display: flex;

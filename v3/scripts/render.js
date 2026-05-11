@@ -12,6 +12,7 @@ import { ProjectCard } from '../components/ProjectCard.js';
 import { StatPill } from '../components/StatPill.js';
 import { EmptyState } from '../components/EmptyState.js';
 import { StatCard } from '../components/StatCard.js';
+import { ProjectDetail } from '../components/ProjectDetail.js';
 
 // Local UI state (per-page)
 const _bFilter = { aktif: true, tersedia: true, selesai: true };
@@ -347,8 +348,13 @@ export function handleAction(action, ctx) {
     return true;
   }
   if (action === 'open-project') {
-    // To be wired in commit 5 (project detail modal)
-    return false;
+    const id = ctx.id;
+    const p = (S.projects || []).find((x) => x.id === id);
+    if (!p) return true;
+    const body = document.getElementById('mo-detail-body');
+    if (body) body.innerHTML = ProjectDetail({ project: p });
+    if (window.__openModal) window.__openModal('detail');
+    return true;
   }
   if (action === 'goto-ops') {
     if (window.__navigate) window.__navigate('ops');

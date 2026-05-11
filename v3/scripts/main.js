@@ -302,3 +302,5 @@ function toast(msg, opts = {}) {
 // Expose for other modules
 window.__toast = toast;
 window.__navigate = navigate;
+window.__openModal = openModal;
+window.__closeModal = closeModal;
