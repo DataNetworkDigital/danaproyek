@@ -549,12 +549,30 @@ function stats(){
   const avail=kurOn?f.kurAmount-buf-f.living:0;
   const dep=S.projects.filter(p=>p.status==='aktif'||p.status==='terlambat').reduce((s,p)=>s+parseFloat(p.jumlah||0),0);
   const idle=kurOn?Math.max(0,avail-dep):0;
+  // Total NET profit collected so far (after deducting investor share, excluding pokok).
+  // For bulanan: prorate the full-project admin-net by paid/active months.
+  // For sekali: only count once paid in full.
   const tp=S.projects.reduce((s,p)=>{
+    const rt=p.returnType||'sekali';
+    if(rt==='bulanan'){
+      if(!p.schedule||p.schedule.length===0) return s;
+      const paidMonths=p.schedule.filter(si=>si.status==='paid').length;
+      const activeMonths=p.schedule.filter(si=>si.status!=='skipped').length;
+      if(activeMonths===0||paidMonths===0) return s;
+      const projectNet=calcAdminNetProfit(p);
+      return s+parseFloat((projectNet*paidMonths/activeMonths).toFixed(2));
+    }
+    // Sekali: count when there is at least one payment (fully settled)
+    if((p.payments||[]).length>0){
+      return s+calcAdminNetProfit(p);
+    }
+    return s;
+  },0);
+  // Gross collected for reference / display elsewhere
+  const tpGross=S.projects.reduce((s,p)=>{
     if((p.returnType||'sekali')==='bulanan'&&p.schedule){
-      // Use schedule as source of truth for bulanan
       return s+p.schedule.filter(si=>si.status==='paid').reduce((ps,si)=>ps+parseFloat(si.paidAmount||si.amount||0),0);
     }
-    // Sekali: use payments array
     return s+(p.payments||[]).reduce((ps,py)=>ps+parseFloat(py.jumlah||0),0);
   },0);
   const ms=f.startDate?Math.max(1,Math.round((new Date()-new Date(f.startDate+'T00:00:00'))/2629800000)):1;
@@ -906,7 +924,7 @@ function rD(){
   </div>
   <div class="mg">
     <div class="mc vio"><div class="ml">Deployed</div><div class="mv">${fj(st.dep)}</div><div class="ms">${act.length} proyek</div></div>
-    <div class="mc grn"><div class="ml">Total Profit</div><div class="mv">${fj(st.tp)}</div><div class="ms">Dari ${autoLog.length} bayaran</div></div>
+    <div class="mc grn"><div class="ml">Total Profit (Net)</div><div class="mv">${fj(st.tp)}</div><div class="ms">Setelah bagi hasil · ${autoLog.length} bayaran</div></div>
     ${kurOn?`<div class="mc ${st.idle>0?'org':'grn'}"><div class="ml">Dana Idle</div><div class="mv">${fj(st.idle)}</div><div class="ms">${st.idle>0?'Bisa di-deploy':'Fully deployed'}</div></div>`:''}
   </div>`;
   if(kurOn){

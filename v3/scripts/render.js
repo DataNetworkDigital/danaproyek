@@ -3,7 +3,7 @@
 // ============================================================
 
 import { S, isAdmin } from './state.js';
-import { kontrakP, publicKontrakP, profP, profUmum, wasTaken, isTidakTerambil } from './computations.js';
+import { kontrakP, publicKontrakP, profP, profUmum, calcAdminNetProfit, wasTaken, isTidakTerambil } from './computations.js';
 import { generateSchedule, getNextDue } from './schedule.js';
 import { fjPlain, fj, fd, du } from './formatters.js';
 
@@ -149,9 +149,22 @@ function renderProyek() {
   const tersediaList = projects.filter((p) => p.status === 'tersedia');
   const selesaiList = projects.filter((p) => p.status === 'selesai');
   const totalDeploy = aktifList.reduce((s, p) => s + parseFloat(p.jumlah || 0), 0);
-  const totalProfit = projects
-    .filter((p) => p.status === 'selesai')
-    .reduce((s, p) => s + profP(p, generateSchedule), 0);
+  // Net profit collected so far (after investor share, excluding pokok)
+  const totalProfit = projects.reduce((s, p) => {
+    const rt = p.returnType || 'sekali';
+    if (rt === 'bulanan') {
+      if (!p.schedule || p.schedule.length === 0) return s;
+      const paidMonths = p.schedule.filter((si) => si.status === 'paid').length;
+      const activeMonths = p.schedule.filter((si) => si.status !== 'skipped').length;
+      if (activeMonths === 0 || paidMonths === 0) return s;
+      const projectNet = calcAdminNetProfit(p, generateSchedule);
+      return s + parseFloat((projectNet * paidMonths / activeMonths).toFixed(2));
+    }
+    if ((p.payments || []).length > 0) {
+      return s + calcAdminNetProfit(p, generateSchedule);
+    }
+    return s;
+  }, 0);
 
   let html = '';
   // 3 stat cards (asymmetric — primary/secondary/tertiary, NOT 3-equal)
@@ -159,7 +172,7 @@ function renderProyek() {
     <div class="grid grid-3 gap-2 mb-4">
       ${StatCard({ label: 'Deploy aktif', value: 'Rp ' + fjPlain(totalDeploy), icon: 'trending-up', iconTone: 'primary', size: 'sm' })}
       ${StatCard({ label: 'Berjalan', value: aktifList.length + '', subtext: tersediaList.length + ' pendanaan', icon: 'circle-check', iconTone: 'success', size: 'sm' })}
-      ${StatCard({ label: 'Profit YTD', value: 'Rp ' + fjPlain(totalProfit), icon: 'check', iconTone: 'success', size: 'sm' })}
+      ${StatCard({ label: 'Profit (net)', value: 'Rp ' + fjPlain(totalProfit), icon: 'check', iconTone: 'success', size: 'sm', subtext: 'Setelah bagi hasil' })}
     </div>
   `;
 
