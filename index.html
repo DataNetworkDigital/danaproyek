@@ -2270,21 +2270,85 @@ function oDet(id){
     </div>`;
   }
   el.innerHTML=h;
-  // "Masuk Proyek" button for tersedia projects (admin only)
+  // "Masuk Proyek" + Pemodal allocation form (admin only)
   if(p.status==='tersedia' && isAdmin){
     const mpDv=document.createElement('div');mpDv.className='dv';el.appendChild(mpDv);
-    const mpWrap=document.createElement('div');mpWrap.style.cssText='background:var(--g-l);border-radius:14px;padding:14px;margin-bottom:4px;';
-    const mpLbl=document.createElement('div');mpLbl.style.cssText='font-size:12px;font-weight:800;color:#0B8F46;margin-bottom:8px;';mpLbl.textContent='Ambil proyek ini dan set tanggal masuk:';
-    mpWrap.appendChild(mpLbl);
-    const mpDate=document.createElement('input');mpDate.type='date';mpDate.className='fi';mpDate.value=new Date().toISOString().split('T')[0];mpDate.id='mp-date';mpDate.style.marginBottom='10px';
-    mpWrap.appendChild(mpDate);
-    const mpBtn=document.createElement('button');mpBtn.className='btn gr fw';mpBtn.textContent='\uD83D\uDE80 Masuk Proyek';mpBtn.onclick=function(){
-      var dateVal=document.getElementById('mp-date').value;
-      if(!dateVal){toast('❌ Tanggal wajib diisi');return;}
-      p.tanggalAktif=dateVal;p.status='aktif';save();cm('mo-det');rAll();toast('🚀 Proyek diambil!');
-    };
-    mpWrap.appendChild(mpBtn);
+    const mpWrap=document.createElement('div');
+    mpWrap.style.cssText='background:var(--g-l);border-radius:14px;padding:14px;margin-bottom:8px';
+    const deployAmt=parseFloat(p.jumlah||0);
+    const todayISO=new Date().toISOString().split('T')[0];
+    const investors=S.external.filter(e=>e.tipe==='investor');
+    mpWrap.innerHTML=`
+      <div style="font-size:13px;font-weight:900;color:#0B8F46;margin-bottom:12px">🚀 Aktivasi Proyek</div>
+      <div style="margin-bottom:12px">
+        <div class="fl">Tanggal Masuk</div>
+        <input type="date" class="fi" id="ap-date" value="${todayISO}">
+      </div>
+      <div style="margin-bottom:6px">
+        <div class="fl" style="display:flex;justify-content:space-between;align-items:center">
+          <span>Pemodal & Alokasi</span>
+          <span style="font-size:10px;color:var(--sub);font-weight:700">Deploy: ${fj(deployAmt)}</span>
+        </div>
+      </div>
+      <div id="ap-rows" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px"></div>
+      <button type="button" class="btn gh" id="ap-add" style="font-size:11px;padding:8px 12px">+ Tambah Pemodal</button>
+      <div id="ap-summary" style="font-size:11px;color:var(--sub);margin-top:12px;padding:8px 10px;background:rgba(255,255,255,.5);border-radius:9px;font-weight:700"></div>
+      <button type="button" class="btn gr fw" id="ap-go" style="margin-top:12px">🚀 Masuk Proyek</button>
+    `;
     el.appendChild(mpWrap);
+    function apAddRow(){
+      const rowsEl=document.getElementById('ap-rows');
+      const row=document.createElement('div');
+      row.className='ap-row';
+      row.style.cssText='background:#fff;border-radius:10px;padding:8px;display:flex;flex-direction:column;gap:6px';
+      row.innerHTML=`
+        <div style="display:grid;grid-template-columns:2fr 1fr auto;gap:6px;align-items:center">
+          <select class="fi ap-inv" style="font-size:12px;padding:8px 10px">
+            <option value="">— Pilih pemodal —</option>
+            ${investors.map(i=>`<option value="existing-${i.id}">${i.nama}</option>`).join('')}
+            <option value="new">+ Pemodal baru</option>
+          </select>
+          <input type="number" class="fi ap-amt" placeholder="jt" step="0.01" min="0" style="font-size:12px;padding:8px 10px">
+          <button type="button" class="ap-rm" style="background:var(--r-l);color:var(--r);border:none;border-radius:8px;width:32px;height:32px;font-size:14px;font-weight:900;cursor:pointer">×</button>
+        </div>
+        <input type="text" class="fi ap-name" placeholder="Nama pemodal baru" style="font-size:12px;padding:8px 10px;display:none">
+      `;
+      rowsEl.appendChild(row);
+      row.querySelector('.ap-inv').addEventListener('change',(e)=>{
+        const nameInp=row.querySelector('.ap-name');
+        nameInp.style.display=e.target.value==='new'?'block':'none';
+        apUpdateSummary();
+      });
+      row.querySelector('.ap-amt').addEventListener('input',apUpdateSummary);
+      row.querySelector('.ap-rm').addEventListener('click',()=>{
+        row.remove();
+        apUpdateSummary();
+      });
+    }
+    function apUpdateSummary(){
+      const total=[...document.querySelectorAll('.ap-amt')].reduce((s,i)=>s+parseFloat(i.value||0),0);
+      const remaining=deployAmt-total;
+      const summary=document.getElementById('ap-summary');
+      if(!summary) return;
+      const remainColor=remaining>=0?'#0B8F46':'var(--r)';
+      const remainLbl=remaining>=0?`Sisa ${fj(remaining)}`:`Kelebihan ${fj(-remaining)}`;
+      summary.innerHTML=`Total alokasi: <b style="color:var(--txt)">${fj(total)}</b> · <span style="color:${remainColor}">${remainLbl}</span>`;
+    }
+    document.getElementById('ap-add').onclick=apAddRow;
+    document.getElementById('ap-go').onclick=()=>activateProject(p.id);
+    apAddRow();
+    apUpdateSummary();
+  }
+  // "Batalkan Masuk Proyek" — undo activation (admin, no payments yet)
+  if((p.status==='aktif'||p.status==='terlambat') && isAdmin){
+    const noPayments=!p.schedule||!p.schedule.some(s=>s.status==='paid');
+    if(noPayments){
+      const undoBtn=document.createElement('button');
+      undoBtn.style.cssText='width:100%;margin-top:10px;padding:11px;background:transparent;color:var(--r);border:1.5px dashed var(--r-l);border-radius:11px;font-size:11px;font-weight:800;cursor:pointer;font-family:Nunito,sans-serif';
+      undoBtn.innerHTML='↩️ Batalkan Masuk Proyek';
+      undoBtn.onclick=()=>undoActivation(p.id);
+      el.appendChild(undoBtn);
+    }
   }
   // action buttons — created via DOM to avoid quote issues
   const dv=document.createElement('div');dv.className='dv';el.appendChild(dv);
@@ -2297,6 +2361,103 @@ function oDet(id){
   om('mo-det');
 }
 function markDone(id){const i=S.projects.findIndex(p=>p.id===id);if(i>=0){S.projects[i].status='selesai';save();cm('mo-det');rAll();toast('🏁 Selesai!');}}
+
+function activateProject(pid){
+  const p=S.projects.find(x=>x.id===pid);
+  if(!p) return;
+  const date=document.getElementById('ap-date')?.value;
+  if(!date){toast('❌ Tanggal wajib diisi');return;}
+  const rows=[...document.querySelectorAll('.ap-row')];
+  const allocations=rows.map(r=>{
+    const sel=r.querySelector('.ap-inv')?.value;
+    const name=r.querySelector('.ap-name')?.value?.trim();
+    const amt=parseFloat(r.querySelector('.ap-amt')?.value||0);
+    if(!sel||!amt||amt<=0) return null;
+    if(sel.startsWith('existing-')){
+      return {kind:'existing',id:sel.replace('existing-',''),amount:amt};
+    } else if(sel==='new'){
+      if(!name){toast('❌ Nama pemodal baru wajib');return null;}
+      return {kind:'new',name,amount:amt};
+    }
+    return null;
+  }).filter(Boolean);
+
+  // Apply
+  p.tanggalAktif=date;
+  p.status='aktif';
+  let pemodalCount=0;
+  allocations.forEach(pm=>{
+    if(pm.kind==='existing'){
+      const inv=S.external.find(e=>e.id===pm.id);
+      if(inv){
+        inv.alokasi=inv.alokasi||[];
+        // Replace if allocation to this project already exists, otherwise push
+        const exIdx=inv.alokasi.findIndex(a=>a.pid===pid);
+        if(exIdx>=0) inv.alokasi[exIdx]={pid,jumlah:pm.amount};
+        else inv.alokasi.push({pid,jumlah:pm.amount});
+        // Bump jumlah by the new allocation amount (assume new contribution)
+        inv.jumlah=parseFloat(inv.jumlah||0)+pm.amount;
+        pemodalCount++;
+      }
+    } else {
+      S.external.push({
+        id:uid(),
+        tipe:'investor',
+        nama:pm.name,
+        jumlah:pm.amount,
+        bagiHasilPct:0,
+        alokasi:[{pid,jumlah:pm.amount}],
+        status:'aktif',
+        tanggal:date,
+        catatan:''
+      });
+      pemodalCount++;
+    }
+  });
+  save();cm('mo-det');rAll();
+  toast(pemodalCount>0?`🚀 Proyek aktif · ${pemodalCount} pemodal`:'🚀 Proyek aktif');
+}
+
+function activateProjectSimple(pid){
+  // Fallback for legacy mp-date input (no pemodal form)
+  const p=S.projects.find(x=>x.id===pid);
+  if(!p) return;
+  const date=document.getElementById('mp-date')?.value;
+  if(!date){toast('❌ Tanggal wajib diisi');return;}
+  p.tanggalAktif=date;p.status='aktif';
+  save();cm('mo-det');rAll();
+  toast('🚀 Proyek diambil!');
+}
+
+function undoActivation(pid){
+  if(!confirm('Batalkan masuk proyek?\n\nStatus akan kembali ke Tersedia. Semua alokasi pemodal di proyek ini akan dihapus & total dana mereka dikurangi.\n\nLanjutkan?')) return;
+  const p=S.projects.find(x=>x.id===pid);
+  if(!p) return;
+  // Remove this project's allocations from all investors, reduce their jumlah
+  S.external.forEach(e=>{
+    if(!e.alokasi) return;
+    const removed=e.alokasi.filter(a=>a.pid===pid);
+    const removedSum=removed.reduce((s,a)=>s+parseFloat(a.jumlah||0),0);
+    e.alokasi=e.alokasi.filter(a=>a.pid!==pid);
+    e.jumlah=Math.max(0,parseFloat(e.jumlah||0)-removedSum);
+  });
+  // Remove fully-empty new pemodal that have no other allocations and no other context
+  S.external=S.external.filter(e=>{
+    if(e.tipe!=='investor') return true;
+    // Keep if has other allocations OR has jumlah > 0
+    return (e.alokasi&&e.alokasi.length>0)||parseFloat(e.jumlah||0)>0.001;
+  });
+  // Reset project
+  delete p.tanggalAktif;
+  p.status='tersedia';
+  if(p.schedule){
+    p.schedule.forEach(s=>{
+      if(s.status!=='paid') s.status='pending';
+    });
+  }
+  save();cm('mo-det');rAll();
+  toast('↩️ Masuk proyek dibatalkan');
+}
 
 // ── PAYMENT ───────────────────────────────────────────────────────────
 function oPay(pid){
