@@ -99,16 +99,30 @@ export function calcInvestorReturn(project, allocAmount, generateScheduleFn) {
   return parseFloat((totalUmumProfit * (amt / base)).toFixed(2));
 }
 
-/** Admin net profit after paying investors. */
+/** Admin fee (marketing) — carved out of gross return, per project. */
+export function adminFeePersen(p) { return parseFloat(p.adminFeePersen || 0); }
+export function adminFeeRecipient(p) { return p.adminFeeRecipient || 'Mas Hena'; }
+export function adminFeeMonthly(p) {
+  return parseFloat((kontrakP(p) * adminFeePersen(p) / 100).toFixed(2));
+}
+export function adminFeeTotal(p, generateScheduleFn) {
+  const rt = p.returnType || 'sekali';
+  if (rt === 'bulanan') return parseFloat((adminFeeMonthly(p) * activeDur(p, generateScheduleFn)).toFixed(2));
+  return adminFeeMonthly(p);
+}
+
+/** Owner net profit: gross return − admin fee − NON-owner investor shares.
+ *  Owners are the residual recipients, so their allocations are NOT subtracted. */
 export function calcAdminNetProfit(project, generateScheduleFn) {
   const totalAdminProfit = profP(project, generateScheduleFn);
   const invs = S.external.filter(
-    (e) => e.tipe === 'investor' && (e.alokasi || []).some((a) => a.pid === project.id)
+    (e) => e.tipe === 'investor' && !e.isOwner && (e.alokasi || []).some((a) => a.pid === project.id)
   );
   let totalInvShare = 0;
   invs.forEach((e) => {
     const a = e.alokasi.find((x) => x.pid === project.id) || {};
     totalInvShare += calcInvestorReturn(project, a.jumlah || 0, generateScheduleFn);
   });
-  return parseFloat((totalAdminProfit - totalInvShare).toFixed(2));
+  const fee = adminFeeTotal(project, generateScheduleFn);
+  return parseFloat((totalAdminProfit - totalInvShare - fee).toFixed(2));
 }
