@@ -1793,6 +1793,15 @@ function buildEF(e, tipe){
     <div class="fr">
       <div class="fg"><label class="fl">Tanggal Diterima</label><input class="fi" id="fe-t" type="date" value="${e?e.tanggal||ds:ds}"></div>
       <div class="fg"><label class="fl">Jadwal Bayar Berikutnya</label><input class="fi" id="fe-jb" type="date" value="${e?e.jadwalBayar||'':''}"></div>
+    </div>
+    <div class="fg">
+      <label class="fl" style="display:flex;justify-content:space-between;align-items:center">
+        <span>Assign ke Owner</span>
+        <span style="font-size:10px;color:var(--sub);font-weight:700">Wajib total = jumlah utang</span>
+      </label>
+      <div id="utang-owner-rows" style="display:flex;flex-direction:column;gap:8px;margin-bottom:6px"></div>
+      <button type="button" id="add-utang-owner-btn" style="background:var(--p-l);color:var(--p-darker);border:none;border-radius:8px;padding:7px 12px;font-size:11px;font-weight:800;cursor:pointer;font-family:Nunito,sans-serif">+ Tambah Owner</button>
+      <div class="fh mt6" id="utang-owner-summary">Belum ada alokasi owner</div>
     </div>`;
   } else {
     const existAlloc=(e&&e.alokasi)||[];
@@ -1838,6 +1847,13 @@ function buildEF(e, tipe){
     ['fe-j','fe-dur','fe-b'].forEach(id=>{ const el2=document.getElementById(id); if(el2) el2.addEventListener('input',calcC); });
     document.getElementById('fe-cb')?.addEventListener('input',calcBunga);
     if(e) calcC();
+    // Wire utang owner allocation rows
+    const existOwners=(e&&e.assignedOwners)||[];
+    if(existOwners.length>0) existOwners.forEach(a=>addUtangOwnerRow(a.ownerId,a.jumlah||''));
+    else addUtangOwnerRow('','');
+    document.getElementById('add-utang-owner-btn').onclick=()=>addUtangOwnerRow('','');
+    document.getElementById('fe-j')?.addEventListener('input',updUtangOwnerSummary);
+    updUtangOwnerSummary();
   } else {
     // build allocation rows
     const rowsEl=document.getElementById('inv-alloc-rows');
@@ -1902,6 +1918,42 @@ function updPinjInfo(){
   if(j>0&&dur>0&&cb>0){const total=cb*dur;el.innerHTML=`Total bayar: <b>${fj(total)}</b><br>Total bunga: <b style="color:var(--r)">${fj(total-j)}</b>`;}
   else el.textContent='Isi jumlah, durasi & cicilan';
 }
+function addUtangOwnerRow(ownerId,jumlah){
+  const rowsEl=document.getElementById('utang-owner-rows');if(!rowsEl)return;
+  const owners=S.external.filter(x=>x.tipe==='investor'&&x.isOwner);
+  const row=document.createElement('div');
+  row.className='utang-owner-row';
+  row.style.cssText='display:grid;grid-template-columns:2fr 1fr auto;gap:6px;align-items:center';
+  const sel=document.createElement('select');
+  sel.className='fi fs uo-id';sel.style.fontSize='11px';
+  sel.innerHTML=`<option value="">-- Pilih Owner --</option>${owners.map(o=>`<option value="${o.id}"${o.id===ownerId?' selected':''}>${o.nama}</option>`).join('')}<option value="_new">+ Owner baru</option>`;
+  const jml=document.createElement('input');
+  jml.className='fi uo-amt';jml.type='number';jml.step='0.01';jml.placeholder='jt';jml.value=jumlah||'';jml.style.fontSize='11px';
+  const rm=document.createElement('button');
+  rm.type='button';rm.style.cssText='background:var(--r-l);color:var(--r);border:none;border-radius:8px;width:30px;height:36px;font-size:14px;cursor:pointer';rm.textContent='×';
+  rm.onclick=()=>{row.remove();updUtangOwnerSummary();};
+  // If "+ Owner baru" picked, show inline name input row underneath
+  const nameWrap=document.createElement('div');
+  nameWrap.style.cssText='grid-column:1/-1;display:none';
+  const nameInp=document.createElement('input');
+  nameInp.className='fi uo-newname';nameInp.type='text';nameInp.placeholder='Nama owner baru';nameInp.style.cssText='font-size:11px;margin-top:4px';
+  nameWrap.appendChild(nameInp);
+  sel.addEventListener('change',()=>{nameWrap.style.display=sel.value==='_new'?'block':'none';updUtangOwnerSummary();});
+  jml.addEventListener('input',updUtangOwnerSummary);
+  row.appendChild(sel);row.appendChild(jml);row.appendChild(rm);
+  rowsEl.appendChild(row);
+  rowsEl.appendChild(nameWrap);
+}
+function updUtangOwnerSummary(){
+  const total=[...document.querySelectorAll('.uo-amt')].reduce((s,i)=>s+parseFloat(i.value||0),0);
+  const utangTotal=parseFloat(document.getElementById('fe-j')?.value||0);
+  const remaining=utangTotal-total;
+  const el=document.getElementById('utang-owner-summary');if(!el)return;
+  if(utangTotal===0){el.textContent='Isi jumlah utang dulu';return;}
+  const okColor=Math.abs(remaining)<0.01?'#0B8F46':remaining<0?'var(--r)':'#B45309';
+  const okLbl=Math.abs(remaining)<0.01?'✓ Pas':remaining<0?`Kelebihan ${fj(-remaining)}`:`Sisa ${fj(remaining)}`;
+  el.innerHTML=`Total alokasi: <b>${fj(total)}</b> · <span style="color:${okColor}">${okLbl}</span>`;
+}
 function setInvOwnerType(isOwner){
   const hidden=document.getElementById('fe-isowner');
   const owBtn=document.getElementById('fe-tipe-owner');
@@ -1925,6 +1977,27 @@ function saveExt(tipe){
   let obj={tipe,nama:n,jumlah:j,status:st2,catatan:ct,tanggal:t};
   if(tipe==='pinjaman'){
     obj={...obj,durasi:parseInt(document.getElementById('fe-dur')?.value||0),bungaPct:parseFloat(document.getElementById('fe-b')?.value||0),cicilanBulan:parseFloat(document.getElementById('fe-cb')?.value||0),jadwalBayar:document.getElementById('fe-jb')?.value};
+    // Collect assignedOwners — create new owner inline if "_new" selected
+    const ownerRows=[...document.querySelectorAll('.utang-owner-row')];
+    const assignedOwners=[];
+    ownerRows.forEach(row=>{
+      const sel=row.querySelector('.uo-id')?.value;
+      const amt=parseFloat(row.querySelector('.uo-amt')?.value||0);
+      if(!sel||!amt||amt<=0) return;
+      let ownerId=sel;
+      if(sel==='_new'){
+        // Create new owner inline — name input is in NEXT sibling div
+        const wrap=row.nextElementSibling;
+        const nameInput=wrap?.querySelector('.uo-newname');
+        const name=nameInput?.value?.trim();
+        if(!name){toast('❌ Nama owner baru wajib');return;}
+        const newOwner={id:uid(),tipe:'investor',isOwner:true,nama:name,jumlah:0,bagiHasilPct:0,alokasi:[],status:'aktif',tanggal:t};
+        S.external.push(newOwner);
+        ownerId=newOwner.id;
+      }
+      assignedOwners.push({ownerId,jumlah:amt});
+    });
+    obj.assignedOwners=assignedOwners;
   } else {
     const isOwner=document.getElementById('fe-isowner')?.value==='1';
     const bh=parseFloat(document.getElementById('fe-bh')?.value||0);
