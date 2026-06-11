@@ -619,8 +619,15 @@ function toast(m,opts){
   clearTimeout(_tt);
   _tt=setTimeout(()=>t.classList.remove('show'),dur);
 }
-function om(id){ document.getElementById(id).classList.add('op'); document.body.classList.add('modal-open'); }
-function cm(id){ document.getElementById(id).classList.remove('op'); if(!document.querySelector('.mo.op')) document.body.classList.remove('modal-open'); }
+function om(id){ const el=document.getElementById(id); if(!el)return; el.classList.add('op'); document.body.classList.add('modal-open'); }
+function cm(id){ const el=document.getElementById(id); if(el) el.classList.remove('op'); syncModalState(); }
+// Safety: ensure body.modal-open is always synced with the actual open modal state.
+// Prevents stuck "can't scroll" bugs caused by edit flows that close+reopen modals
+// or by errors in render functions that interrupt cleanup.
+function syncModalState(){
+  if(document.querySelector('.mo.op')) document.body.classList.add('modal-open');
+  else document.body.classList.remove('modal-open');
+}
 
 // ── BERANDA ───────────────────────────────────────────────────────────
 let _bSort='default',_bSortDir=1,_bFilter={tersedia:true,aktif:true,selesai:true},_bPanelOpen='';
@@ -1858,7 +1865,7 @@ function confirmSchedulePay(pid, month){
       p.payments.push({id:uid(),tanggal:date,jumlah:amt,catatan:note});
       p.status='selesai';
     }
-    save();cm('mo-det');oDet(pid);rAll();
+    save();oDet(pid);rAll();
     toast('✅ Pembayaran dicatat!');
   };
   const cancelBtn=document.createElement('button');
@@ -1913,7 +1920,7 @@ function editSchedulePay(pid, month){
       p.payments[payIdx].tanggal=date;
       p.payments[payIdx].catatan=note;
     }
-    save();cm('mo-det');oDet(pid);rAll();
+    save();oDet(pid);rAll();
     toast('✅ Pembayaran diupdate!');
   };
   const cancelBtn=document.createElement('button');
@@ -2286,10 +2293,16 @@ function fixProjectStatuses(){
 }
 function rAll(){
   fixProjectStatuses();
-  if(CP==='b') rB();
-  else if(CP==='m') rM();
-  else if(CP==='k') rK();
-  else if(CP==='e') rE();
+  try {
+    if(CP==='b') rB();
+    else if(CP==='m') rM();
+    else if(CP==='k') rK();
+    else if(CP==='e') rE();
+  } catch(e) {
+    console.error('Render error:', e);
+  }
+  // Always self-heal modal-open state after a render — prevents stuck scroll
+  syncModalState();
 }
 
 // ── PIN & ADMIN ──────────────────────────────────────────────────────
