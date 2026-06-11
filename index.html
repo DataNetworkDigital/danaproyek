@@ -405,6 +405,15 @@ function retBulananRp(p){
   if(p.returnMode==='persen') return parseFloat((kontrakP(p)*parseFloat(p.returnPersen||0)/100).toFixed(2));
   return parseFloat(p.returnBulanan||0);
 }
+// ── ADMIN FEE (marketing) — carved out of gross return, per-project ──
+function adminFeePersen(p){ return parseFloat(p.adminFeePersen||0); }
+function adminFeeRecipient(p){ return p.adminFeeRecipient||'Mas Hena'; }
+function adminFeeMonthly(p){ return parseFloat((kontrakP(p)*adminFeePersen(p)/100).toFixed(2)); }
+function adminFeeTotal(p){
+  const rt=p.returnType||'sekali';
+  if(rt==='bulanan') return parseFloat((adminFeeMonthly(p)*activeDur(p)).toFixed(2));
+  return adminFeeMonthly(p); // sekali: one-time fee
+}
 function retLabel(p){
   const rt=p.returnType||'sekali';
   if(rt==='bulanan'){
@@ -470,16 +479,18 @@ function calcInvestorReturn(project, allocAmount){
   return parseFloat((totalUmumProfit * (amt/base)).toFixed(2));
 }
 
-// Calculate admin's net profit after paying all investors
+// Calculate owner's net profit: gross return − admin fee − NON-owner investor shares.
+// Owners are the residual recipients, so their allocations are NOT subtracted.
 function calcAdminNetProfit(project){
   const totalAdminProfit=profP(project);
-  const invs=S.external.filter(e=>e.tipe==='investor'&&(e.alokasi||[]).some(a=>a.pid===project.id));
+  const invs=S.external.filter(e=>e.tipe==='investor'&&!e.isOwner&&(e.alokasi||[]).some(a=>a.pid===project.id));
   let totalInvShare=0;
   invs.forEach(e=>{
     const a=e.alokasi.find(x=>x.pid===project.id)||{};
     totalInvShare+=calcInvestorReturn(project, a.jumlah||0);
   });
-  return parseFloat((totalAdminProfit - totalInvShare).toFixed(2));
+  const fee=adminFeeTotal(project);
+  return parseFloat((totalAdminProfit - totalInvShare - fee).toFixed(2));
 }
 
 // Generate monthly payment schedule for a project
@@ -941,6 +952,24 @@ function getCalendarEvents(year,month){
       });
     });
   });
+  // 4. Admin fee (marketing) — per schedule month, for projects with fee > 0
+  S.projects.forEach(p=>{
+    if(adminFeePersen(p)<=0) return;
+    const rt=p.returnType||'sekali';
+    if(rt!=='bulanan'||!p.schedule) return;
+    const monthlyFee=adminFeeMonthly(p);
+    if(monthlyFee<=0) return;
+    p.schedule.forEach(s=>{
+      if(s.status==='skipped') return;
+      if(!inMonth(s.dueDate)) return;
+      events[s.dueDate]=events[s.dueDate]||[];
+      events[s.dueDate].push({
+        type:'adminfee',
+        label:`${adminFeeRecipient(p)} (${p.peminjam})`,
+        amount:monthlyFee,
+      });
+    });
+  });
   return events;
 }
 function rK(){
@@ -950,13 +979,15 @@ function rK(){
   const year=_kalYear,month=_kalMonth;
   const events=getCalendarEvents(year,month);
   // Compute totals
-  let totalIncome=0,totalUtang=0,totalBagiHasil=0;
+  let totalIncome=0,totalUtang=0,totalBagiHasil=0,totalAdminFee=0;
   Object.values(events).flat().forEach(e=>{
     if(e.type==='income') totalIncome+=e.amount;
     else if(e.type==='utang') totalUtang+=e.amount;
     else if(e.type==='bagihasil') totalBagiHasil+=e.amount;
+    else if(e.type==='adminfee') totalAdminFee+=e.amount;
   });
-  const net=totalIncome-totalUtang-totalBagiHasil;
+  const totalOut=totalUtang+totalBagiHasil+totalAdminFee;
+  const net=totalIncome-totalOut;
   const monthNames=['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
   const todayISO=new Date().toISOString().split('T')[0];
   // Build calendar grid (Sun=0...Sat=6)
@@ -972,7 +1003,7 @@ function rK(){
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px">
       <div class="mc grn"><div class="ml">Income</div><div class="mv">${fj(totalIncome)}</div></div>
-      <div class="mc red"><div class="ml">Outgoing</div><div class="mv">${fj(totalUtang+totalBagiHasil)}</div><div class="ms">U ${fj(totalUtang)} + BH ${fj(totalBagiHasil)}</div></div>
+      <div class="mc red"><div class="ml">Outgoing</div><div class="mv">${fj(totalOut)}</div><div class="ms">U ${fj(totalUtang)} · BH ${fj(totalBagiHasil)}${totalAdminFee>0?` · AF ${fj(totalAdminFee)}`:''}</div></div>
       <div class="mc ${net>=0?'vio':'red'}"><div class="ml">Net</div><div class="mv">${fj(net)}</div></div>
     </div>
     <div style="background:var(--card);border-radius:14px;padding:10px;box-shadow:var(--sh);margin-bottom:14px">
@@ -1012,8 +1043,8 @@ function rK(){
       h+=`<div style="background:var(--card);border-radius:12px;padding:10px 12px;margin-bottom:8px;border:1px solid var(--bdr)">
         <div style="font-size:11px;font-weight:900;color:var(--p-darker);margin-bottom:5px">${fd(date)}</div>
         ${evs.map(e=>{
-          const color=e.type==='income'?'#0B8F46':e.type==='utang'?'#1D4ED8':'#B45309';
-          const icon=e.type==='income'?'🟢':e.type==='utang'?'🔴':'🟠';
+          const color=e.type==='income'?'#0B8F46':e.type==='utang'?'#1D4ED8':e.type==='adminfee'?'#7C3AED':'#B45309';
+          const icon=e.type==='income'?'🟢':e.type==='utang'?'🔴':e.type==='adminfee'?'💼':'🟠';
           const sign=e.type==='income'?'+':'-';
           return `<div class="fb txx" style="padding:3px 0"><span>${icon} ${e.label}${e.paid?' ✓':''}${e.isFinal?' +pokok':''}</span><span style="color:${color};font-weight:800">${sign}${fj(e.amount)}</span></div>`;
         }).join('')}
@@ -1272,6 +1303,14 @@ function oPM(id){
         <div class="fh" style="margin-bottom:0">Profit admin otomatis dihitung dari: Nilai Kontrak − Jumlah Deploy</div>
       </div>
     </div>
+    <div style="background:#FEF3C7;border-radius:12px;padding:12px;margin-bottom:13px;border:1px solid #FDE68A">
+      <div style="font-size:12px;font-weight:900;color:#B45309;margin-bottom:4px">💼 Admin Fee (Marketing)</div>
+      <div class="fh" style="margin-bottom:10px">Dikarve-out dari return. Bagi hasil owner = return − admin fee − investor non-owner.</div>
+      <div class="fr" style="margin-bottom:0">
+        <div class="fg" style="margin-bottom:0"><label class="fl">Fee (%)</label><input class="fi" id="fp-adminfee" type="number" step="0.1" value="${p?(p.adminFeePersen||''):'0.5'}" placeholder="0.5"><div class="fh">% dari kontrak/bulan</div></div>
+        <div class="fg" style="margin-bottom:0"><label class="fl">Penerima</label><input class="fi" id="fp-adminfee-to" value="${p?(p.adminFeeRecipient||'Mas Hena'):'Mas Hena'}" placeholder="Mas Hena"></div>
+      </div>
+    </div>
     <div id="fp-c" style="display:none" class="fc-note"></div>
     <div class="fr">
       <div class="fg"><label class="fl">Tanggal Mulai *</label><input class="fi" id="fp-m" type="date" value="${p?p.tanggalMulai:ds}"></div>
@@ -1309,7 +1348,9 @@ function oPM(id){
     document.getElementById('fp-ret-sekali').style.display=this.value!=='bulanan'?'block':'none';
     updCalc();
   });
-  ['fp-rb','fp-dur','fp-pct','fp-su-rp-val','fp-su-pct-val'].forEach(id=>{const el2=document.getElementById(id);if(el2)el2.addEventListener('input',updCalc);});
+  ['fp-rb','fp-dur','fp-su-rp-val','fp-su-pct-val','fp-adminfee'].forEach(id=>{const el2=document.getElementById(id);if(el2)el2.addEventListener('input',updCalc);});
+  // Return% drives deploy auto-fill: deploy% = 100 − return%
+  document.getElementById('fp-pct')?.addEventListener('input',function(){autoFillDeploy();updCalc();});
   // sekali umum mode toggle
   let _sekaliModeUmum=p?.sekaliModeUmum||'persen';
   document.getElementById('fp-sumode-rp').addEventListener('click',function(){
@@ -1354,6 +1395,20 @@ function getFormDeploy(){
     return k*pct/100;
   }
   return parseFloat(document.getElementById('fp-j')?.value||0);
+}
+// When return% is set, deploy auto-fills to (100 − return%) of contract.
+// Only applies when return is in % mode; switches deploy to % mode automatically.
+function autoFillDeploy(){
+  const retMode=window._getRetMode?window._getRetMode():'persen';
+  if(retMode!=='persen') return;
+  const retPct=parseFloat(document.getElementById('fp-pct')?.value||0);
+  if(retPct<=0) return;
+  const deployPct=parseFloat((100-retPct).toFixed(2));
+  // Switch deploy to % mode if not already
+  const dm=window._getDeployMode?window._getDeployMode():'rupiah';
+  if(dm!=='persen') document.getElementById('fp-dmode-pct')?.click();
+  const jpct=document.getElementById('fp-jpct');
+  if(jpct) jpct.value=deployPct;
 }
 function updCalc(){
   const k=parseFloat(document.getElementById('fp-k')?.value||0);
@@ -1418,7 +1473,9 @@ function savePrj(){
   if(!m||!jt){toast('❌ Tanggal wajib diisi');return;}
   const kontrak=k;
   const deployPersen=dm==='persen'?parseFloat(document.getElementById('fp-jpct')?.value||0):0;
-  const data={peminjam:n,kontrak,jumlah:parseFloat(j.toFixed(2)),deployMode:dm,deployPersen,returnType:rt,tanggalMulai:m,tanggalJT:jt,status:s,catatan:ct};
+  const adminFeePersen=parseFloat(document.getElementById('fp-adminfee')?.value||0);
+  const adminFeeRecipient=document.getElementById('fp-adminfee-to')?.value?.trim()||'Mas Hena';
+  const data={peminjam:n,kontrak,jumlah:parseFloat(j.toFixed(2)),deployMode:dm,deployPersen,adminFeePersen,adminFeeRecipient,returnType:rt,tanggalMulai:m,tanggalJT:jt,status:s,catatan:ct};
   if(!eP) data.deployBasis=true;
   if(rt==='bulanan'){
     const dur=parseInt(document.getElementById('fp-dur')?.value||0);
@@ -1539,10 +1596,16 @@ function oDet(id){
     ${d!==null?`<div class="ir"><span class="ik">Status Waktu</span><span class="iv" style="color:${gc(d)}">${gl(d)}</span></div>`:''}
     ${p.tanggalAktif?`<div class="ir"><span class="ik">Tanggal Masuk</span><span class="iv">${fd(p.tanggalAktif)}</span></div>`:''}
     ${p.catatan?`<div class="ir"><span class="ik">Catatan</span><span class="iv">${p.catatan}</span></div>`:''}`;
-  if(invs.length>0){
-    h+=`<div class="dv"></div><div style="font-weight:900;font-size:13px;margin-bottom:8px">🟠 Investor Terlibat</div>`;
-    invs.forEach(e=>{const a=e.alokasi.find(x=>x.pid===id)||{};const invRet=calcInvestorReturn(p, a.jumlah||0);const rt=p.returnType||'sekali';const umumLbl=rt==='bulanan'?(p.returnModeUmum==='persen'?`${p.returnPersenUmum}%/bln umum`:`${fj(parseFloat(p.returnBulananUmum||0))}/bln umum`):'umum rate';h+=`<div class="pi"><div><div style="font-weight:800;font-size:12px">${e.nama}</div><div class="txx tg">Alokasi: ${fj(a.jumlah||0)} · ${umumLbl}</div></div><div class="tred tbold">-${fj(invRet)}</div></div>`;});
-    h+=`<div style="background:var(--g-l);border-radius:8px;padding:8px 11px;margin-top:6px;font-size:11px;font-weight:800;color:#0B8F46">Net profit kamu: ${fj(calcAdminNetProfit(p))}</div>`;
+  const nonOwnerInvs=invs.filter(e=>!e.isOwner);
+  const fee=adminFeeTotal(p);
+  if(nonOwnerInvs.length>0||fee>0){
+    h+=`<div class="dv"></div><div style="font-weight:900;font-size:13px;margin-bottom:8px">💰 Rincian Bagi Hasil</div>`;
+    h+=`<div class="pi"><div><div style="font-weight:800;font-size:12px">Return gross</div></div><div class="tgrn tbold">+${fj(profP(p))}</div></div>`;
+    if(fee>0){
+      h+=`<div class="pi"><div><div style="font-weight:800;font-size:12px">💼 ${adminFeeRecipient(p)}</div><div class="txx tg">Admin fee ${adminFeePersen(p)}%/bln × ${activeDur(p)} bln</div></div><div class="tred tbold">-${fj(fee)}</div></div>`;
+    }
+    nonOwnerInvs.forEach(e=>{const a=e.alokasi.find(x=>x.pid===id)||{};const invRet=calcInvestorReturn(p, a.jumlah||0);const rt=p.returnType||'sekali';const umumLbl=rt==='bulanan'?(p.returnModeUmum==='persen'?`${p.returnPersenUmum}%/bln umum`:`${fj(parseFloat(p.returnBulananUmum||0))}/bln umum`):'umum rate';h+=`<div class="pi"><div><div style="font-weight:800;font-size:12px">${e.nama}</div><div class="txx tg">Alokasi: ${fj(a.jumlah||0)} · ${umumLbl}</div></div><div class="tred tbold">-${fj(invRet)}</div></div>`;});
+    h+=`<div style="background:var(--g-l);border-radius:8px;padding:8px 11px;margin-top:6px;font-size:11px;font-weight:800;color:#0B8F46">Bagi hasil owner: ${fj(calcAdminNetProfit(p))}</div>`;
   }
   // Schedule view
   h+=`<div class="dv"></div>`;
