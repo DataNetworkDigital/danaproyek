@@ -816,7 +816,7 @@ function pCard(p, isAdmin){
       ${p.status!=='selesai'&&(isAdmin||d===null||d>=0)?`<span style="font-size:10px;font-weight:700;color:${gc(d)}">⌛ ${gl(d)||'—'}</span>`:''}
       ${isAdmin&&pyc>0?`<span style="font-size:10px;color:var(--sub);font-weight:700">💳 ${pyc}×</span>`:''}
     </div>
-    ${isAdmin&&invAlloc.length>0?`<div style="margin-bottom:8px">${invAlloc.map(e=>`<span class="at">👤 ${e.nama}</span>`).join('')}</div>`:''}
+    ${isAdmin&&invAlloc.length>0?`<div style="margin-bottom:8px">${invAlloc.map(e=>`<span class="at" style="${e.isOwner?'background:#EDE9FE;color:#6D28D9':''}">${e.isOwner?'👑':'👤'} ${e.nama}</span>`).join('')}</div>`:''}
     <div class="fb mb8 txx"><span class="tg tbold">Progress</span><span class="tvio tbold">${Math.round(prog)}%</span></div>
     <div class="pw mb8"><div class="pb ${pbcls}" style="width:${prog}%"></div></div>
     ${isAdmin?`<div class="fb txx"><span class="tg">Deploy: <b style="color:var(--txt)">${fj(p.jumlah)}</b></span></div><div class="fb txx mt6">`:`<div class="fb txx">`}<span class="tg">Return: <b style="color:var(--txt)">${_retLbl}</b></span><span class="tgrn tbold">+${fj(_prof)} profit</span></div>
@@ -855,10 +855,174 @@ function rM(){
 function swMT(t){ MT=t; rM(); }
 
 // ── KALENDER ──────────────────────────────────────────────────────────
+let _kalMonth=null,_kalYear=null;
+function getCalendarEvents(year,month){
+  // Returns map: YYYY-MM-DD → [{type, label, amount, color}]
+  const events={};
+  const monthStart=new Date(Date.UTC(year,month,1));
+  const monthEnd=new Date(Date.UTC(year,month+1,0));
+  const inMonth=(s)=>{
+    if(!s) return false;
+    const d=new Date(s+'T00:00:00Z');
+    return d>=monthStart && d<=monthEnd;
+  };
+  // 1. Income: payment schedule items (paid + pending) from active projects
+  S.projects.forEach(p=>{
+    const rt=p.returnType||'sekali';
+    if(rt==='bulanan'&&p.schedule){
+      p.schedule.forEach(s=>{
+        if(s.status==='skipped') return;
+        if(!inMonth(s.dueDate)) return;
+        events[s.dueDate]=events[s.dueDate]||[];
+        events[s.dueDate].push({
+          type:'income',
+          label:p.peminjam,
+          amount:parseFloat(s.paidAmount||s.amount||0),
+          paid:s.status==='paid',
+          pid:p.id,
+          isFinal:s.isFinal,
+        });
+      });
+    } else {
+      // sekali: single event at tanggalJT
+      if(inMonth(p.tanggalJT)&&(p.status==='aktif'||p.status==='terlambat')){
+        events[p.tanggalJT]=events[p.tanggalJT]||[];
+        events[p.tanggalJT].push({
+          type:'income',
+          label:p.peminjam,
+          amount:kontrakP(p),
+          paid:(p.payments||[]).length>0,
+          pid:p.id,
+        });
+      }
+    }
+  });
+  // 2. Utang cicilan: KUR/pinjaman jadwalBayar
+  S.external.filter(e=>e.tipe==='pinjaman'&&e.status!=='selesai').forEach(e=>{
+    if(!e.jadwalBayar) return;
+    if(!inMonth(e.jadwalBayar)) return;
+    events[e.jadwalBayar]=events[e.jadwalBayar]||[];
+    events[e.jadwalBayar].push({
+      type:'utang',
+      label:e.nama,
+      amount:parseFloat(e.cicilanBulan||0),
+    });
+  });
+  // 3. Bagi hasil ke investor non-owner: per paid schedule item, compute investor share
+  S.projects.forEach(p=>{
+    const rt=p.returnType||'sekali';
+    if(rt!=='bulanan'||!p.schedule) return;
+    const nonOwnerInvs=S.external.filter(e=>e.tipe==='investor'&&!e.isOwner&&(e.alokasi||[]).some(a=>a.pid===p.id));
+    if(nonOwnerInvs.length===0) return;
+    p.schedule.forEach(s=>{
+      if(s.status==='skipped') return;
+      if(!inMonth(s.dueDate)) return;
+      const monthlyGross=parseFloat(s.amount||0);
+      nonOwnerInvs.forEach(inv=>{
+        const a=inv.alokasi.find(x=>x.pid===p.id);
+        if(!a) return;
+        const base=publicKontrakP(p);
+        if(base<=0) return;
+        const share=monthlyGross*(parseFloat(a.jumlah||0)/base);
+        if(share<=0) return;
+        events[s.dueDate]=events[s.dueDate]||[];
+        events[s.dueDate].push({
+          type:'bagihasil',
+          label:`${inv.nama} (${p.peminjam})`,
+          amount:share,
+        });
+      });
+    });
+  });
+  return events;
+}
 function rK(){
   const el=document.getElementById('p-k');if(!el)return;
-  el.innerHTML=`<div class="es"><div class="ei">📅</div><div class="et">Kalender</div><div class="esb">Coming in commit 4</div></div>`;
+  const now=new Date();
+  if(_kalYear===null){_kalYear=now.getFullYear();_kalMonth=now.getMonth();}
+  const year=_kalYear,month=_kalMonth;
+  const events=getCalendarEvents(year,month);
+  // Compute totals
+  let totalIncome=0,totalUtang=0,totalBagiHasil=0;
+  Object.values(events).flat().forEach(e=>{
+    if(e.type==='income') totalIncome+=e.amount;
+    else if(e.type==='utang') totalUtang+=e.amount;
+    else if(e.type==='bagihasil') totalBagiHasil+=e.amount;
+  });
+  const net=totalIncome-totalUtang-totalBagiHasil;
+  const monthNames=['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+  const todayISO=new Date().toISOString().split('T')[0];
+  // Build calendar grid (Sun=0...Sat=6)
+  const firstDay=new Date(Date.UTC(year,month,1));
+  const lastDay=new Date(Date.UTC(year,month+1,0));
+  const startDow=firstDay.getUTCDay();
+  const daysInMonth=lastDay.getUTCDate();
+  let h=`
+    <div class="fb" style="margin-bottom:12px">
+      <button onclick="kalNav(-1)" style="background:var(--card);border:1px solid var(--bdr);border-radius:10px;width:38px;height:38px;font-size:16px;font-weight:900;cursor:pointer;font-family:Nunito,sans-serif">‹</button>
+      <div style="font-size:15px;font-weight:900;text-align:center;flex:1">${monthNames[month]} ${year}</div>
+      <button onclick="kalNav(1)" style="background:var(--card);border:1px solid var(--bdr);border-radius:10px;width:38px;height:38px;font-size:16px;font-weight:900;cursor:pointer;font-family:Nunito,sans-serif">›</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px">
+      <div class="mc grn"><div class="ml">Income</div><div class="mv">${fj(totalIncome)}</div></div>
+      <div class="mc red"><div class="ml">Outgoing</div><div class="mv">${fj(totalUtang+totalBagiHasil)}</div><div class="ms">U ${fj(totalUtang)} + BH ${fj(totalBagiHasil)}</div></div>
+      <div class="mc ${net>=0?'vio':'red'}"><div class="ml">Net</div><div class="mv">${fj(net)}</div></div>
+    </div>
+    <div style="background:var(--card);border-radius:14px;padding:10px;box-shadow:var(--sh);margin-bottom:14px">
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-bottom:6px;font-size:9px;font-weight:900;color:var(--sub);text-align:center;text-transform:uppercase;letter-spacing:.4px">
+        <div>Min</div><div>Sen</div><div>Sel</div><div>Rab</div><div>Kam</div><div>Jum</div><div>Sab</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">`;
+  // Empty cells before day 1
+  for(let i=0;i<startDow;i++) h+=`<div></div>`;
+  let _kalSelected=null; // not used yet — placeholder
+  for(let d=1;d<=daysInMonth;d++){
+    const iso=`${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const dayEvents=events[iso]||[];
+    const dayIncome=dayEvents.filter(e=>e.type==='income').reduce((s,e)=>s+e.amount,0);
+    const dayOut=dayEvents.filter(e=>e.type!=='income').reduce((s,e)=>s+e.amount,0);
+    let bg='transparent',brd='1px solid transparent';
+    if(dayEvents.length>0){
+      if(dayIncome>dayOut) bg='#E6F4EE';
+      else if(dayOut>dayIncome) bg='#FCE8EC';
+      else bg='#F1F5F9';
+    }
+    if(iso===todayISO) brd='2px solid var(--p)';
+    h+=`<div onclick="kalOpenDay('${iso}')" style="aspect-ratio:1;background:${bg};border:${brd};border-radius:10px;padding:4px 5px;cursor:pointer;display:flex;flex-direction:column;justify-content:space-between;font-size:11px;font-weight:700;min-height:42px">
+      <span style="color:${iso===todayISO?'var(--p)':'var(--txt)'};font-weight:900">${d}</span>
+      ${dayEvents.length>0?`<span style="display:flex;gap:1px;align-items:flex-end;font-size:7px"><span style="width:5px;height:5px;border-radius:50%;background:#0B8F46"></span>${dayOut>0?`<span style="width:5px;height:5px;border-radius:50%;background:#DC2626"></span>`:''}</span>`:''}
+    </div>`;
+  }
+  h+=`</div></div>`;
+  // List of events this month
+  const sortedDates=Object.keys(events).sort();
+  if(sortedDates.length===0){
+    h+=`<div class="es" style="padding:30px 16px"><div class="ei">📭</div><div class="et">Tidak ada event bulan ini</div></div>`;
+  } else {
+    h+=`<div style="font-size:13px;font-weight:900;color:var(--txt);margin-bottom:8px">📌 Daftar Event</div>`;
+    sortedDates.forEach(date=>{
+      const evs=events[date];
+      h+=`<div style="background:var(--card);border-radius:12px;padding:10px 12px;margin-bottom:8px;border:1px solid var(--bdr)">
+        <div style="font-size:11px;font-weight:900;color:var(--p-darker);margin-bottom:5px">${fd(date)}</div>
+        ${evs.map(e=>{
+          const color=e.type==='income'?'#0B8F46':e.type==='utang'?'#1D4ED8':'#B45309';
+          const icon=e.type==='income'?'🟢':e.type==='utang'?'🔴':'🟠';
+          const sign=e.type==='income'?'+':'-';
+          return `<div class="fb txx" style="padding:3px 0"><span>${icon} ${e.label}${e.paid?' ✓':''}${e.isFinal?' +pokok':''}</span><span style="color:${color};font-weight:800">${sign}${fj(e.amount)}</span></div>`;
+        }).join('')}
+      </div>`;
+    });
+  }
+  el.innerHTML=h;
 }
+function kalNav(delta){
+  if(_kalMonth===null){const n=new Date();_kalYear=n.getFullYear();_kalMonth=n.getMonth();}
+  _kalMonth+=delta;
+  if(_kalMonth<0){_kalMonth=11;_kalYear--;}
+  else if(_kalMonth>11){_kalMonth=0;_kalYear++;}
+  rK();
+}
+function kalOpenDay(iso){/* placeholder — future: show modal with day events */}
 
 // ── PEMODAL (Owner / Non-Owner / Utang) ──────────────────────────────
 
