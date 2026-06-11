@@ -750,21 +750,18 @@ function rB(){
   const tersediaC=S.projects.filter(p=>p.status==='tersedia').length;
   const aktifC=S.projects.filter(p=>p.status==='aktif'||p.status==='terlambat').length;
   const selesaiC=S.projects.filter(p=>p.status==='selesai').length;
-  // === Hero: Asset Under Management with period switcher ===
-  const AUM_PERIODS=[['lifetime','Lifetime'],['yoy','YoY'],['1y','1Y'],['ytd','YTD'],['mom','MoM'],['1m','1M'],['mtd','MTD'],['active','Active']];
+  // === Hero: Asset Under Management — Lifetime / Active switcher ===
+  const AUM_PERIODS=[['lifetime','Lifetime'],['active','Active']];
+  if(_aumPeriod!=='lifetime'&&_aumPeriod!=='active') _aumPeriod='lifetime';
   const aum=aumForPeriod(_aumPeriod);
-  // Delta chip: YoY/MoM show comparison vs previous period; others show return
+  // Lifetime totals (denominator for the "still working" bar)
+  const lifetimeTotal=aumForPeriod('lifetime').total;
+  const activeTotal=aumForPeriod('active').total;
+  const workingPct=lifetimeTotal>0?Math.min(100,Math.round((activeTotal/lifetimeTotal)*100)):0;
+  // Delta chip: show return for the selected scope
   let deltaChip='';
-  if(aum.prevTotal!==null){
-    if(aum.prevTotal>0){
-      const pct=((aum.total-aum.prevTotal)/aum.prevTotal)*100;
-      const up=pct>=0;
-      deltaChip=`<div class="hero-delta ${up?'up':'down'}">${up?'▲':'▼'} ${up?'+':''}${pct.toFixed(1)}% vs ${aum.prevLabel} (Rp ${fjPlain(aum.prevTotal)})</div>`;
-    } else {
-      deltaChip=`<div class="hero-delta up">✦ ${aum.prevLabel==='tahun lalu'?'Tahun':'Bulan'} pertama beroperasi</div>`;
-    }
-  } else if(aum.profit>0){
-    const lbl=_aumPeriod==='active'?'projected return':'total return';
+  if(aum.profit>0){
+    const lbl=_aumPeriod==='active'?'projected return':'lifetime return';
     deltaChip=`<div class="hero-delta up">↗ +Rp ${fjPlain(aum.profit)} ${lbl}</div>`;
   }
   // streak: consecutive months with on-time payments (admin) or simple count (umum)
@@ -777,6 +774,8 @@ function rB(){
     <div class="hero-label">Asset Under Management</div>
     <div class="hero-num"><span class="hero-curr">Rp</span>${fjPlain(aum.total)}</div>
     ${deltaChip}
+    ${lifetimeTotal>0?`<div class="hero-pw"><div class="hero-pb" style="width:${workingPct}%"></div></div>
+    <div class="hero-meta"><span><b>${workingPct}%</b> modal sedang berjalan</span><span>Rp ${fjPlain(activeTotal)} aktif</span></div>`:''}
     <div class="aum-pills">${AUM_PERIODS.map(([k,lbl])=>`<button type="button" class="aum-pill${_aumPeriod===k?' on':''}" onclick="setAumPeriod('${k}')">${lbl}</button>`).join('')}</div>
   </div>`;
   // === Asymmetric Achievement Strip (admin only) ===
