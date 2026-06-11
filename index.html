@@ -631,7 +631,17 @@ function toast(m,opts){
   _tt=setTimeout(()=>t.classList.remove('show'),dur);
 }
 function om(id){ const el=document.getElementById(id); if(!el)return; el.classList.add('op'); document.body.classList.add('modal-open'); }
-function cm(id){ const el=document.getElementById(id); if(el) el.classList.remove('op'); syncModalState(); }
+function cm(id){
+  // Blur any focused input BEFORE hiding the modal. Closing a fixed modal while
+  // the iOS keyboard is up is what strands the window scroll offset (freeze bug).
+  const ae=document.activeElement;
+  if(ae&&ae.blur&&(ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'||ae.tagName==='SELECT')) ae.blur();
+  const el=document.getElementById(id); if(el) el.classList.remove('op');
+  syncModalState();
+  // Heal viewport now and again after the keyboard finishes collapsing (~350ms)
+  healViewport('modal-close');
+  setTimeout(()=>healViewport('modal-close-late'),400);
+}
 // Safety: ensure body.modal-open is always synced with the actual open modal state.
 // Prevents stuck "can't scroll" bugs caused by edit flows that close+reopen modals
 // or by errors in render functions that interrupt cleanup.
@@ -639,6 +649,49 @@ function syncModalState(){
   if(document.querySelector('.mo.op')) document.body.classList.add('modal-open');
   else document.body.classList.remove('modal-open');
 }
+// ── iOS VIEWPORT FREEZE GUARD ─────────────────────────────────────────
+// Root cause of the "can't scroll until reload" bug: iOS Safari force-scrolls
+// the WINDOW (ignoring overflow:hidden) to keep a focused input visible above
+// the keyboard. If the modal closes while the keyboard is still up, iOS can
+// leave window.scrollY / visualViewport.offsetTop stuck > 0. The visual layer
+// and the touch hit-testing layer then misalign — taps land on the wrong
+// coordinates, so scrolling and buttons appear dead until a reload resets it.
+// healViewport() detects that stranded offset and snaps the window back to 0.
+// Every occurrence is logged to localStorage('dt_freeze_log') as evidence.
+function isEditableFocused(){
+  const ae=document.activeElement;
+  return !!(ae&&(ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'||ae.tagName==='SELECT'));
+}
+function healViewport(reason){
+  if(isEditableFocused()) return; // keyboard legitimately open — don't yank
+  const vv=window.visualViewport;
+  const offY=window.scrollY||window.pageYOffset||document.documentElement.scrollTop||0;
+  const vvTop=vv?vv.offsetTop:0;
+  if(offY>1||vvTop>1){
+    try{
+      const log=JSON.parse(localStorage.getItem('dt_freeze_log')||'[]');
+      log.push({t:new Date().toISOString(),reason,scrollY:Math.round(offY),vvTop:Math.round(vvTop),vvH:vv?Math.round(vv.height):0,winH:window.innerHeight});
+      localStorage.setItem('dt_freeze_log',JSON.stringify(log.slice(-30)));
+    }catch(e){}
+    window.scrollTo(0,0);
+    document.documentElement.scrollTop=0;
+    document.body.scrollTop=0;
+    console.warn('[freeze-guard] viewport offset healed:',reason,'scrollY='+Math.round(offY),'vvTop='+Math.round(vvTop));
+  }
+}
+// Heal whenever an input loses focus (keyboard closing)
+document.addEventListener('focusout',()=>{ setTimeout(()=>healViewport('focusout'),300); });
+// Heal when the visual viewport returns to full height (keyboard fully closed)
+if(window.visualViewport){
+  window.visualViewport.addEventListener('resize',()=>{
+    if(window.visualViewport.height>=window.innerHeight-60) setTimeout(()=>healViewport('vv-resize'),100);
+  });
+}
+// Report past freeze evidence on startup so we can confirm the diagnosis
+try{
+  const fl=JSON.parse(localStorage.getItem('dt_freeze_log')||'[]');
+  if(fl.length) console.warn('[freeze-guard] healed '+fl.length+' stranded-viewport events so far:',fl);
+}catch(e){}
 
 // ── BERANDA ───────────────────────────────────────────────────────────
 let _bSort='default',_bSortDir=1,_bFilter={tersedia:true,aktif:true,selesai:true},_bPanelOpen='';
@@ -2380,7 +2433,7 @@ function rAll(){
 
 // Watchdog: every 2s, re-sync modal-open state. Last line of defense against
 // any flow that leaves body.modal-open stuck (pointer-events:none on .pages).
-setInterval(syncModalState, 2000);
+setInterval(()=>{ syncModalState(); healViewport('watchdog'); }, 2000);
 
 // ── PIN & ADMIN ──────────────────────────────────────────────────────
 let _adminUnlocked=false;
