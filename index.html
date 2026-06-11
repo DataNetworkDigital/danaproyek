@@ -120,10 +120,15 @@ body.modal-open .pages{pointer-events:none}
 .aum-pill{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.18);color:rgba(255,255,255,.75);border-radius:10px;padding:6px 11px;font-size:10px;font-weight:900;letter-spacing:.4px;cursor:pointer;font-family:Nunito,sans-serif;transition:all .15s;touch-action:manipulation;-webkit-tap-highlight-color:transparent;min-height:30px}
 .aum-pill.on{background:#fff;color:#3B2169;border-color:#fff;box-shadow:0 2px 10px rgba(255,255,255,.25)}
 .aum-pill:not(.on):active{background:rgba(255,255,255,.22)}
-.hero-pw{background:rgba(0,0,0,.4);border-radius:20px;height:10px;overflow:hidden;margin-bottom:10px;border:1px solid rgba(255,255,255,.08)}
-.hero-pb{height:100%;background:linear-gradient(90deg,#86EFAC 0%,#22D3EE 50%,#EC4899 100%);border-radius:20px;transition:width 1s cubic-bezier(.34,1.56,.64,1);box-shadow:0 0 20px rgba(134,239,172,.6),inset 0 1px 0 rgba(255,255,255,.3);position:relative;overflow:hidden}
-.hero-pb::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.4),transparent);animation:shimmer 2s infinite}
+.hero-pw{display:flex;background:rgba(0,0,0,.4);border-radius:20px;height:10px;overflow:hidden;margin-bottom:10px;border:1px solid rgba(255,255,255,.08)}
+.hero-seg{height:100%;transition:width 1s cubic-bezier(.34,1.56,.64,1)}
+.hero-seg--realized{background:linear-gradient(90deg,#86EFAC 0%,#22D3EE 60%,#EC4899 100%);box-shadow:0 0 20px rgba(134,239,172,.6),inset 0 1px 0 rgba(255,255,255,.3);position:relative;overflow:hidden}
+.hero-seg--realized::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.4),transparent);animation:shimmer 2s infinite}
+.hero-seg--scheduled{background:rgba(255,255,255,.22)}
 .hero-meta{display:flex;justify-content:space-between;align-items:center;font-size:11px;font-weight:800;color:rgba(255,255,255,.75)}
+.hero-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;vertical-align:middle}
+.hero-dot--realized{background:#86EFAC;box-shadow:0 0 6px rgba(134,239,172,.7)}
+.hero-dot--scheduled{background:rgba(255,255,255,.45)}
 .hero-meta b{color:#fff;font-weight:900}
 
 /* === ASYMMETRIC ACHIEVEMENT STRIP (no 3-column AI cliché) === */
@@ -746,6 +751,30 @@ function aumForPeriod(period){
 }
 function setAumPeriod(p){ _aumPeriod=p; rB(); }
 
+// Split total projected return into realized (cair) vs scheduled (terjadwal).
+// The two ALWAYS sum to the full projected return — so the bar is always full
+// and the remainder reads as "upcoming/scheduled", never "failed".
+function returnSplit(list){
+  let proj=0,realized=0;
+  list.forEach(p=>{
+    const pr=_adminUnlocked?profP(p):profUmum(p);
+    proj+=pr;
+    const rt=p.returnType||'sekali';
+    let frac=0;
+    if(rt==='bulanan'&&p.schedule&&p.schedule.length){
+      const active=p.schedule.filter(s=>s.status!=='skipped').length;
+      const paid=p.schedule.filter(s=>s.status==='paid').length;
+      frac=active>0?paid/active:0;
+    } else {
+      frac=(p.payments&&p.payments.length>0)?1:0;
+    }
+    realized+=pr*frac;
+  });
+  realized=parseFloat(realized.toFixed(2));
+  proj=parseFloat(proj.toFixed(2));
+  return {proj,realized,scheduled:Math.max(0,parseFloat((proj-realized).toFixed(2)))};
+}
+
 function rB(){
   const tersediaC=S.projects.filter(p=>p.status==='tersedia').length;
   const aktifC=S.projects.filter(p=>p.status==='aktif'||p.status==='terlambat').length;
@@ -754,26 +783,29 @@ function rB(){
   const AUM_PERIODS=[['lifetime','Lifetime'],['active','Active']];
   if(_aumPeriod!=='lifetime'&&_aumPeriod!=='active') _aumPeriod='lifetime';
   const aum=aumForPeriod(_aumPeriod);
-  const activeTotal=aumForPeriod('active').total;
-  // Delta chip: show return for the selected scope
+  // Imbal hasil: realized (cair) vs scheduled (terjadwal), always summing to 100%
+  const rs=returnSplit(aum.list);
+  const realizedPct=rs.proj>0?Math.round(rs.realized/rs.proj*100):0;
+  const scheduledPct=Math.max(0,100-realizedPct);
+  // Delta chip = total projected imbal hasil for the selected scope
   let deltaChip='';
-  if(aum.profit>0){
-    const lbl=_aumPeriod==='active'?'projected return':'lifetime return';
-    deltaChip=`<div class="hero-delta up">↗ +Rp ${fjPlain(aum.profit)} ${lbl}</div>`;
+  if(rs.proj>0){
+    deltaChip=`<div class="hero-delta up">↗ Rp ${fjPlain(rs.proj)} total imbal hasil</div>`;
   }
-  // On-time payment rate — quality metric, doesn't decay as AUM accumulates
-  const allPaid=S.projects.flatMap(p=>(p.schedule||[]).filter(s=>s.status==='paid'));
-  const onTimeCount=allPaid.filter(s=>{const due=new Date(s.dueDate);const paid=s.paidDate?new Date(s.paidDate):null;return paid&&paid<=due;}).length;
-  const totalPaid=allPaid.length;
-  const onTimeRate=totalPaid>0?Math.round(onTimeCount/totalPaid*100):100;
   const profitYTD=S.projects.filter(p=>p.status==='selesai').reduce((s,p)=>s+(_adminUnlocked?profP(p):profUmum(p)),0);
   let h=`<div class="hero-bal">
     <div class="hero-stars"></div>
     <div class="hero-label">Asset Under Management</div>
     <div class="hero-num"><span class="hero-curr">Rp</span>${fjPlain(aum.total)}</div>
     ${deltaChip}
-    <div class="hero-pw"><div class="hero-pb" style="width:${onTimeRate}%"></div></div>
-    <div class="hero-meta"><span><b>${onTimeRate}%</b> pembayaran tepat waktu</span><span>${totalPaid>0?`${onTimeCount}/${totalPaid} pembayaran`:'Rp '+fjPlain(activeTotal)+' aktif'}</span></div>
+    ${rs.proj>0?`<div class="hero-pw">
+      <div class="hero-seg hero-seg--realized" style="width:${realizedPct}%"></div>
+      <div class="hero-seg hero-seg--scheduled" style="width:${scheduledPct}%"></div>
+    </div>
+    <div class="hero-meta">
+      <span><span class="hero-dot hero-dot--realized"></span><b>Rp ${fjPlain(rs.realized)}</b> cair</span>
+      <span><span class="hero-dot hero-dot--scheduled"></span><b>Rp ${fjPlain(rs.scheduled)}</b> terjadwal</span>
+    </div>`:''}
     <div class="aum-pills">${AUM_PERIODS.map(([k,lbl])=>`<button type="button" class="aum-pill${_aumPeriod===k?' on':''}" onclick="setAumPeriod('${k}')">${lbl}</button>`).join('')}</div>
   </div>`;
   // === Asymmetric Achievement Strip (admin only) ===
