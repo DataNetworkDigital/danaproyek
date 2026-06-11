@@ -861,28 +861,106 @@ function rK(){
 }
 
 // ── PEMODAL (Owner / Non-Owner / Utang) ──────────────────────────────
+
+// Compute owner's modal breakdown
+function getOwnerModal(ownerId){
+  const owner=S.external.find(e=>e.id===ownerId);
+  if(!owner) return {cash:0,utang:0,total:0,deployed:0,idle:0,utangSources:[]};
+  const cash=parseFloat(owner.jumlah||0);
+  // Sum utang assigned to this owner
+  const pinjamen=S.external.filter(e=>e.tipe==='pinjaman'&&e.status!=='selesai');
+  const utangSources=[];
+  let utang=0;
+  pinjamen.forEach(p=>{
+    const assignment=(p.assignedOwners||[]).find(a=>a.ownerId===ownerId);
+    if(assignment){
+      utang+=parseFloat(assignment.jumlah||0);
+      utangSources.push({nama:p.nama,jumlah:parseFloat(assignment.jumlah||0)});
+    }
+  });
+  const total=cash+utang;
+  const deployed=(owner.alokasi||[]).reduce((s,a)=>s+parseFloat(a.jumlah||0),0);
+  const idle=total-deployed;
+  return {cash,utang,total,deployed,idle,utangSources};
+}
+
 function rE(){
   const st=stats();
+  const owners=S.external.filter(e=>e.tipe==='investor'&&e.isOwner);
+  const nonOwners=S.external.filter(e=>e.tipe==='investor'&&!e.isOwner);
   const pinj=S.external.filter(e=>e.tipe==='pinjaman');
-  const inv=S.external.filter(e=>e.tipe==='investor');
+
+  // Totals
+  const totalOwnerModal=owners.reduce((s,e)=>s+getOwnerModal(e.id).total,0);
+  const totalNonOwner=nonOwners.filter(e=>e.status!=='selesai').reduce((s,e)=>s+parseFloat(e.jumlah||0),0);
+
+  // Warning: utang with no assignment
+  const unassignedUtang=pinj.filter(p=>p.status!=='selesai'&&(!p.assignedOwners||p.assignedOwners.length===0));
+
   let h=`<div class="mg">
-    <div class="mc blu"><div class="ml">Total Pinjaman</div><div class="mv">${fj(st.pinjP)}</div><div class="ms">Cicilan ${fj(st.pinjCic)}/bln</div></div>
-    <div class="mc org"><div class="ml">Total Investor</div><div class="mv">${fj(st.invP)}</div><div class="ms">${inv.filter(e=>e.status!=='selesai').length} aktif</div></div>
-  </div>
-  <div class="tabs">
-    <button class="tab ${extTab==='pinjaman'?'on':''}" onclick="swET('pinjaman')">💙 Pinjaman (${pinj.length})</button>
-    <button class="tab ${extTab==='investor'?'on':''}" onclick="swET('investor')">🟠 Investor (${inv.length})</button>
+    <div class="mc vio"><div class="ml">Modal Owner</div><div class="mv">${fj(totalOwnerModal)}</div><div class="ms">${owners.length} owner</div></div>
+    <div class="mc org"><div class="ml">Investor Non-Owner</div><div class="mv">${fj(totalNonOwner)}</div><div class="ms">${nonOwners.filter(e=>e.status!=='selesai').length} aktif</div></div>
   </div>`;
-  if(extTab==='pinjaman'){
-    h+=`<div style="background:var(--b-l);border-radius:12px;padding:11px 13px;margin-bottom:11px;font-size:11px;color:#0369A1;font-weight:700">💙 Pinjaman: kamu mengembalikan pokok + bunga secara bulanan.</div>`;
-    if(pinj.length===0) h+=`<div class="es"><div class="ei">💙</div><div class="et">Belum ada pinjaman</div><div class="esb">Catat pinjaman bank atau pribadi</div><button class="btn vio" style="margin-top:14px" onclick="oEM()">＋ Tambah Pinjaman</button></div>`;
-    else pinj.forEach(e=>{ h+=extCard(e); });
-  } else {
-    h+=`<div style="background:var(--o-l);border-radius:12px;padding:11px 13px;margin-bottom:11px;font-size:11px;color:#B56B00;font-weight:700">🟠 Investor: mendapat bagi hasil dari profit proyek yang dialokasikan.</div>`;
-    if(inv.length===0) h+=`<div class="es"><div class="ei">🟠</div><div class="et">Belum ada investor</div><div class="esb">Catat investor & alokasi dana mereka</div><button class="btn vio" style="margin-top:14px" onclick="oEM()">＋ Tambah Investor</button></div>`;
-    else inv.forEach(e=>{ h+=extCard(e); });
+
+  // Warning banner for unassigned utang
+  if(unassignedUtang.length>0){
+    h+=`<div style="background:#FEF3C7;border-radius:12px;padding:11px 13px;margin-bottom:12px;font-size:11px;color:#B45309;font-weight:700;border:1px solid #FDE68A">
+      ⚠️ ${unassignedUtang.length} utang belum di-assign ke owner: ${unassignedUtang.map(p=>p.nama).join(', ')}
+    </div>`;
   }
+
+  // === Owner section ===
+  h+=`<div class="sh" style="margin-top:12px"><div class="st">👑 Owner</div><span style="font-size:10px;color:var(--sub);font-weight:700">${owners.length}</span></div>`;
+  if(owners.length===0){
+    h+=`<div style="background:var(--p-l);border-radius:12px;padding:14px;margin-bottom:14px;font-size:12px;color:var(--p-darker);font-weight:700;text-align:center">
+      Belum ada owner. Tambah pemodal & toggle "Owner" untuk mengaktifkan tracking modal pribadi.
+    </div>`;
+  } else {
+    owners.forEach(e=>{ h+=ownerCard(e); });
+  }
+
+  // === Non-Owner section ===
+  h+=`<div class="sh" style="margin-top:18px"><div class="st">🤝 Investor Non-Owner</div><span style="font-size:10px;color:var(--sub);font-weight:700">${nonOwners.length}</span></div>`;
+  if(nonOwners.length===0){
+    h+=`<div class="es" style="padding:24px 16px"><div class="ei">🤝</div><div class="et">Belum ada investor non-owner</div><div class="esb">Catat investor luar untuk tracking bagi hasil</div></div>`;
+  } else {
+    nonOwners.forEach(e=>{ h+=extCard(e); });
+  }
+
+  // === Utang section ===
+  h+=`<div class="sh" style="margin-top:18px"><div class="st">🏦 Utang / Pinjaman</div><span style="font-size:10px;color:var(--sub);font-weight:700">${pinj.length}</span></div>`;
+  if(pinj.length===0){
+    h+=`<div class="es" style="padding:24px 16px"><div class="ei">🏦</div><div class="et">Belum ada utang</div><div class="esb">Catat KUR, pinjaman keluarga, dll</div></div>`;
+  } else {
+    pinj.forEach(e=>{ h+=extCard(e); });
+  }
+
   document.getElementById('p-e').innerHTML=h;
+}
+
+function ownerCard(e){
+  const m=getOwnerModal(e.id);
+  const allocProjs=(e.alokasi||[]).map(a=>{const pp=S.projects.find(p=>p.id===a.pid);return pp?{...a,nama:pp.peminjam}:null;}).filter(Boolean);
+  return `<div class="ec" style="border-color:#DDD6FE;border-bottom-color:#7C3AED;background:linear-gradient(140deg,#fff 0%,#F5F3FF 100%);box-shadow:6px 6px 14px rgba(124,58,237,.15),-6px -6px 14px rgba(255,255,255,.95)" onclick="oEDet('${e.id}')">
+    <div class="fb" style="margin-bottom:10px">
+      <div>
+        <div style="font-size:14px;font-weight:900">${e.nama}</div>
+        <div style="margin-top:3px"><span class="bdg tidak-terambil">👑 Owner</span></div>
+      </div>
+      <div class="tr">
+        <div style="font-size:14px;font-weight:900;color:var(--p-darker)">${fj(m.total)}</div>
+        <div style="font-size:9px;color:var(--sub);font-weight:700">total modal</div>
+      </div>
+    </div>
+    <div style="background:rgba(255,255,255,.7);border-radius:10px;padding:8px 10px;font-size:10.5px">
+      <div class="fb" style="margin-bottom:4px"><span class="tg">💰 Cash pribadi</span><b>${fj(m.cash)}</b></div>
+      ${m.utang>0?`<div class="fb" style="margin-bottom:4px"><span class="tg">🏦 Utang (${m.utangSources.length})</span><b style="color:#0369A1">${fj(m.utang)}</b></div>`:''}
+      <div class="dv" style="margin:6px 0"></div>
+      <div class="fb"><span class="tg">Deployed</span><b style="color:#0B8F46">${fj(m.deployed)}</b></div>
+      <div class="fb mt6"><span class="tg">Idle</span><b style="color:${m.idle<0?'var(--r)':'#B56B00'}">${fj(m.idle)}</b></div>
+    </div>
+    ${allocProjs.length>0?`<div class="mt6">${allocProjs.slice(0,4).map(a=>`<span class="at">${a.nama} ${fj(a.jumlah)}</span>`).join('')}${allocProjs.length>4?`<span class="at">+${allocProjs.length-4}</span>`:''}</div>`:''}
+  </div>`;
 }
 function swET(t){ extTab=t; rE(); }
 
@@ -906,6 +984,7 @@ function extCard(e){
     ${isPinj?`
       <div class="fb txx"><span class="tg">Cicilan: <b>${fj(e.cicilanBulan)}</b>/bln</span><span class="tg">${e.durasi?e.durasi+' bln · ':''}<b style="color:#0369A1">${e.bungaPct||0}%/bln</b></span></div>
       ${e.jadwalBayar?`<div class="txx mt6" style="color:${gc(d)}">⏰ Bayar: ${fd(e.jadwalBayar)} · ${gl(d)}</div>`:''}
+      ${(()=>{const ao=e.assignedOwners||[];if(ao.length===0)return `<div class="txx mt6" style="color:#B45309;font-weight:700">⚠️ Belum di-assign ke owner</div>`;return `<div class="mt6">${ao.map(a=>{const o=S.external.find(x=>x.id===a.ownerId);return o?`<span class="at" style="background:#EDE9FE;color:#6D28D9">👑 ${o.nama} ${fj(a.jumlah)}</span>`:''}).join('')}</div>`;})()}
     `:`
       <div class="fb txx"><span class="tg">Default bagi hasil: <b style="color:#B56B00">${e.bagiHasilPct||0}%</b></span><span class="tg">Idle: <b style="color:${idle>0?'#B56B00':'#0B8F46'}">${fj(idle)}</b></span></div>
       ${allocProjs.length>0?`<div class="mt6">${allocProjs.map(a=>`<span class="at">📌 ${a.nama} ${fj(a.jumlah)}</span>`).join('')}</div>`:`<div class="txx mt6 tg">Belum ada alokasi proyek</div>`}
@@ -1718,7 +1797,16 @@ function buildEF(e, tipe){
   } else {
     const existAlloc=(e&&e.alokasi)||[];
     el.innerHTML+=`
-    <div class="fg"><label class="fl">Bagi Hasil Default (%)</label><input class="fi" id="fe-bh" type="number" step="0.1" value="${e?e.bagiHasilPct||0:0}" placeholder="30"><div class="fh">Default % bagi hasil per alokasi proyek</div></div>
+    <div class="fg">
+      <label class="fl">Tipe Investor</label>
+      <div style="display:flex;gap:6px">
+        <button type="button" class="btn ${(!e||!e.isOwner)?'pr':'ou'} fw" id="fe-tipe-nonowner" onclick="setInvOwnerType(false)" style="font-size:11px;padding:10px">🤝 Non-Owner</button>
+        <button type="button" class="btn ${e&&e.isOwner?'pr':'ou'} fw" id="fe-tipe-owner" onclick="setInvOwnerType(true)" style="font-size:11px;padding:10px">👑 Owner</button>
+      </div>
+      <input type="hidden" id="fe-isowner" value="${e&&e.isOwner?'1':'0'}">
+      <div class="fh" id="fe-owner-hint">${e&&e.isOwner?'Owner: inherit sisa profit setelah investor non-owner dibayar.':'Non-owner: bagi hasil fixed sesuai rate proyek.'}</div>
+    </div>
+    <div class="fg" id="fe-bh-wrap" style="${e&&e.isOwner?'display:none':''}"><label class="fl">Bagi Hasil Default (%)</label><input class="fi" id="fe-bh" type="number" step="0.1" value="${e?e.bagiHasilPct||0:0}" placeholder="30"><div class="fh">Default % bagi hasil per alokasi proyek (non-owner only)</div></div>
     <div class="fg">
       <label class="fl">Alokasi Proyek <span id="inv-idle-lbl" style="color:#B56B00"></span></label>
       <div style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:6px;margin-bottom:4px;font-size:9px;font-weight:800;color:var(--sub)"><span>Proyek</span><span>Nominal (jt)</span><span>% Proyek</span><span style="width:30px"></span></div>
@@ -1814,6 +1902,18 @@ function updPinjInfo(){
   if(j>0&&dur>0&&cb>0){const total=cb*dur;el.innerHTML=`Total bayar: <b>${fj(total)}</b><br>Total bunga: <b style="color:var(--r)">${fj(total-j)}</b>`;}
   else el.textContent='Isi jumlah, durasi & cicilan';
 }
+function setInvOwnerType(isOwner){
+  const hidden=document.getElementById('fe-isowner');
+  const owBtn=document.getElementById('fe-tipe-owner');
+  const noBtn=document.getElementById('fe-tipe-nonowner');
+  const hint=document.getElementById('fe-owner-hint');
+  const bhWrap=document.getElementById('fe-bh-wrap');
+  if(hidden) hidden.value=isOwner?'1':'0';
+  if(owBtn){owBtn.classList.toggle('pr',isOwner);owBtn.classList.toggle('ou',!isOwner);}
+  if(noBtn){noBtn.classList.toggle('pr',!isOwner);noBtn.classList.toggle('ou',isOwner);}
+  if(hint) hint.textContent=isOwner?'Owner: inherit sisa profit setelah investor non-owner dibayar.':'Non-owner: bagi hasil fixed sesuai rate proyek.';
+  if(bhWrap) bhWrap.style.display=isOwner?'none':'';
+}
 function saveExt(tipe){
   const n=document.getElementById('fe-n')?.value?.trim();
   const j=parseFloat(document.getElementById('fe-j')?.value);
@@ -1826,7 +1926,9 @@ function saveExt(tipe){
   if(tipe==='pinjaman'){
     obj={...obj,durasi:parseInt(document.getElementById('fe-dur')?.value||0),bungaPct:parseFloat(document.getElementById('fe-b')?.value||0),cicilanBulan:parseFloat(document.getElementById('fe-cb')?.value||0),jadwalBayar:document.getElementById('fe-jb')?.value};
   } else {
+    const isOwner=document.getElementById('fe-isowner')?.value==='1';
     const bh=parseFloat(document.getElementById('fe-bh')?.value||0);
+    obj.isOwner=isOwner;
     const alok=Array.from(document.getElementById('inv-alloc-rows')?.children||[]).map(row=>{
       const pid=row.querySelector('.inv-pid')?.value;
       const jmlVal=parseFloat(row.querySelector('.inv-jml')?.value||0);
