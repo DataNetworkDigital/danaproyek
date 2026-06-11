@@ -116,6 +116,10 @@ body.modal-open .pages{pointer-events:none}
 .hero-num .hero-curr{font-size:18px;font-weight:800;opacity:.6;margin-right:6px;vertical-align:top;line-height:2.2;background:none;-webkit-text-fill-color:rgba(255,255,255,.7)}
 .hero-delta{display:inline-flex;align-items:center;gap:7px;background:rgba(34,197,94,.18);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);padding:8px 14px;border-radius:14px;font-size:12px;font-weight:900;border:1.5px solid rgba(134,239,172,.3);margin-bottom:18px;color:#86EFAC;box-shadow:0 4px 16px rgba(34,197,94,.2)}
 .hero-delta.down{background:rgba(239,68,68,.18);border-color:rgba(252,165,165,.3);color:#FCA5A5;box-shadow:0 4px 16px rgba(239,68,68,.2)}
+.aum-pills{display:flex;flex-wrap:wrap;gap:6px}
+.aum-pill{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.18);color:rgba(255,255,255,.75);border-radius:10px;padding:6px 11px;font-size:10px;font-weight:900;letter-spacing:.4px;cursor:pointer;font-family:Nunito,sans-serif;transition:all .15s;touch-action:manipulation;-webkit-tap-highlight-color:transparent;min-height:30px}
+.aum-pill.on{background:#fff;color:#3B2169;border-color:#fff;box-shadow:0 2px 10px rgba(255,255,255,.25)}
+.aum-pill:not(.on):active{background:rgba(255,255,255,.22)}
 .hero-pw{background:rgba(0,0,0,.4);border-radius:20px;height:10px;overflow:hidden;margin-bottom:10px;border:1px solid rgba(255,255,255,.08)}
 .hero-pb{height:100%;background:linear-gradient(90deg,#86EFAC 0%,#22D3EE 50%,#EC4899 100%);border-radius:20px;transition:width 1s cubic-bezier(.34,1.56,.64,1);box-shadow:0 0 20px rgba(134,239,172,.6),inset 0 1px 0 rgba(255,255,255,.3);position:relative;overflow:hidden}
 .hero-pb::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.4),transparent);animation:shimmer 2s infinite}
@@ -695,16 +699,74 @@ try{
 
 // ── BERANDA ───────────────────────────────────────────────────────────
 let _bSort='default',_bSortDir=1,_bFilter={tersedia:true,aktif:true,selesai:true},_bPanelOpen='';
+let _aumPeriod='lifetime';
+
+// === AUM (Asset Under Management) helpers ===
+// AUM = projects that were actually funded: aktif/terlambat now, or selesai
+// that was genuinely taken. Tersedia & tidak-terambil are excluded.
+function aumValue(p){ return _adminUnlocked?parseFloat(p.jumlah||0):publicKontrakP(p); }
+function aumManaged(){
+  return (S.projects||[]).filter(p=>{
+    if(p.status==='aktif'||p.status==='terlambat') return true;
+    if(p.status==='selesai') return wasTaken(p);
+    return false;
+  });
+}
+function aumOverlaps(p,ws,we){
+  const s=new Date((p.tanggalAktif||p.tanggalMulai||'1970-01-01')+'T00:00:00');
+  const e=new Date((p.tanggalJT||p.tanggalMulai||'2999-12-31')+'T00:00:00');
+  return s<=we&&e>=ws;
+}
+function aumForPeriod(period){
+  const managed=aumManaged();
+  const now=new Date();const y=now.getFullYear(),m=now.getMonth();
+  const sum=(list)=>list.reduce((s,p)=>s+aumValue(p),0);
+  const profit=(list)=>list.reduce((s,p)=>s+(_adminUnlocked?profP(p):profUmum(p)),0);
+  let list=managed,prevTotal=null,prevLabel='';
+  if(period==='active'){
+    list=managed.filter(p=>p.status==='aktif'||p.status==='terlambat');
+  } else if(period==='yoy'){
+    list=managed.filter(p=>aumOverlaps(p,new Date(y,0,1),now));
+    prevTotal=sum(managed.filter(p=>aumOverlaps(p,new Date(y-1,0,1),new Date(y-1,11,31,23,59,59))));
+    prevLabel='tahun lalu';
+  } else if(period==='1y'){
+    list=managed.filter(p=>aumOverlaps(p,new Date(now-365*864e5),now));
+  } else if(period==='ytd'){
+    list=managed.filter(p=>aumOverlaps(p,new Date(y,0,1),now));
+  } else if(period==='mom'){
+    list=managed.filter(p=>aumOverlaps(p,new Date(y,m,1),now));
+    prevTotal=sum(managed.filter(p=>aumOverlaps(p,new Date(y,m-1,1),new Date(y,m,0,23,59,59))));
+    prevLabel='bulan lalu';
+  } else if(period==='1m'){
+    list=managed.filter(p=>aumOverlaps(p,new Date(now-30*864e5),now));
+  } else if(period==='mtd'){
+    list=managed.filter(p=>aumOverlaps(p,new Date(y,m,1),now));
+  }
+  return {list,total:sum(list),profit:profit(list),prevTotal,prevLabel};
+}
+function setAumPeriod(p){ _aumPeriod=p; rB(); }
+
 function rB(){
   const tersediaC=S.projects.filter(p=>p.status==='tersedia').length;
   const aktifC=S.projects.filter(p=>p.status==='aktif'||p.status==='terlambat').length;
   const selesaiC=S.projects.filter(p=>p.status==='selesai').length;
-  // === Phantom Hero Balance Card ===
-  const aktifList=S.projects.filter(p=>p.status==='aktif'||p.status==='terlambat');
-  const totalAktif=aktifList.reduce((s,p)=>s+(_adminUnlocked?parseFloat(p.jumlah||0):publicKontrakP(p)),0);
-  const projProfit=aktifList.reduce((s,p)=>s+(_adminUnlocked?profP(p):profUmum(p)),0);
-  const totalCap=S.projects.reduce((s,p)=>s+(_adminUnlocked?parseFloat(p.jumlah||0):publicKontrakP(p)),0);
-  const capUsedPct=totalCap>0?Math.min(100,(totalAktif/totalCap)*100):0;
+  // === Hero: Asset Under Management with period switcher ===
+  const AUM_PERIODS=[['lifetime','Lifetime'],['yoy','YoY'],['1y','1Y'],['ytd','YTD'],['mom','MoM'],['1m','1M'],['mtd','MTD'],['active','Active']];
+  const aum=aumForPeriod(_aumPeriod);
+  // Delta chip: YoY/MoM show comparison vs previous period; others show return
+  let deltaChip='';
+  if(aum.prevTotal!==null){
+    if(aum.prevTotal>0){
+      const pct=((aum.total-aum.prevTotal)/aum.prevTotal)*100;
+      const up=pct>=0;
+      deltaChip=`<div class="hero-delta ${up?'up':'down'}">${up?'▲':'▼'} ${up?'+':''}${pct.toFixed(1)}% vs ${aum.prevLabel} (Rp ${fjPlain(aum.prevTotal)})</div>`;
+    } else {
+      deltaChip=`<div class="hero-delta up">✦ ${aum.prevLabel==='tahun lalu'?'Tahun':'Bulan'} pertama beroperasi</div>`;
+    }
+  } else if(aum.profit>0){
+    const lbl=_aumPeriod==='active'?'projected return':'total return';
+    deltaChip=`<div class="hero-delta up">↗ +Rp ${fjPlain(aum.profit)} ${lbl}</div>`;
+  }
   // streak: consecutive months with on-time payments (admin) or simple count (umum)
   const allPaid=S.projects.flatMap(p=>(p.schedule||[]).filter(s=>s.status==='paid'));
   const onTimeCount=allPaid.filter(s=>{const due=new Date(s.dueDate);const paid=s.paidDate?new Date(s.paidDate):null;return paid&&paid<=due;}).length;
@@ -712,11 +774,10 @@ function rB(){
   const profitYTD=S.projects.filter(p=>p.status==='selesai').reduce((s,p)=>s+(_adminUnlocked?profP(p):profUmum(p)),0);
   let h=`<div class="hero-bal">
     <div class="hero-stars"></div>
-    <div class="hero-label">Total Modal ${_adminUnlocked?'Deploy':'Investasi'} Aktif</div>
-    <div class="hero-num"><span class="hero-curr">Rp</span>${fjPlain(totalAktif)}</div>
-    ${projProfit>0?`<div class="hero-delta up">↗ +Rp ${fjPlain(projProfit)} projected profit</div>`:''}
-    ${totalCap>0?`<div class="hero-pw"><div class="hero-pb" style="width:${capUsedPct}%"></div></div>
-    <div class="hero-meta"><span><b>${aktifC}</b> aktif · <b>${tersediaC}</b> tersedia</span><span><b>${Math.round(capUsedPct)}%</b> kapasitas</span></div>`:''}
+    <div class="hero-label">Asset Under Management</div>
+    <div class="hero-num"><span class="hero-curr">Rp</span>${fjPlain(aum.total)}</div>
+    ${deltaChip}
+    <div class="aum-pills">${AUM_PERIODS.map(([k,lbl])=>`<button type="button" class="aum-pill${_aumPeriod===k?' on':''}" onclick="setAumPeriod('${k}')">${lbl}</button>`).join('')}</div>
   </div>`;
   // === Asymmetric Achievement Strip (admin only) ===
   if(_adminUnlocked){
