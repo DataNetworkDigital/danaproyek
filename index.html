@@ -2035,7 +2035,10 @@ function addInvRowData(pid,jumlah,pct){
   const row=document.createElement('div');
   row.style.cssText='display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:6px;margin-bottom:8px;align-items:center';
   const projSel=document.createElement('select');projSel.className='fi fs inv-pid';projSel.style.fontSize='11px';
-  projSel.innerHTML=`<option value="">-- Proyek --</option>${S.projects.map(p=>`<option value="${p.id}"${p.id===pid?' selected':''}>${p.peminjam} (${fj(kontrakP(p))})</option>`).join('')}`;
+  // Only show active projects (aktif/terlambat) + currently-allocated project (if editing).
+  // This keeps the dropdown focused on relevant choices.
+  const activeProjects=S.projects.filter(p=>p.status==='aktif'||p.status==='terlambat'||p.id===pid);
+  projSel.innerHTML=`<option value="">-- Proyek --</option>${activeProjects.map(p=>`<option value="${p.id}"${p.id===pid?' selected':''}>${p.peminjam} (${fj(kontrakP(p))})</option>`).join('')}`;
   const jmlIn=document.createElement('input');jmlIn.className='fi inv-jml';jmlIn.type='number';jmlIn.step='0.01';jmlIn.placeholder='jt';jmlIn.value=jumlah||'';jmlIn.style.fontSize='11px';
   const pctIn=document.createElement('input');pctIn.className='fi inv-pct';pctIn.type='number';pctIn.step='0.1';pctIn.placeholder='%';pctIn.value=pct||'';pctIn.style.fontSize='11px';
   // Auto-calc: nominal ↔ % kepemilikan (based on deploy value, not contract value)
