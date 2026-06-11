@@ -232,8 +232,8 @@ body.modal-open .pages{pointer-events:none}
 .ec.done{opacity:.7}
 .at{background:var(--p-l2);color:var(--p-darker);border-radius:7px;padding:4px 10px;font-size:10px;font-weight:900;display:inline-block;margin:2px;border:1px solid rgba(139,92,246,.15)}
 .fc-note{background:var(--p-l);border:1px solid rgba(139,92,246,.15);border-radius:11px;padding:10px 12px;font-size:11px;color:var(--p-darker);font-weight:800;margin-top:6px}
-#toast{position:fixed;top:20px;left:50%;transform:translateX(-50%) translateY(-100px);background:linear-gradient(135deg,#1A1325,#3B2169);color:#fff;padding:14px 22px;border-radius:18px;font-size:13px;font-weight:800;z-index:999;transition:transform .4s cubic-bezier(.34,1.56,.64,1);white-space:nowrap;max-width:88%;box-shadow:0 12px 32px rgba(26,19,37,.3);border:1px solid rgba(255,255,255,.1);display:flex;align-items:center}
-#toast.show{transform:translateX(-50%) translateY(0)}
+#toast{position:fixed;top:20px;left:50%;transform:translateX(-50%) translateY(-100px);background:linear-gradient(135deg,#1A1325,#3B2169);color:#fff;padding:14px 22px;border-radius:18px;font-size:13px;font-weight:800;z-index:999;transition:transform .4s cubic-bezier(.34,1.56,.64,1);white-space:nowrap;max-width:88%;box-shadow:0 12px 32px rgba(26,19,37,.3);border:1px solid rgba(255,255,255,.1);display:flex;align-items:center;pointer-events:none}
+#toast.show{transform:translateX(-50%) translateY(0);pointer-events:auto}
 .fb{display:flex;justify-content:space-between;align-items:center}
 .txs{font-size:11px}.txx{font-size:10px}.tg{color:var(--sub)}.tbold{font-weight:900}
 .tgrn{color:#15803D}.tred{color:var(--r)}.tvio{color:var(--p-deep)}.tblu{color:#0369A1}.torg{color:#B56B00}.tr{text-align:right}
@@ -2303,7 +2303,21 @@ function rAll(){
   }
   // Always self-heal modal-open state after a render — prevents stuck scroll
   syncModalState();
+  // iOS Safari workaround: replacing innerHTML of a scroll container mid-momentum
+  // can freeze its scrolling until the next layout pass. Nudge a reflow to unfreeze.
+  requestAnimationFrame(()=>{
+    const pg=document.querySelector('.page.active');
+    if(!pg) return;
+    const prev=pg.style.overflowY;
+    pg.style.overflowY='hidden';
+    void pg.offsetHeight; // force reflow
+    pg.style.overflowY=prev||'';
+  });
 }
+
+// Watchdog: every 2s, re-sync modal-open state. Last line of defense against
+// any flow that leaves body.modal-open stuck (pointer-events:none on .pages).
+setInterval(syncModalState, 2000);
 
 // ── PIN & ADMIN ──────────────────────────────────────────────────────
 let _adminUnlocked=false;
