@@ -2035,10 +2035,35 @@ function addInvRowData(pid,jumlah,pct){
   const row=document.createElement('div');
   row.style.cssText='display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:6px;margin-bottom:8px;align-items:center';
   const projSel=document.createElement('select');projSel.className='fi fs inv-pid';projSel.style.fontSize='11px';
-  // Only show active projects (aktif/terlambat) + currently-allocated project (if editing).
-  // This keeps the dropdown focused on relevant choices.
-  const activeProjects=S.projects.filter(p=>p.status==='aktif'||p.status==='terlambat'||p.id===pid);
-  projSel.innerHTML=`<option value="">-- Proyek --</option>${activeProjects.map(p=>`<option value="${p.id}"${p.id===pid?' selected':''}>${p.peminjam} (${fj(kontrakP(p))})</option>`).join('')}`;
+  // Filter projects: must be aktif/terlambat AND still have capacity (not fully funded).
+  // Always include the currently-allocated project so existing allocations remain editable.
+  const activeProjects=S.projects.filter(p=>{
+    if(p.id===pid) return true; // keep current allocation visible
+    if(p.status!=='aktif'&&p.status!=='terlambat') return false;
+    // Capacity check: sum allocations from OTHER investors (skip the one being edited)
+    const deploy=parseFloat(p.jumlah||0);
+    if(deploy<=0) return true; // no deploy → no cap check
+    let allocatedByOthers=0;
+    S.external.forEach(e=>{
+      if(e.tipe!=='investor') return;
+      if(eE&&e.id===eE) return; // exclude current investor's own existing allocations
+      (e.alokasi||[]).forEach(a=>{ if(a.pid===p.id) allocatedByOthers+=parseFloat(a.jumlah||0); });
+    });
+    return allocatedByOthers<deploy-0.001; // tiny epsilon for float precision
+  });
+  projSel.innerHTML=`<option value="">-- Proyek --</option>${activeProjects.map(p=>{
+    // Show remaining capacity in label so user knows how much is left
+    const deploy=parseFloat(p.jumlah||0);
+    let allocByOthers=0;
+    S.external.forEach(e=>{
+      if(e.tipe!=='investor') return;
+      if(eE&&e.id===eE) return;
+      (e.alokasi||[]).forEach(a=>{ if(a.pid===p.id) allocByOthers+=parseFloat(a.jumlah||0); });
+    });
+    const remaining=deploy-allocByOthers;
+    const remLbl=deploy>0?` · sisa ${fj(remaining)}`:'';
+    return `<option value="${p.id}"${p.id===pid?' selected':''}>${p.peminjam} (${fj(kontrakP(p))}${remLbl})</option>`;
+  }).join('')}`;
   const jmlIn=document.createElement('input');jmlIn.className='fi inv-jml';jmlIn.type='number';jmlIn.step='0.01';jmlIn.placeholder='jt';jmlIn.value=jumlah||'';jmlIn.style.fontSize='11px';
   const pctIn=document.createElement('input');pctIn.className='fi inv-pct';pctIn.type='number';pctIn.step='0.1';pctIn.placeholder='%';pctIn.value=pct||'';pctIn.style.fontSize='11px';
   // Auto-calc: nominal ↔ % kepemilikan (based on deploy value, not contract value)
