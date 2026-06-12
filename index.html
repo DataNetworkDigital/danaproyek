@@ -98,6 +98,20 @@ body.modal-open .pages{pointer-events:none}
 .mc.org{background:linear-gradient(140deg,#fff 0%,#FED7AA 100%)}.mc.org .mv{color:var(--o-darker)}
 .mc.red{background:linear-gradient(140deg,#fff 0%,#FECACA 100%)}.mc.red .mv{color:var(--r-darker)}
 .mc.blu{background:linear-gradient(140deg,#fff 0%,#DBEAFE 100%)}.mc.blu .mv{color:var(--b-darker)}
+.seg{display:flex;background:var(--clay-card);border-radius:14px;padding:3px;box-shadow:var(--clay-in);border:1px solid rgba(255,255,255,.7);gap:2px}
+.seg button{flex:1;padding:10px 4px;border:none;border-radius:11px;font-size:11px;font-weight:800;font-family:'Nunito',sans-serif;cursor:pointer;background:transparent;color:var(--sub);transition:all .2s ease}
+.seg button.on{background:var(--grad-purple);color:#fff;box-shadow:0 3px 8px rgba(124,58,237,.3)}
+.seg-hint{font-size:10px;color:var(--sub);font-weight:700;margin-top:6px;min-height:14px;transition:opacity .15s}
+.cf-strip{display:flex;align-items:stretch;background:var(--clay-card);border-radius:18px;padding:14px 0;box-shadow:var(--clay-out-sm);border:1px solid rgba(255,255,255,.9);margin-bottom:14px}
+.cf-strip .cf-col{flex:1;text-align:center;padding:0 10px}
+.cf-strip .cf-col+.cf-col{border-left:1.5px solid var(--bdr)}
+.cf-strip .cf-lbl{font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.8px;color:var(--sub);margin-bottom:4px}
+.cf-strip .cf-val{font-size:15px;font-weight:900;font-variant-numeric:tabular-nums;font-family:'Geist Mono','SF Mono',monospace;line-height:1.2}
+.cf-strip .cf-sub{font-size:9px;color:var(--sub);font-weight:700;margin-top:3px;line-height:1.3}
+.pinj-summary{border-radius:12px;padding:10px 14px;font-size:11px;font-weight:700;color:#0369A1;background:var(--b-l);display:none}
+.pinj-summary.show{display:block}
+.pinj-summary .ps-row{display:flex;justify-content:space-between;align-items:center;padding:2px 0}
+.pinj-summary .ps-row+.ps-row{border-top:1px solid rgba(3,105,161,.1);margin-top:2px;padding-top:4px}
 .sh{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}.st{font-size:15px;font-weight:900;color:var(--txt)}
 .sl{font-size:11px;color:var(--p-deep);font-weight:800;cursor:pointer;background:none;border:none;font-family:'Nunito',sans-serif}
 
@@ -1193,10 +1207,10 @@ function rK(){
       <div style="font-size:15px;font-weight:900;text-align:center;flex:1">${monthNames[month]} ${year}</div>
       <button onclick="kalNav(1)" style="background:var(--card);border:1px solid var(--bdr);border-radius:10px;width:38px;height:38px;font-size:16px;font-weight:900;cursor:pointer;font-family:Nunito,sans-serif">›</button>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px">
-      <div class="mc grn"><div class="ml">Income</div><div class="mv">${fj(totalIncome)}</div></div>
-      <div class="mc red"><div class="ml">Outgoing</div><div class="mv">${fj(totalOut)}</div><div class="ms">U ${fj(totalUtang)} · BH ${fj(totalBagiHasil)}${totalAdminFee>0?` · AF ${fj(totalAdminFee)}`:''}</div></div>
-      <div class="mc ${net>=0?'vio':'red'}"><div class="ml">Net</div><div class="mv">${fj(net)}</div></div>
+    <div class="cf-strip">
+      <div class="cf-col"><div class="cf-lbl">Income</div><div class="cf-val" style="color:#0B8F46">${fj(totalIncome)}</div></div>
+      <div class="cf-col"><div class="cf-lbl">Outgoing</div><div class="cf-val" style="color:var(--r)">${fj(totalOut)}</div><div class="cf-sub">U ${fj(totalUtang)} · BH ${fj(totalBagiHasil)}${totalAdminFee>0?` · AF ${fj(totalAdminFee)}`:''}</div></div>
+      <div class="cf-col"><div class="cf-lbl">Net</div><div class="cf-val" style="color:${net>=0?'#0B8F46':'var(--r)'}">${fj(net)}</div></div>
     </div>
     <div style="background:var(--card);border-radius:14px;padding:10px;box-shadow:var(--sh);margin-bottom:14px">
       <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-bottom:6px;font-size:9px;font-weight:900;color:var(--sub);text-align:center;text-transform:uppercase;letter-spacing:.4px">
@@ -2221,11 +2235,12 @@ function buildEF(e, tipe){
     const tp=e?.tipePinjaman||'angsuran';
     el.innerHTML+=`
     <div class="fg"><label class="fl">Tipe Pembayaran</label>
-      <div style="display:flex;gap:6px" id="pinj-tipe-btns">
-        <button type="button" class="btn ${tp==='angsuran'?'pr':'ou'} fw" data-tp="angsuran" style="font-size:10px;padding:9px 6px">💰 Angsuran<br><span style="font-size:8px;opacity:.7">Pokok+bunga /bln</span></button>
-        <button type="button" class="btn ${tp==='bunga_saja'?'pr':'ou'} fw" data-tp="bunga_saja" style="font-size:10px;padding:9px 6px">📊 Bunga Saja<br><span style="font-size:8px;opacity:.7">Bunga /bln, pokok akhir</span></button>
-        <button type="button" class="btn ${tp==='jatuh_tempo'?'pr':'ou'} fw" data-tp="jatuh_tempo" style="font-size:10px;padding:9px 6px">📅 Jatuh Tempo<br><span style="font-size:8px;opacity:.7">Semua di akhir</span></button>
+      <div class="seg" id="pinj-tipe-btns">
+        <button type="button" class="${tp==='angsuran'?'on':''}" data-tp="angsuran">Angsuran</button>
+        <button type="button" class="${tp==='bunga_saja'?'on':''}" data-tp="bunga_saja">Bunga Saja</button>
+        <button type="button" class="${tp==='jatuh_tempo'?'on':''}" data-tp="jatuh_tempo">Jatuh Tempo</button>
       </div>
+      <div class="seg-hint" id="seg-hint">${tp==='angsuran'?'Pokok + bunga dibayar tiap bulan':tp==='bunga_saja'?'Bunga tiap bulan, pokok dikembalikan di akhir':'Semua dibayar sekaligus di akhir periode'}</div>
       <input type="hidden" id="fe-tp" value="${tp}">
     </div>
     <div class="fr">
@@ -2234,7 +2249,8 @@ function buildEF(e, tipe){
     </div>
     <div class="fr">
       <div class="fg"><label class="fl">Suku Bunga (%/bln)</label><input class="fi" id="fe-b" type="number" step="0.01" value="${e?e.bungaPct||'':''}" placeholder="0"><div class="fh" id="fh-bunga">Isi → cicilan auto</div></div>
-      <div class="fg" id="pinj-info" style="background:var(--b-l);border-radius:11px;padding:9px 12px;font-size:10px;color:#0369A1;font-weight:700;display:flex;align-items:center">Isi jumlah, durasi & bunga</div>
+    </div>
+    <div class="pinj-summary" id="pinj-info">
     </div>
     <div class="fr">
       <div class="fg"><label class="fl">Tanggal Diterima</label><input class="fi" id="fe-t" type="date" value="${e?e.tanggal||ds:ds}"></div>
@@ -2290,11 +2306,14 @@ function buildEF(e, tipe){
 
   if(isPinj){
     // wire tipe pinjaman buttons
+    const hints={angsuran:'Pokok + bunga dibayar tiap bulan',bunga_saja:'Bunga tiap bulan, pokok dikembalikan di akhir',jatuh_tempo:'Semua dibayar sekaligus di akhir periode'};
     document.querySelectorAll('#pinj-tipe-btns button').forEach(btn=>{
       btn.onclick=()=>{
-        document.querySelectorAll('#pinj-tipe-btns button').forEach(b=>{b.classList.remove('pr');b.classList.add('ou');});
-        btn.classList.remove('ou');btn.classList.add('pr');
+        document.querySelectorAll('#pinj-tipe-btns button').forEach(b=>b.classList.remove('on'));
+        btn.classList.add('on');
         document.getElementById('fe-tp').value=btn.dataset.tp;
+        const hintEl=document.getElementById('seg-hint');
+        if(hintEl) hintEl.textContent=hints[btn.dataset.tp]||'';
         updPinjFields();
       };
     });
@@ -2423,16 +2442,21 @@ function updPinjInfo(){
   const el=document.getElementById('pinj-info'); if(!el) return;
   const tp=getPinjTipe();
   const bungaBln=j*b/100;
+  let rows=[];
   if(tp==='angsuran'){
     const cb=parseFloat(document.getElementById('fe-cb')?.value||0);
-    if(j>0&&dur>0&&cb>0){const total=cb*dur;el.innerHTML=`Total bayar: <b>${fj(total)}</b><br>Total bunga: <b style="color:var(--r)">${fj(total-j)}</b>`;}
-    else el.textContent='Isi jumlah, durasi & cicilan';
+    if(j>0&&dur>0&&cb>0){const total=cb*dur;rows=[['Total bayar',fj(total)],['Total bunga',fj(total-j)]];}
   } else if(tp==='bunga_saja'){
-    if(j>0&&b>0&&dur>0){const totalBunga=bungaBln*dur;el.innerHTML=`Bunga/bln: <b>${fj(bungaBln)}</b><br>Total bunga: <b style="color:var(--r)">${fj(totalBunga)}</b><br>Total bayar: <b>${fj(j+totalBunga)}</b>`;}
-    else el.textContent='Isi jumlah, durasi & bunga';
+    if(j>0&&b>0&&dur>0){const tb=bungaBln*dur;rows=[['Bunga/bulan',fj(bungaBln)],['Total bunga',fj(tb)],['Total bayar',fj(j+tb)]];}
   } else {
-    if(j>0&&b>0&&dur>0){const totalBunga=bungaBln*dur;el.innerHTML=`Total bunga: <b style="color:var(--r)">${fj(totalBunga)}</b><br>Total bayar (akhir): <b>${fj(j+totalBunga)}</b>`;}
-    else el.textContent='Isi jumlah, durasi & bunga';
+    if(j>0&&b>0&&dur>0){const tb=bungaBln*dur;rows=[['Total bunga',fj(tb)],['Bayar di akhir',fj(j+tb)]];}
+  }
+  if(rows.length>0){
+    el.classList.add('show');
+    el.innerHTML=rows.map(r=>`<div class="ps-row"><span>${r[0]}</span><b>${r[1]}</b></div>`).join('');
+  } else {
+    el.classList.remove('show');
+    el.innerHTML='';
   }
 }
 function addUtangOwnerRow(ownerId,jumlah){
