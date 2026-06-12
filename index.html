@@ -356,8 +356,20 @@ function save(){
   if(_saveTimer)clearTimeout(_saveTimer);
   _saveTimer=setTimeout(saveToFirestore,800);
 }
+// Guard: never let a dev/preview origin (localhost / 127.* / file) write to
+// the PRODUCTION Firestore doc. Prevents test data from clobbering real data.
+function isProdOrigin(){
+  const h=location.hostname;
+  return h.endsWith('github.io')||h.endsWith('datanetworkdigital.com');
+}
 async function saveToFirestore(){
-  if(!_adminUnlocked||_saving)return;_saving=true;
+  if(!_adminUnlocked||_saving)return;
+  if(!isProdOrigin()){
+    console.warn('[guard] cloud write blocked on non-prod origin:',location.hostname);
+    setSync('synced'); // pretend-OK locally; localStorage still holds the data
+    return;
+  }
+  _saving=true;
   setSync('syncing');
   try{
     const ts=new Date().toISOString();
