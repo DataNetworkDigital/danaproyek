@@ -793,6 +793,10 @@ function rB(){
     deltaChip=`<div class="hero-delta up">↗ Rp ${fjPlain(rs.proj)} total imbal hasil</div>`;
   }
   const profitYTD=S.projects.filter(p=>p.status==='selesai').reduce((s,p)=>s+(_adminUnlocked?profP(p):profUmum(p)),0);
+  // Streak strip metrics (admin only) — restored after on-time bar was removed
+  const _allPaid=S.projects.flatMap(p=>(p.schedule||[]).filter(s=>s.status==='paid'));
+  const onTimeCount=_allPaid.filter(s=>{const due=new Date(s.dueDate);const paid=s.paidDate?new Date(s.paidDate):null;return paid&&paid<=due;}).length;
+  const onTimeRate=_allPaid.length>0?Math.round(onTimeCount/_allPaid.length*100):100;
   let h=`<div class="hero-bal">
     <div class="hero-stars"></div>
     <div class="hero-label">Asset Under Management</div>
