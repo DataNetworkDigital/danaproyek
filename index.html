@@ -346,8 +346,25 @@ async function loadFromFirestore(){
   setSync('syncing');
   try{
     const snap=await db.collection('danatrack').doc(DOC_ID).get();
-    if(snap.exists){const d=snap.data();S={...S,...d.state};localStorage.setItem('dt_v3',JSON.stringify(S));setSync('synced',d.updatedAt);}
-    else setSync('synced');
+    if(snap.exists){
+      const d=snap.data();
+      const cloudProjects=(d.state&&d.state.projects)?d.state.projects.length:0;
+      const localProjects=(S.projects||[]).length;
+      // Data-loss guard: if cloud has FEWER projects than what we already have
+      // locally, the cloud copy is likely corrupted/clobbered — do NOT overwrite.
+      // Snapshot local first, then keep local so the real data survives.
+      if(localProjects>0 && cloudProjects<localProjects){
+        try{localStorage.setItem('dt_v3_backup_'+Date.now(),JSON.stringify(S));}catch(e){}
+        console.warn('[guard] cloud has fewer projects ('+cloudProjects+') than local ('+localProjects+') — keeping local, cloud NOT applied.');
+        setSync('error');
+        return;
+      }
+      // Always snapshot the pre-merge local data before overwriting (recovery safety)
+      try{localStorage.setItem('dt_v3_prev',localStorage.getItem('dt_v3')||'');}catch(e){}
+      S={...S,...d.state};
+      localStorage.setItem('dt_v3',JSON.stringify(S));
+      setSync('synced',d.updatedAt);
+    } else setSync('synced');
   }catch(e){console.warn('Firestore load:',e);setSync('error');}
 }
 function save(){
