@@ -461,9 +461,9 @@ function gc(d){ if(d===null) return 'var(--sub)'; if(d<0) return 'var(--r)'; if(
 // balanced journal entry in S.ledger; ALL balances/reports derive from it.
 const COA_FIXED = [
   {code:'1100', name:'Dana di Proyek',                type:'aset',       normal:'D'},
-  {code:'2000', name:'Utang Pokok Investor',          type:'liabilitas', normal:'K'},
-  {code:'2010', name:'Bagi Hasil Terutang',           type:'liabilitas', normal:'K'},
-  {code:'2100', name:'Utang Pinjaman',                type:'liabilitas', normal:'K'},
+  {code:'2000', name:'Dana Investor (Pokok)',         type:'liabilitas', normal:'K'},
+  {code:'2010', name:'Bagi Hasil Belum Dibayar',      type:'liabilitas', normal:'K'},
+  {code:'2100', name:'Kewajiban Pembiayaan',          type:'liabilitas', normal:'K'},
   {code:'3000', name:'Modal Gde',                     type:'ekuitas',    normal:'K'},
   {code:'3010', name:'Modal RRPR',                    type:'ekuitas',    normal:'K'},
   {code:'3900', name:'Laba Ditahan',                  type:'ekuitas',    normal:'K'},
@@ -574,22 +574,24 @@ function rKeu(){
   const el=document.getElementById('p-u'); if(!el) return;
   const sub=`<div class="tabs" style="margin-bottom:14px">
     <button class="tab ${keuTab==='kantong'?'on':''}" onclick="swKeu('kantong')">🏦 Kantong</button>
+    <button class="tab ${keuTab==='investor'?'on':''}" onclick="swKeu('investor')">🤝 Investor</button>
     <button class="tab ${keuTab==='likuiditas'?'on':''}" onclick="swKeu('likuiditas')">💧 Likuiditas</button>
     <button class="tab ${keuTab==='laporan'?'on':''}" onclick="swKeu('laporan')">📊 Laporan</button>
   </div>`;
   let body='';
   if(keuTab==='kantong') body=rKeuKantong();
-  else if(keuTab==='likuiditas') body=`<div class="es"><div class="ei">💧</div><div class="et">Mesin Likuiditas</div><div class="esb">Segera hadir: status cash-ready, ROE, cadangan RRPR, dan "safe project size".</div></div>`;
+  else if(keuTab==='investor') body=rKeuInvestor();
+  else if(keuTab==='likuiditas') body=`<div class="es"><div class="ei">💧</div><div class="et">Mesin Likuiditas</div><div class="esb">Segera hadir: rekomendasi pindah dana, cash-ready, ROE, cadangan RRPR, dan "safe project size".</div></div>`;
   else body=`<div class="es"><div class="ei">📊</div><div class="et">Laporan Keuangan</div><div class="esb">Segera hadir: jurnal, neraca saldo, laba rugi, neraca, arus kas.</div></div>`;
   el.innerHTML=sub+body;
 }
 function rKeuKantong(){
   const pockets=[...(S.pockets||[])].sort((a,b)=>a.prioritas-b.prioritas);
-  const likuid=totalLikuid(), diProyek=acctBalance('1100'), utangInv=acctBalance('2000')+acctBalance('2010');
+  const likuid=totalLikuid(), diProyek=acctBalance('1100'), danaInv=acctBalance('2000')+acctBalance('2010');
   let h=`<div class="cf-strip">
     <div class="cf-col"><div class="cf-lbl">Kas Likuid</div><div class="cf-val" style="color:#0B8F46">${fj(likuid)}</div></div>
     <div class="cf-col"><div class="cf-lbl">Di Proyek</div><div class="cf-val" style="color:var(--p-deep)">${fj(diProyek)}</div></div>
-    <div class="cf-col"><div class="cf-lbl">Utang Investor</div><div class="cf-val" style="color:var(--r)">${fj(utangInv)}</div></div>
+    <div class="cf-col"><div class="cf-lbl">Dana Investor</div><div class="cf-val" style="color:var(--r)">${fj(danaInv)}</div></div>
   </div>`;
   if(!(S.ledger||[]).length){
     h+=`<div class="fc-note" style="margin-bottom:12px">Belum ada transaksi. Klik <b>Isi Data Contoh</b> untuk lihat cara kerjanya. Nanti bisa direset saat data aslimu siap.</div>`;
@@ -682,17 +684,164 @@ function keuDummy(){
   const today=new Date(), d=x=>{const t=new Date(today);t.setDate(t.getDate()-x);return t.toISOString().split('T')[0];};
   txSetorModal(d(30),'1010',150,'Setoran modal Gde (contoh)');
   txSetorModal(d(30),'1020',80,'Setoran modal RRPR (contoh)');
-  ledgerPost2(d(25),'Terima pokok investor (contoh)','1030','2000',100,'inv-pokok-in');
+  // sample investor contract (2%/bln, bagi hasil bulanan, pokok di akhir)
+  const c={id:uid(),nama:'Investor Contoh',pokok:100,ratePct:2,tanggalMulai:d(25),tenorBulan:12,struktur:'bulanan',status:'aktif'};
+  c.schedule=contractSchedule(c);
+  S.investorContracts=[c];
+  ledgerPost2(d(25),'Terima dana investor: '+c.nama,'1030','2000',100,'inv-masuk');
   txDeployProyek(d(20),100,'1030','Deploy ke proyek dari dana investor (contoh)');
   txDeployProyek(d(20),20,'1010','Deploy ke proyek dari Gde (contoh)');
   txReturnProyek(d(5),6,'1000','Return proyek bulan ini (contoh)');
-  txAkrualBagiHasil(d(5),2,'Akrual bagi hasil investor 2% (contoh)');
   txBayarBagiHasil(d(2),2,'1000','Bayar bagi hasil investor (contoh)');
   save(); rKeu(); toast('✨ Data contoh diisi');
 }
 function keuReset(){
-  if(!confirm('Hapus SEMUA jurnal buku besar? Saldo kantong jadi 0. Data proyek & pemodal TIDAK terpengaruh.')) return;
-  S.ledger=[]; save(); rKeu(); toast('🗑️ Buku besar direset');
+  if(!confirm('Hapus SEMUA jurnal buku besar + kontrak investor? Saldo kantong jadi 0. Data proyek & pemodal lama TIDAK terpengaruh.')) return;
+  S.ledger=[]; S.investorContracts=[]; save(); rKeu(); toast('🗑️ Buku besar direset');
+}
+
+// ── INVESTOR CONTRACTS (M3) ───────────────────────────────────────────
+const INV_STRUKTUR={
+  bulanan:{label:'Bagi hasil bulanan, pokok di akhir', hint:'Investor terima bagi hasil tiap bulan; pokok kembali saat jatuh tempo. Paling stabil untuk likuiditas.'},
+  akhir:  {label:'Bagi hasil + pokok di akhir',        hint:'Semua (bagi hasil terkumpul + pokok) dibayar sekaligus di akhir tenor.'},
+  cicil:  {label:'Pokok + bagi hasil dicicil bulanan', hint:'Pokok dicicil rata tiap bulan; bagi hasil dihitung dari sisa pokok.'},
+};
+function invContracts(){ if(!Array.isArray(S.investorContracts)) S.investorContracts=[]; return S.investorContracts; }
+function contractSchedule(c){
+  const pokok=parseFloat(c.pokok||0), rate=parseFloat(c.ratePct||2)/100, tenor=parseInt(c.tenorBulan||0);
+  const bh=pokok*rate, r4=x=>Math.round(x*1e4)/1e4, sched=[];
+  if(c.struktur==='akhir'){
+    sched.push({tanggal:am(c.tanggalMulai,tenor), tipe:'bagihasil', jumlah:r4(bh*tenor), status:'pending'});
+    sched.push({tanggal:am(c.tanggalMulai,tenor), tipe:'pokok', jumlah:r4(pokok), status:'pending'});
+  } else if(c.struktur==='cicil'){
+    const pb=pokok/tenor;
+    for(let i=1;i<=tenor;i++){
+      const sisa=pokok-pb*(i-1);
+      sched.push({tanggal:am(c.tanggalMulai,i), tipe:'bagihasil', jumlah:r4(sisa*rate), status:'pending'});
+      sched.push({tanggal:am(c.tanggalMulai,i), tipe:'pokok', jumlah:r4(pb), status:'pending'});
+    }
+  } else { // bulanan
+    for(let i=1;i<=tenor;i++) sched.push({tanggal:am(c.tanggalMulai,i), tipe:'bagihasil', jumlah:r4(bh), status:'pending'});
+    sched.push({tanggal:am(c.tanggalMulai,tenor), tipe:'pokok', jumlah:r4(pokok), status:'pending'});
+  }
+  return sched;
+}
+function invNextDue(c){ return (c.schedule||[]).filter(s=>s.status==='pending').sort((a,b)=>a.tanggal<b.tanggal?-1:1)[0]||null; }
+function invTotalPokok(){ return invContracts().filter(c=>c.status!=='selesai').reduce((s,c)=>s+parseFloat(c.pokok||0),0); }
+function rKeuInvestor(){
+  const cs=invContracts();
+  const aktif=cs.filter(c=>c.status!=='selesai');
+  const totalPokok=invTotalPokok();
+  const bhBulan=aktif.reduce((s,c)=>s+parseFloat(c.pokok||0)*parseFloat(c.ratePct||2)/100,0);
+  let h=`<div class="cf-strip">
+    <div class="cf-col"><div class="cf-lbl">Total Pokok</div><div class="cf-val" style="color:var(--p-deep)">${fj(totalPokok)}</div></div>
+    <div class="cf-col"><div class="cf-lbl">Bagi Hasil/bln</div><div class="cf-val" style="color:var(--r)">${fj(bhBulan)}</div></div>
+    <div class="cf-col"><div class="cf-lbl">Kontrak Aktif</div><div class="cf-val">${aktif.length}</div></div>
+  </div>
+  <button class="btn pr fw" onclick="invModal('add')" style="margin-bottom:12px">➕ Tambah Kontrak Investor</button>`;
+  if(!cs.length){ h+=`<div class="es"><div class="ei">🤝</div><div class="et">Belum ada kontrak</div><div class="esb">Tambah kontrak investor, atau "Isi Data Contoh" di tab Kantong.</div></div>`; return h; }
+  cs.slice().sort((a,b)=>(a.status==='selesai'?1:0)-(b.status==='selesai'?1:0)).forEach(c=>{
+    const nd=invNextDue(c), st=INV_STRUKTUR[c.struktur]||INV_STRUKTUR.bulanan, done=c.status==='selesai';
+    h+=`<div class="card-s" style="margin-bottom:10px;${done?'opacity:.6':''}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+        <div style="min-width:0"><div style="font-size:14px;font-weight:900">${c.nama}</div>
+          <div style="font-size:10px;color:var(--sub);font-weight:700">${fj(c.pokok)} · ${c.ratePct||2}%/bln · ${c.tenorBulan} bln</div></div>
+        <div style="font-size:9px;font-weight:900;color:var(--p-deep);text-transform:uppercase;text-align:right;flex-shrink:0">${done?'✅ Selesai':(c.struktur==='akhir'?'Di akhir':c.struktur==='cicil'?'Dicicil':'Bulanan')}</div>
+      </div>
+      ${nd?`<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--bdr);font-size:11px;font-weight:700;display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <span>Berikutnya: ${nd.tipe==='pokok'?'💰 Pokok':'📈 Bagi hasil'} <b>${fj(nd.jumlah)}</b><br><span style="font-size:10px;color:${gc(du(nd.tanggal))}">${fd(nd.tanggal)} · ${gl(du(nd.tanggal))}</span></span>
+        <button class="btn pr" onclick="invBayar('${c.id}')" style="font-size:11px;padding:7px 14px;flex-shrink:0">Bayar</button></div>`:''}
+      <div style="margin-top:8px;font-size:11px"><button class="sl" onclick="invModal('edit','${c.id}')">✏️ Edit</button> &nbsp;·&nbsp; <button class="sl" onclick="invDetail('${c.id}')" style="color:var(--sub)">📅 Jadwal lengkap</button></div>
+    </div>`;
+  });
+  return h;
+}
+function invHint(){ const v=document.getElementById('ic-struktur').value, el=document.getElementById('ic-hint'); if(el) el.textContent=(INV_STRUKTUR[v]||INV_STRUKTUR.bulanan).hint; }
+function invModal(mode, id){
+  const c=mode==='edit'?invContracts().find(x=>x.id===id):null;
+  document.getElementById('mo-keu-t').textContent=(mode==='edit'?'✏️ Edit':'➕ Tambah')+' Kontrak Investor';
+  const ds=new Date().toISOString().split('T')[0], stru=(c&&c.struktur)||'bulanan';
+  const opt=(v)=>`<option value="${v}" ${stru===v?'selected':''}>${INV_STRUKTUR[v].label}</option>`;
+  document.getElementById('mo-keu-b').innerHTML=`
+    <div class="fg"><label class="fl">Nama Investor</label><input class="fi" id="ic-nama" value="${c?c.nama:''}" placeholder="Nama investor"></div>
+    <div class="fr">
+      <div class="fg"><label class="fl">Pokok (jt)</label><input class="fi" id="ic-pokok" type="number" step="0.0001" value="${c?c.pokok:''}" placeholder="0"></div>
+      <div class="fg"><label class="fl">Bagi Hasil (%/bln)</label><input class="fi" id="ic-rate" type="number" step="0.01" value="${c?(c.ratePct??2):2}"></div>
+    </div>
+    <div class="fr">
+      <div class="fg"><label class="fl">Tanggal Mulai</label><input class="fi" id="ic-mulai" type="date" value="${c?c.tanggalMulai:ds}"></div>
+      <div class="fg"><label class="fl">Tenor (bln)</label><input class="fi" id="ic-tenor" type="number" value="${c?c.tenorBulan:12}"></div>
+    </div>
+    <div class="fg"><label class="fl">Struktur Bagi Hasil</label>
+      <select class="fi" id="ic-struktur" onchange="invHint()">${opt('bulanan')}${opt('akhir')}${opt('cicil')}</select>
+      <div class="fh" id="ic-hint">${(INV_STRUKTUR[stru]||INV_STRUKTUR.bulanan).hint}</div>
+    </div>
+    <button class="btn pr fw" onclick="invSave('${mode}','${id||''}')" style="margin-top:8px">${mode==='edit'?'Simpan Perubahan':'Buat Kontrak + Terima Pokok'}</button>
+    ${mode==='edit'?`<button class="btn ou fw" onclick="invDelete('${id}')" style="margin-top:8px;color:var(--r)">🗑️ Hapus Kontrak</button>`:''}`;
+  om('mo-keu');
+}
+function invSave(mode, id){
+  const nama=document.getElementById('ic-nama').value.trim();
+  const pokok=parseFloat(document.getElementById('ic-pokok').value||0);
+  const rate=parseFloat(document.getElementById('ic-rate').value||2);
+  const mulai=document.getElementById('ic-mulai').value;
+  const tenor=parseInt(document.getElementById('ic-tenor').value||0);
+  const struktur=document.getElementById('ic-struktur').value;
+  if(!nama){ toast('❌ Nama wajib'); return; }
+  if(!(pokok>0)){ toast('❌ Pokok harus > 0'); return; }
+  if(!(tenor>0)){ toast('❌ Tenor harus > 0'); return; }
+  if(mode==='edit'){
+    const c=invContracts().find(x=>x.id===id); if(!c) return;
+    const anyPaid=(c.schedule||[]).some(s=>s.status==='paid');
+    Object.assign(c,{nama,pokok,ratePct:rate,tanggalMulai:mulai,tenorBulan:tenor,struktur});
+    if(!anyPaid) c.schedule=contractSchedule(c);
+    save(); cm('mo-keu'); rKeu(); toast(anyPaid?'✅ Diperbarui (jadwal terkunci karena sudah ada pembayaran)':'✅ Kontrak diperbarui');
+  } else {
+    const c={id:uid(),nama,pokok,ratePct:rate,tanggalMulai:mulai,tenorBulan:tenor,struktur,status:'aktif'};
+    c.schedule=contractSchedule(c);
+    invContracts().push(c);
+    ledgerPost2(mulai,'Terima dana investor: '+nama,'1030','2000',pokok,'inv-masuk'); // cash into amunisi, liability up
+    save(); cm('mo-keu'); rKeu(); toast('✅ Kontrak dibuat + pokok diterima');
+  }
+}
+function invBayar(id){
+  const c=invContracts().find(x=>x.id===id); if(!c) return;
+  const nd=invNextDue(c); if(!nd){ toast('Semua sudah dibayar'); return; }
+  document.getElementById('mo-keu-t').textContent='💸 Bayar '+(nd.tipe==='pokok'?'Pokok':'Bagi Hasil');
+  document.getElementById('mo-keu-b').innerHTML=`
+    <div class="fc-note" style="margin-bottom:12px">${c.nama} · ${nd.tipe==='pokok'?'Pengembalian pokok':'Bagi hasil'} <b>${fj(nd.jumlah)}</b> · jatuh tempo ${fd(nd.tanggal)}</div>
+    <div class="fg"><label class="fl">Bayar dari kantong</label><select class="fi" id="k-src">${pocketOptions('1040')}</select></div>
+    <div class="fg"><label class="fl">Tanggal bayar</label><input class="fi" id="k-date" type="date" value="${new Date().toISOString().split('T')[0]}"></div>
+    <button class="btn pr fw" onclick="invConfirmBayar('${id}')" style="margin-top:8px">Konfirmasi Bayar ${fj(nd.jumlah)}</button>`;
+  om('mo-keu');
+}
+function invConfirmBayar(id){
+  const c=invContracts().find(x=>x.id===id); if(!c) return;
+  const nd=invNextDue(c); if(!nd) return;
+  const src=document.getElementById('k-src').value, date=document.getElementById('k-date').value;
+  if(nd.tipe==='pokok') txKembalikanPokokInvestor(date, nd.jumlah, src, 'Kembalikan pokok: '+c.nama);
+  else ledgerPost(date,'Bagi hasil: '+c.nama,[{account:'5000',debit:nd.jumlah,credit:0},{account:src,debit:0,credit:nd.jumlah}],'bayar-bh');
+  nd.status='paid'; nd.paidDate=date; nd.paidFrom=src;
+  if(!(c.schedule||[]).some(s=>s.status==='pending')) c.status='selesai';
+  save(); cm('mo-keu'); rKeu(); toast('✅ Pembayaran dicatat');
+}
+function invDetail(id){
+  const c=invContracts().find(x=>x.id===id); if(!c) return;
+  document.getElementById('mo-keu-t').textContent='📅 Jadwal · '+c.nama;
+  let b=`<div class="fc-note" style="margin-bottom:10px">${fj(c.pokok)} · ${c.ratePct}%/bln · ${c.tenorBulan} bln · ${(INV_STRUKTUR[c.struktur]||INV_STRUKTUR.bulanan).label}</div>`;
+  (c.schedule||[]).forEach(s=>{
+    b+=`<div class="ir"><div class="ik">${s.tipe==='pokok'?'💰 Pokok':'📈 Bagi hasil'} · ${fd(s.tanggal)}</div><div class="iv" style="color:${s.status==='paid'?'#0B8F46':'var(--txt)'}">${fj(s.jumlah)} ${s.status==='paid'?'✅':''}</div></div>`;
+  });
+  document.getElementById('mo-keu-b').innerHTML=b;
+  om('mo-keu');
+}
+function invDelete(id){
+  const c=invContracts().find(x=>x.id===id); if(!c) return;
+  if((c.schedule||[]).some(s=>s.status==='paid')){ toast('❌ Sudah ada pembayaran. Tidak bisa dihapus.'); return; }
+  if(!confirm('Hapus kontrak "'+c.nama+'"? Jurnal terima pokok akan dibalik agar buku besar tetap konsisten.')) return;
+  ledgerPost2(new Date().toISOString().split('T')[0],'Batal kontrak investor: '+c.nama,'2000','1030',parseFloat(c.pokok||0),'inv-batal');
+  S.investorContracts=invContracts().filter(x=>x.id!==id);
+  save(); cm('mo-keu'); rKeu(); toast('🗑️ Kontrak dihapus + pokok dibalik');
 }
 function am(s,m){
   // Add m months to date string s (YYYY-MM-DD), timezone-safe
