@@ -349,6 +349,20 @@ function migrateSchema(){
     if(e.tipe==='investor' && e.isOwner===undefined) e.isOwner=false;
     if(e.tipe==='pinjaman' && !e.assignedOwners) e.assignedOwners=[];
   });
+  // 2. Fase 2 — Treasury & Accounting ledger foundation (additive, idempotent).
+  //    Physical pockets must mirror Bank Jago: Utama=bayar (transfer conduit,
+  //    transient), Gde/RRPR=nabung (savings, no direct transfer). Liquidity
+  //    priority: Gde first, RRPR last resort.
+  if(!Array.isArray(S.pockets) || !S.pockets.length){
+    S.pockets=[
+      {code:'1000', nama:'Kantong Utama', tipe:'bayar',  prioritas:0},
+      {code:'1010', nama:'Kantong Gde',   tipe:'nabung', prioritas:1},
+      {code:'1020', nama:'Kantong RRPR',  tipe:'nabung', prioritas:2},
+    ];
+  }
+  if(!Array.isArray(S.ledger)) S.ledger=[];
+  if(!Array.isArray(S.investorContracts)) S.investorContracts=[];
+  if(!S.orgConfig) S.orgConfig={ ownerSplitMode:'prorata', investorRateDefault:2 };
 }
 function setSync(state, ts){
   const el=document.getElementById('sync-ind');if(!el)return;
@@ -425,6 +439,102 @@ function fd(s){ if(!s) return '—'; return new Date(s+'T00:00:00').toLocaleDate
 function du(s){ if(!s) return null; const n=new Date(); n.setHours(0,0,0,0); return Math.round((new Date(s+'T00:00:00')-n)/86400000); }
 function gl(d){ if(d===null) return ''; if(d<0) return `${Math.abs(d)}h terlambat`; if(d===0) return 'Jatuh tempo hari ini!'; return `${d} hari lagi`; }
 function gc(d){ if(d===null) return 'var(--sub)'; if(d<0) return 'var(--r)'; if(d<=7) return 'var(--o)'; return 'var(--sub)'; }
+
+// ── LEDGER ENGINE (Fase 2 — double-entry) ─────────────────────────────
+// Fixed chart of accounts (non-pocket). Pockets (asset accounts 10xx) live in
+// S.pockets so the user can add savings pockets. Every rupiah movement is a
+// balanced journal entry in S.ledger; ALL balances/reports derive from it.
+const COA_FIXED = [
+  {code:'1100', name:'Dana di Proyek',                type:'aset',       normal:'D'},
+  {code:'2000', name:'Utang Pokok Investor',          type:'liabilitas', normal:'K'},
+  {code:'2010', name:'Bagi Hasil Terutang',           type:'liabilitas', normal:'K'},
+  {code:'2100', name:'Utang Pinjaman',                type:'liabilitas', normal:'K'},
+  {code:'3000', name:'Modal Gde',                     type:'ekuitas',    normal:'K'},
+  {code:'3010', name:'Modal RRPR',                    type:'ekuitas',    normal:'K'},
+  {code:'3900', name:'Laba Ditahan',                  type:'ekuitas',    normal:'K'},
+  {code:'4000', name:'Pendapatan Imbal Hasil Proyek', type:'pendapatan', normal:'K'},
+  {code:'5000', name:'Beban Bagi Hasil Investor',     type:'beban',      normal:'D'},
+  {code:'5010', name:'Beban Bunga Pinjaman',          type:'beban',      normal:'D'},
+  {code:'5020', name:'Beban Fee Admin',               type:'beban',      normal:'D'},
+  {code:'5030', name:'Beban Operasional',             type:'beban',      normal:'D'},
+];
+// Resolve account metadata by code (CoA first, then pockets = asset/D-normal).
+function acct(code){
+  const f=COA_FIXED.find(a=>a.code===code); if(f) return f;
+  const p=(S.pockets||[]).find(x=>x.code===code);
+  if(p) return {code:p.code, name:p.nama, type:'aset', normal:'D', pocket:true, pocketTipe:p.tipe};
+  return {code, name:code, type:'aset', normal:'D'};
+}
+function allAccounts(){
+  const map={};
+  (S.pockets||[]).forEach(p=>{ map[p.code]=acct(p.code); });
+  COA_FIXED.forEach(a=>{ map[a.code]=a; });
+  return Object.values(map).sort((a,b)=>a.code<b.code?-1:1);
+}
+// Post a balanced journal entry. lines: [{account, debit, credit}] in jt.
+function ledgerPost(tanggal, memo, lines, ref){
+  const cl=lines.filter(l=>(+l.debit||0)!==0||(+l.credit||0)!==0)
+    .map(l=>({account:l.account, debit:Math.round((+l.debit||0)*1e4)/1e4, credit:Math.round((+l.credit||0)*1e4)/1e4}));
+  const d=cl.reduce((s,l)=>s+l.debit,0), k=cl.reduce((s,l)=>s+l.credit,0);
+  if(Math.abs(d-k)>0.005){ console.error('[ledger] UNBALANCED', memo, {d,k}, cl); throw new Error('Jurnal tidak balance: '+memo); }
+  const entry={ id:uid(), tanggal, memo, ref:ref||null, lines:cl };
+  if(!Array.isArray(S.ledger)) S.ledger=[];
+  S.ledger.push(entry);
+  return entry;
+}
+// Convenience: simple 2-line Dr/Cr entry.
+function ledgerPost2(tanggal, memo, drCode, krCode, amount, ref){
+  const a=Math.round((+amount||0)*1e4)/1e4;
+  return ledgerPost(tanggal, memo, [{account:drCode,debit:a,credit:0},{account:krCode,debit:0,credit:a}], ref);
+}
+// Signed balance of an account across the whole ledger (respecting normal side).
+function acctBalance(code){
+  let d=0,k=0;
+  (S.ledger||[]).forEach(e=>e.lines.forEach(l=>{ if(l.account===code){ d+=l.debit; k+=l.credit; } }));
+  return acct(code).normal==='D' ? d-k : k-d;
+}
+function pocketBalance(code){ return acctBalance(code); }
+// Trial balance: every account with a nonzero balance, split to debit/credit column.
+function trialBalance(){
+  return allAccounts().map(a=>{
+    const bal=acctBalance(a.code);
+    return { code:a.code, name:a.name, type:a.type, normal:a.normal,
+             debit: a.normal==='D'? Math.max(bal,0) : Math.max(-bal,0),
+             credit:a.normal==='K'? Math.max(bal,0) : Math.max(-bal,0),
+             balance:bal };
+  }).filter(r=>Math.abs(r.balance)>0.005);
+}
+// Owner pocket -> equity account (for capital injections). RRPR pocket = 3010, else Gde.
+function ownerModalAccount(pocketCode){ return pocketCode==='1020' ? '3010' : '3000'; }
+
+// High-level transaction helpers (each = one balanced journal entry). Values in jt.
+function txSetorModal(tanggal, pocketCode, jumlah, memo){
+  return ledgerPost2(tanggal, memo||('Setor modal ke '+acct(pocketCode).name), pocketCode, ownerModalAccount(pocketCode), jumlah, 'setor-modal');
+}
+function txTransfer(tanggal, dariCode, keCode, jumlah, memo){
+  return ledgerPost2(tanggal, memo||('Transfer '+acct(dariCode).name+' → '+acct(keCode).name), keCode, dariCode, jumlah, 'transfer');
+}
+function txTerimaPokokInvestor(tanggal, jumlah, memo){
+  return ledgerPost2(tanggal, memo||'Terima pokok investor', '1000', '2000', jumlah, 'inv-pokok-in');
+}
+function txDeployProyek(tanggal, jumlah, fromCode, memo){
+  return ledgerPost2(tanggal, memo||'Deploy ke proyek', '1100', fromCode||'1000', jumlah, 'deploy');
+}
+function txReturnProyek(tanggal, jumlah, toCode, memo){
+  return ledgerPost2(tanggal, memo||'Return proyek', toCode||'1000', '4000', jumlah, 'return');
+}
+function txPokokProyekBalik(tanggal, jumlah, toCode, memo){
+  return ledgerPost2(tanggal, memo||'Pokok proyek kembali', toCode||'1000', '1100', jumlah, 'pokok-balik');
+}
+function txAkrualBagiHasil(tanggal, jumlah, memo){
+  return ledgerPost2(tanggal, memo||'Akrual bagi hasil investor', '5000', '2010', jumlah, 'akrual-bh');
+}
+function txBayarBagiHasil(tanggal, jumlah, fromCode, memo){
+  return ledgerPost2(tanggal, memo||'Bayar bagi hasil investor', '2010', fromCode||'1000', jumlah, 'bayar-bh');
+}
+function txKembalikanPokokInvestor(tanggal, jumlah, fromCode, memo){
+  return ledgerPost2(tanggal, memo||'Kembalikan pokok investor', '2000', fromCode||'1000', jumlah, 'inv-pokok-out');
+}
 function am(s,m){
   // Add m months to date string s (YYYY-MM-DD), timezone-safe
   const [y,mo,da]=s.split('-').map(Number);
