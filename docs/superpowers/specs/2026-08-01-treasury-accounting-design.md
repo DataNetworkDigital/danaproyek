@@ -71,3 +71,27 @@ Fields lama (projects, external) DIPERTAHANKAN. Migrasi mengonversi investor lam
 
 ## Keamanan migrasi
 Backup `dt_v3` ke key bertanggal sebelum migrasi. Migrasi additif + idempoten. Guard `isProdOrigin` tetap (tak ada tulis produksi dari localhost). Guard data-loss (cloud<local projects) tetap.
+
+---
+
+## Addendum 2026-08-01 (setelah 2 putaran review strategi + math)
+
+**Kantong final = 5** (Dana Proyek Aktif jadi DASHBOARD, bukan kantong):
+1. Utama (bayar/hub, transient) · 2. Gde (serang) · 3. Investor Belum Dialokasikan (amunisi/dry powder) · 4. RRPR (bertahan/cadangan bergulir) · 5. **Investor Jatuh Tempo (sinking fund, LOCKED)** = pre-fund kewajiban investor paling lambat H-1, tak boleh dipakai proyek.
+
+**Urutan deploy (attack):** dana investor available dulu, lalu Gde bridge, lalu RRPR (last resort). Prioritas likuiditas defend: Gde dulu, RRPR terakhir.
+
+**Mesin likuiditas (M6) diperkeras — dua lapis: aktual (ledger) + proyeksi (jadwal kontrak/proyek):**
+- **Projected daily closing cash**, cari MIN across horizon (bukan cuma kumulatif). Status vs reserve floor: HIJAU/KUNING/MERAH + **HITAM/LOCKED** (blok proyek yang langgar reserve; override = alasan diketik, bukan dual-approval karena solo admin).
+- **Confidence/haircut per inflow.** Defend cuma andalkan uang yang sudah ada/hampir pasti; pipeline & investor-belum-transfer = 0% untuk defend (boleh untuk attack).
+- **3 skenario:** base / conservative / stress. Status pakai conservative; keputusan RRPR wajib lolos stress. Buffer H+7 default, belajar per-klien saat ada data (cold-start konservatif).
+- **RRPR Minimum = MAX(peak stress gap, pokok+return 30 hari, investor terbesar segera JT, emergency ops) × 1,25.** **RRPR Available** = saldo − bridge outstanding − yang sudah dicadangkan − kewajiban RRPR sendiri.
+- **Safe Deployable Cash** dipisah sumber (Investor Allocatable + Gde Bridge Available + RRPR Attack Allowance[floor 0] − deficit − opsbuffer). **Safe Project Size** + tombol **Simulasikan proyek RpX** (before/after, cari max via simulasi/binary-search).
+- **Metrik:** Cost of Idle Capital (dana investor idle × 2%), Concentration 7d(≤10-15%)/30d(≤20-25%), 3 runway (contractual/conservative/**no-new-money** = paling penting), ROE Deployed (time-weighted avg modal deployed) + Return on Total Owner Liquidity.
+- **Liquidity waterfall** urutan pakai kas: kewajiban investor JT → pajak/wajib → ops kritis → balikin bridge RRPR → balikin bridge Gde → top-up reserve → deploy proyek baru → distribusi laba.
+
+**Tenor:** variabel sebenarnya UTILISASI, bukan tenor. Panjang = funding stabil (bagus) asal terus terdeploy; bahaya saat idle (bayar 2% percuma). Rumus: sepanjang keyakinan deal-flow, dibatasi kapasitas (jangan over-raise), di-ladder.
+
+**Prinsip UX:** disiplin institusi ditaruh di software (auto-hitung, auto-warn, auto-segregate), tampil bertahap, biar fund kecil tak tenggelam parameter. Tujuan mesin: bikin BERANI menyerang dengan pasti, bukan takut.
+
+**Status build:** M1 (fondasi) + M2 (Kantong UI 5 kantong + transfer/setor/rekonsiliasi + dummy seed) SELESAI & terverifikasi (trial balance selalu balance). Berikut: M3 kontrak investor.

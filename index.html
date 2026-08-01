@@ -306,12 +306,14 @@ body.modal-open{position:fixed;left:0;right:0;width:100%;overflow:hidden}
     <div class="page" id="p-m"></div>
     <div class="page" id="p-k"></div>
     <div class="page" id="p-e"></div>
+    <div class="page" id="p-u"></div>
   </div>
   <nav class="bnav" id="nav">
     <button class="ni on" onclick="go('b')" id="n-b"><span class="ico">🏠</span><span class="lbl">Beranda</span></button>
     <button class="ni" onclick="go('m')" id="n-m" style="display:none"><span class="ico">📋</span><span class="lbl">Proyek</span></button>
-    <button class="ni" onclick="go('k')" id="n-k" style="display:none"><span class="ico">📅</span><span class="lbl">Kalender</span></button>
     <button class="ni" onclick="go('e')" id="n-e" style="display:none"><span class="ico">🤝</span><span class="lbl">Pemodal</span></button>
+    <button class="ni" onclick="go('u')" id="n-u" style="display:none"><span class="ico">🏦</span><span class="lbl">Keuangan</span></button>
+    <button class="ni" onclick="go('k')" id="n-k" style="display:none"><span class="ico">📅</span><span class="lbl">Kalender</span></button>
     <button class="ni" onclick="showPin()" id="n-admin"><span class="ico">🔐</span><span class="lbl">Admin</span></button>
   </nav>
 </div>
@@ -321,6 +323,7 @@ body.modal-open{position:fixed;left:0;right:0;width:100%;overflow:hidden}
 <div class="mo" id="mo-det" onclick="cm('mo-det')"><div class="modal" onclick="event.stopPropagation()"><button class="mclose" onclick="cm('mo-det')" aria-label="Tutup">×</button><div class="mh"></div><div id="mo-det-b"></div></div></div>
 <div class="mo" id="mo-fund" onclick="cm('mo-fund')"><div class="modal" onclick="event.stopPropagation()"><button class="mclose" onclick="cm('mo-fund')" aria-label="Tutup">×</button><div class="mh"></div><div class="mtt">⚙️ Konfigurasi KUR</div><div id="mo-fund-b"></div></div></div>
 <div class="mo" id="mo-edet" onclick="cm('mo-edet')"><div class="modal" onclick="event.stopPropagation()"><button class="mclose" onclick="cm('mo-edet')" aria-label="Tutup">×</button><div class="mh"></div><div id="mo-edet-b"></div></div></div>
+<div class="mo" id="mo-keu" onclick="cm('mo-keu')"><div class="modal" onclick="event.stopPropagation()"><button class="mclose" onclick="cm('mo-keu')" aria-label="Tutup">×</button><div class="mh"></div><div class="mtt" id="mo-keu-t">Kantong</div><div id="mo-keu-b"></div></div></div>
 <button class="fab" id="fab" onclick="fabAct()">＋</button>
 <div id="toast"></div>
 <script>
@@ -353,13 +356,25 @@ function migrateSchema(){
   //    Physical pockets must mirror Bank Jago: Utama=bayar (transfer conduit,
   //    transient), Gde/RRPR=nabung (savings, no direct transfer). Liquidity
   //    priority: Gde first, RRPR last resort.
-  if(!Array.isArray(S.pockets) || !S.pockets.length){
-    S.pockets=[
-      {code:'1000', nama:'Kantong Utama', tipe:'bayar',  prioritas:0},
-      {code:'1010', nama:'Kantong Gde',   tipe:'nabung', prioritas:1},
-      {code:'1020', nama:'Kantong RRPR',  tipe:'nabung', prioritas:2},
-    ];
-  }
+  // 5 kantong (additive + idempoten). role: hub=bayar/transient, serang=Gde,
+  // bertahan=RRPR benteng, amunisi=investor belum dialokasikan, sinking=investor
+  // jatuh tempo (dikunci, tidak boleh dipakai proyek). prioritas = urutan pakai
+  // likuiditas (Gde dulu, investor, RRPR terakhir). Deploy priority beda: investor dulu.
+  const defPockets=[
+    {code:'1000', nama:'Utama',                  tipe:'bayar',  role:'hub',      prioritas:0},
+    {code:'1010', nama:'Gde',                    tipe:'nabung', role:'serang',   prioritas:1},
+    {code:'1030', nama:'Investor Belum Dialokasikan', tipe:'nabung', role:'amunisi', prioritas:2},
+    {code:'1020', nama:'RRPR',                   tipe:'nabung', role:'bertahan', prioritas:3},
+    {code:'1040', nama:'Investor Jatuh Tempo',   tipe:'nabung', role:'sinking',  prioritas:9, locked:true},
+  ];
+  if(!Array.isArray(S.pockets)) S.pockets=[];
+  defPockets.forEach(dp=>{
+    const ex=S.pockets.find(p=>p.code===dp.code);
+    if(!ex){ S.pockets.push({...dp}); return; }
+    // keep the 5 system-default pockets canonical (name/tipe/role/prioritas/locked)
+    ex.nama=dp.nama; ex.tipe=dp.tipe; ex.role=dp.role; ex.prioritas=dp.prioritas;
+    if(dp.locked) ex.locked=true;
+  });
   if(!Array.isArray(S.ledger)) S.ledger=[];
   if(!Array.isArray(S.investorContracts)) S.investorContracts=[];
   if(!S.orgConfig) S.orgConfig={ ownerSplitMode:'prorata', investorRateDefault:2 };
@@ -452,6 +467,7 @@ const COA_FIXED = [
   {code:'3000', name:'Modal Gde',                     type:'ekuitas',    normal:'K'},
   {code:'3010', name:'Modal RRPR',                    type:'ekuitas',    normal:'K'},
   {code:'3900', name:'Laba Ditahan',                  type:'ekuitas',    normal:'K'},
+  {code:'3990', name:'Penyesuaian Rekonsiliasi',      type:'ekuitas',    normal:'K'},
   {code:'4000', name:'Pendapatan Imbal Hasil Proyek', type:'pendapatan', normal:'K'},
   {code:'5000', name:'Beban Bagi Hasil Investor',     type:'beban',      normal:'D'},
   {code:'5010', name:'Beban Bunga Pinjaman',          type:'beban',      normal:'D'},
@@ -534,6 +550,149 @@ function txBayarBagiHasil(tanggal, jumlah, fromCode, memo){
 }
 function txKembalikanPokokInvestor(tanggal, jumlah, fromCode, memo){
   return ledgerPost2(tanggal, memo||'Kembalikan pokok investor', '2000', fromCode||'1000', jumlah, 'inv-pokok-out');
+}
+
+// ── KEUANGAN MODULE (M2: Kantong + rekonsiliasi) ──────────────────────
+let keuTab='kantong';
+function swKeu(t){ keuTab=t; rKeu(); }
+function pocketMeta(role){
+  const m={
+    hub:      {emoji:'🔀', label:'Bayar · Transit',        c:'#6b7280', bg:'var(--clay-card)'},
+    serang:   {emoji:'⚔️', label:'Serang · Modal Gde',      c:'#7c3aed', bg:'linear-gradient(140deg,#fff,#F3F0FF)'},
+    amunisi:  {emoji:'📦', label:'Amunisi · Dana Investor',  c:'#2563eb', bg:'linear-gradient(140deg,#fff,#EFF4FF)'},
+    bertahan: {emoji:'🛡️', label:'Bertahan · Cadangan',     c:'#0891b2', bg:'linear-gradient(140deg,#fff,#ECFEFF)'},
+    sinking:  {emoji:'🔒', label:'Jatuh Tempo · Terkunci',   c:'#b45309', bg:'linear-gradient(140deg,#fff,#FFFBEB)'},
+  };
+  return m[role]||m.hub;
+}
+function totalLikuid(){ return (S.pockets||[]).reduce((s,p)=>s+pocketBalance(p.code),0); }
+function pocketOptions(sel){
+  return [...(S.pockets||[])].sort((a,b)=>a.prioritas-b.prioritas)
+    .map(p=>`<option value="${p.code}" ${p.code===sel?'selected':''}>${p.nama}</option>`).join('');
+}
+function rKeu(){
+  const el=document.getElementById('p-u'); if(!el) return;
+  const sub=`<div class="tabs" style="margin-bottom:14px">
+    <button class="tab ${keuTab==='kantong'?'on':''}" onclick="swKeu('kantong')">🏦 Kantong</button>
+    <button class="tab ${keuTab==='likuiditas'?'on':''}" onclick="swKeu('likuiditas')">💧 Likuiditas</button>
+    <button class="tab ${keuTab==='laporan'?'on':''}" onclick="swKeu('laporan')">📊 Laporan</button>
+  </div>`;
+  let body='';
+  if(keuTab==='kantong') body=rKeuKantong();
+  else if(keuTab==='likuiditas') body=`<div class="es"><div class="ei">💧</div><div class="et">Mesin Likuiditas</div><div class="esb">Segera hadir: status cash-ready, ROE, cadangan RRPR, dan "safe project size".</div></div>`;
+  else body=`<div class="es"><div class="ei">📊</div><div class="et">Laporan Keuangan</div><div class="esb">Segera hadir: jurnal, neraca saldo, laba rugi, neraca, arus kas.</div></div>`;
+  el.innerHTML=sub+body;
+}
+function rKeuKantong(){
+  const pockets=[...(S.pockets||[])].sort((a,b)=>a.prioritas-b.prioritas);
+  const likuid=totalLikuid(), diProyek=acctBalance('1100'), utangInv=acctBalance('2000')+acctBalance('2010');
+  let h=`<div class="cf-strip">
+    <div class="cf-col"><div class="cf-lbl">Kas Likuid</div><div class="cf-val" style="color:#0B8F46">${fj(likuid)}</div></div>
+    <div class="cf-col"><div class="cf-lbl">Di Proyek</div><div class="cf-val" style="color:var(--p-deep)">${fj(diProyek)}</div></div>
+    <div class="cf-col"><div class="cf-lbl">Utang Investor</div><div class="cf-val" style="color:var(--r)">${fj(utangInv)}</div></div>
+  </div>`;
+  if(!(S.ledger||[]).length){
+    h+=`<div class="fc-note" style="margin-bottom:12px">Belum ada transaksi. Klik <b>Isi Data Contoh</b> untuk lihat cara kerjanya. Nanti bisa direset saat data aslimu siap.</div>`;
+  }
+  pockets.forEach(p=>{
+    const m=pocketMeta(p.role), bal=pocketBalance(p.code);
+    h+=`<div class="card-s" style="margin-bottom:10px;display:flex;align-items:center;gap:12px;background:${m.bg}">
+      <div style="font-size:24px;flex-shrink:0">${m.emoji}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13.5px;font-weight:900">${p.nama} ${p.locked?'🔒':''}</div>
+        <div style="font-size:9.5px;font-weight:800;color:${m.c};text-transform:uppercase;letter-spacing:.4px">${m.label}</div>
+      </div>
+      <div class="t-num" style="font-size:16px;font-weight:900;color:${bal<-0.005?'var(--r)':'var(--txt)'};white-space:nowrap">${fj(bal)}</div>
+    </div>`;
+  });
+  h+=`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:12px">
+    <button class="btn pr" onclick="keuModal('transfer')" style="padding:11px 6px;font-size:12px">🔀 Transfer</button>
+    <button class="btn ou" onclick="keuModal('setor')" style="padding:11px 6px;font-size:12px">💰 Setor</button>
+    <button class="btn ou" onclick="keuModal('recon')" style="padding:11px 6px;font-size:12px">✅ Rekon</button>
+  </div>
+  <div style="margin-top:10px">
+    ${!(S.ledger||[]).length
+      ? `<button class="btn ou fw" onclick="keuDummy()" style="font-size:12px">✨ Isi Data Contoh</button>`
+      : `<button class="btn ou fw" onclick="keuReset()" style="font-size:12px;color:var(--r)">🗑️ Reset Buku Besar (hapus semua jurnal)</button>`}
+  </div>`;
+  return h;
+}
+function keuModal(type){
+  const title={transfer:'🔀 Transfer Antar Kantong',setor:'💰 Setor Modal Owner',recon:'✅ Rekonsiliasi Bank Jago'}[type]||'Kantong';
+  document.getElementById('mo-keu-t').textContent=title;
+  const ds=new Date().toISOString().split('T')[0];
+  let b='';
+  if(type==='transfer'){
+    b=`<div class="fc-note" style="margin-bottom:12px">Di Bank Jago semua transfer lewat <b>Utama</b>. Di sini catat asal & tujuan akhirnya (saldo tetap cocok).</div>
+    <div class="fr"><div class="fg"><label class="fl">Dari</label><select class="fi" id="k-from">${pocketOptions('1010')}</select></div>
+    <div class="fg"><label class="fl">Ke</label><select class="fi" id="k-to">${pocketOptions('1030')}</select></div></div>
+    <div class="fg"><label class="fl">Jumlah (jt)</label><input class="fi" id="k-amt" type="number" step="0.0001" placeholder="0"></div>
+    <div class="fg"><label class="fl">Tanggal</label><input class="fi" id="k-date" type="date" value="${ds}"></div>
+    <button class="btn pr fw" onclick="keuSaveTransfer()" style="margin-top:8px">Simpan Transfer</button>`;
+  } else if(type==='setor'){
+    b=`<div class="fc-note" style="margin-bottom:12px">Owner menyetor modal (mis. sisihan gaji) ke kantong nabungnya.</div>
+    <div class="fg"><label class="fl">Kantong Owner</label><select class="fi" id="k-pocket"><option value="1010">Gde</option><option value="1020">RRPR</option></select></div>
+    <div class="fg"><label class="fl">Jumlah (jt)</label><input class="fi" id="k-amt" type="number" step="0.0001" placeholder="0"></div>
+    <div class="fg"><label class="fl">Tanggal</label><input class="fi" id="k-date" type="date" value="${ds}"></div>
+    <button class="btn pr fw" onclick="keuSaveSetor()" style="margin-top:8px">Simpan Setoran</button>`;
+  } else if(type==='recon'){
+    const pockets=[...(S.pockets||[])].sort((a,b)=>a.prioritas-b.prioritas);
+    b=`<div class="fc-note" style="margin-bottom:12px">Isi saldo <b>aktual di Bank Jago</b> tiap kantong. Sistem catat penyesuaian biar sama persis. Kosongkan kalau sudah cocok.</div>`;
+    pockets.forEach(p=>{
+      const bal=pocketBalance(p.code);
+      b+=`<div class="fr" style="align-items:flex-end"><div class="fg" style="flex:1.2"><label class="fl">${p.nama}</label><div style="font-size:11px;color:var(--sub);font-weight:700">Sistem: ${fj(bal)}</div></div>
+      <div class="fg"><label class="fl">Aktual (jt)</label><input class="fi k-actual" data-code="${p.code}" data-sys="${bal}" type="number" step="0.0001" placeholder="${bal.toFixed(2)}"></div></div>`;
+    });
+    b+=`<div class="fg"><label class="fl">Tanggal</label><input class="fi" id="k-date" type="date" value="${ds}"></div>
+    <button class="btn pr fw" onclick="keuSaveRecon()" style="margin-top:8px">Catat Penyesuaian</button>`;
+  }
+  document.getElementById('mo-keu-b').innerHTML=b;
+  om('mo-keu');
+}
+function keuSaveTransfer(){
+  const from=document.getElementById('k-from').value, to=document.getElementById('k-to').value;
+  const amt=parseFloat(document.getElementById('k-amt').value||0), date=document.getElementById('k-date').value;
+  if(from===to){ toast('❌ Kantong asal & tujuan sama'); return; }
+  if(!(amt>0)){ toast('❌ Jumlah harus > 0'); return; }
+  txTransfer(date, from, to, amt);
+  save(); cm('mo-keu'); rKeu(); toast('✅ Transfer dicatat');
+}
+function keuSaveSetor(){
+  const pocket=document.getElementById('k-pocket').value;
+  const amt=parseFloat(document.getElementById('k-amt').value||0), date=document.getElementById('k-date').value;
+  if(!(amt>0)){ toast('❌ Jumlah harus > 0'); return; }
+  txSetorModal(date, pocket, amt);
+  save(); cm('mo-keu'); rKeu(); toast('✅ Setoran modal dicatat');
+}
+function keuSaveRecon(){
+  const date=document.getElementById('k-date').value; let n=0;
+  document.querySelectorAll('.k-actual').forEach(inp=>{
+    if(inp.value==='') return;
+    const code=inp.dataset.code, sys=parseFloat(inp.dataset.sys||0), actual=parseFloat(inp.value||0);
+    const diff=Math.round((actual-sys)*1e4)/1e4;
+    if(Math.abs(diff)<0.005) return;
+    if(diff>0) ledgerPost2(date, 'Penyesuaian rekonsiliasi '+acct(code).name, code, '3990', diff, 'recon');
+    else       ledgerPost2(date, 'Penyesuaian rekonsiliasi '+acct(code).name, '3990', code, -diff, 'recon');
+    n++;
+  });
+  save(); cm('mo-keu'); rKeu();
+  toast(n?`✅ ${n} penyesuaian dicatat`:'✅ Semua sudah cocok');
+}
+function keuDummy(){
+  const today=new Date(), d=x=>{const t=new Date(today);t.setDate(t.getDate()-x);return t.toISOString().split('T')[0];};
+  txSetorModal(d(30),'1010',150,'Setoran modal Gde (contoh)');
+  txSetorModal(d(30),'1020',80,'Setoran modal RRPR (contoh)');
+  ledgerPost2(d(25),'Terima pokok investor (contoh)','1030','2000',100,'inv-pokok-in');
+  txDeployProyek(d(20),100,'1030','Deploy ke proyek dari dana investor (contoh)');
+  txDeployProyek(d(20),20,'1010','Deploy ke proyek dari Gde (contoh)');
+  txReturnProyek(d(5),6,'1000','Return proyek bulan ini (contoh)');
+  txAkrualBagiHasil(d(5),2,'Akrual bagi hasil investor 2% (contoh)');
+  txBayarBagiHasil(d(2),2,'1000','Bayar bagi hasil investor (contoh)');
+  save(); rKeu(); toast('✨ Data contoh diisi');
+}
+function keuReset(){
+  if(!confirm('Hapus SEMUA jurnal buku besar? Saldo kantong jadi 0. Data proyek & pemodal TIDAK terpengaruh.')) return;
+  S.ledger=[]; save(); rKeu(); toast('🗑️ Buku besar direset');
 }
 function am(s,m){
   // Add m months to date string s (YYYY-MM-DD), timezone-safe
@@ -780,13 +939,13 @@ function go(p){
   document.getElementById('p-'+p).classList.add('active');
   document.getElementById('n-'+p).classList.add('on');
   CP=p;
-  const ti={b:{t:'💸 DanaTrack',s:'Portfolio Manager'},m:{t:'📋 Proyek',s:'Kelola semua proyek'},k:{t:'📅 Kalender',s:'Jadwal & cashflow'},e:{t:'🤝 Pemodal',s:'Owner, investor & utang'}};
+  const ti={b:{t:'💸 DanaTrack',s:'Portfolio Manager'},m:{t:'📋 Proyek',s:'Kelola semua proyek'},k:{t:'📅 Kalender',s:'Jadwal & cashflow'},e:{t:'🤝 Pemodal',s:'Owner, investor & utang'},u:{t:'🏦 Keuangan',s:'Kantong, likuiditas & laporan'}};
   document.getElementById('HT').textContent=ti[p]?.t||'';
   document.getElementById('HS').textContent=ti[p]?.s||'';
   document.getElementById('HA').innerHTML=`<button class="hdr-icon" onclick="exportJ()" title="Export">⬆️</button><button class="hdr-icon" onclick="importJ()" title="Import">⬇️</button>`;
   document.getElementById('fab').style.display=['m','e'].includes(p)?'flex':'none';
   window.scrollTo(0,0); // native document scroll: start each tab at the top
-  if(p==='b')rB();else if(p==='m')rM();else if(p==='k')rK();else if(p==='e')rE();
+  if(p==='b')rB();else if(p==='m')rM();else if(p==='k')rK();else if(p==='e')rE();else if(p==='u')rKeu();
 }
 function fabAct(){ if(CP==='m') oPM(); else if(CP==='e') oEM(); }
 let _tt;
@@ -2805,6 +2964,7 @@ async function unlockAdmin(){
   document.getElementById('n-m').style.display='';
   document.getElementById('n-k').style.display='';
   document.getElementById('n-e').style.display='';
+  document.getElementById('n-u').style.display='';
   document.getElementById('n-admin').style.display='none';
   // Load from Firestore
   await loadFromFirestore();
