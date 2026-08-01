@@ -117,6 +117,17 @@ body.modal-open{position:fixed;left:0;right:0;width:100%;overflow:hidden}
 .pinj-summary.show{display:block}
 .pinj-summary .ps-row{display:flex;justify-content:space-between;align-items:center;padding:2px 0}
 .pinj-summary .ps-row+.ps-row{border-top:1px solid rgba(3,105,161,.1);margin-top:2px;padding-top:4px}
+/* Financial statements (M5) */
+.rep{background:var(--clay-card);border-radius:18px;padding:16px;box-shadow:var(--clay-out-sm);border:1px solid rgba(255,255,255,.9)}
+.rep-t{font-size:15px;font-weight:900;text-align:center;letter-spacing:.3px}
+.rep-s{font-size:10px;color:var(--sub);text-align:center;font-weight:700;margin-bottom:10px}
+.rep-sec{font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.5px;color:var(--p-deep);margin:12px 0 3px;border-bottom:1.5px solid var(--bdr);padding-bottom:3px}
+.rep-r{display:flex;justify-content:space-between;align-items:baseline;padding:3px 0;font-size:12.5px;gap:10px}
+.rep-r .rl{color:var(--txt);font-weight:700;min-width:0}
+.rep-r .rv{font-variant-numeric:tabular-nums;font-family:'Geist Mono','SF Mono',monospace;font-weight:700;white-space:nowrap}
+.rep-r.sub{border-top:1px solid var(--bdr);margin-top:2px;font-weight:900}.rep-r.sub .rv{font-weight:900}
+.rep-r.tot{border-top:2px solid var(--txt);margin-top:4px;font-weight:900;font-size:13.5px}.rep-r.tot .rv{font-weight:900}
+.rep-ok{text-align:center;font-size:10px;font-weight:800;margin-top:8px}
 .sh{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}.st{font-size:15px;font-weight:900;color:var(--txt)}
 .sl{font-size:11px;color:var(--p-deep);font-weight:800;cursor:pointer;background:none;border:none;font-family:'Nunito',sans-serif}
 
@@ -582,7 +593,7 @@ function rKeu(){
   if(keuTab==='kantong') body=rKeuKantong();
   else if(keuTab==='investor') body=rKeuInvestor();
   else if(keuTab==='likuiditas') body=`<div class="es"><div class="ei">💧</div><div class="et">Mesin Likuiditas</div><div class="esb">Segera hadir: rekomendasi pindah dana, cash-ready, ROE, cadangan RRPR, dan "safe project size".</div></div>`;
-  else body=`<div class="es"><div class="ei">📊</div><div class="et">Laporan Keuangan</div><div class="esb">Segera hadir: jurnal, neraca saldo, laba rugi, neraca, arus kas.</div></div>`;
+  else body=rKeuLaporan();
   el.innerHTML=sub+body;
 }
 function rKeuKantong(){
@@ -692,7 +703,7 @@ function keuDummy(){
   txDeployProyek(d(20),100,'1030','Deploy ke proyek dari dana investor (contoh)');
   txDeployProyek(d(20),20,'1010','Deploy ke proyek dari Gde (contoh)');
   txReturnProyek(d(5),6,'1000','Return proyek bulan ini (contoh)');
-  txBayarBagiHasil(d(2),2,'1000','Bayar bagi hasil investor (contoh)');
+  ledgerPost(d(2),'Bayar bagi hasil investor (contoh)',[{account:'5000',debit:2,credit:0},{account:'1000',debit:0,credit:2}],'bayar-bh');
   save(); rKeu(); toast('✨ Data contoh diisi');
 }
 function keuReset(){
@@ -842,6 +853,116 @@ function invDelete(id){
   ledgerPost2(new Date().toISOString().split('T')[0],'Batal kontrak investor: '+c.nama,'2000','1030',parseFloat(c.pokok||0),'inv-batal');
   S.investorContracts=invContracts().filter(x=>x.id!==id);
   save(); cm('mo-keu'); rKeu(); toast('🗑️ Kontrak dihapus + pokok dibalik');
+}
+
+// ── LAPORAN KEUANGAN (M5: 5 laporan format perusahaan terbuka) ────────
+let lapReport='laba-rugi';
+function swLap(r){ lapReport=r; rKeu(); }
+function repR(label, amount, cls){ return `<div class="rep-r ${cls||''}"><span class="rl">${label}</span><span class="rv">${fj(amount)}</span></div>`; }
+function repToday(){ return fd(new Date().toISOString().split('T')[0]); }
+function rKeuLaporan(){
+  const reports=[['laba-rugi','Laba Rugi'],['neraca','Neraca'],['arus-kas','Arus Kas'],['neraca-saldo','Neraca Saldo'],['jurnal','Jurnal']];
+  let h=`<div style="display:flex;gap:6px;overflow-x:auto;margin-bottom:14px;padding-bottom:4px;-webkit-overflow-scrolling:touch">`;
+  reports.forEach(([k,l])=>h+=`<button class="tab ${lapReport===k?'on':''}" onclick="swLap('${k}')" style="flex:0 0 auto;padding:8px 14px">${l}</button>`);
+  h+=`</div>`;
+  if(!(S.ledger||[]).length) return h+`<div class="es"><div class="ei">📊</div><div class="et">Belum ada data</div><div class="esb">Isi transaksi dulu (tab Kantong → Isi Data Contoh).</div></div>`;
+  if(lapReport==='laba-rugi') h+=repLabaRugi();
+  else if(lapReport==='neraca') h+=repNeraca();
+  else if(lapReport==='arus-kas') h+=repArusKas();
+  else if(lapReport==='neraca-saldo') h+=repNeracaSaldo();
+  else h+=repJurnal();
+  return h;
+}
+function labaBerjalan(){
+  return allAccounts().filter(a=>a.type==='pendapatan').reduce((s,a)=>s+acctBalance(a.code),0)
+       - allAccounts().filter(a=>a.type==='beban').reduce((s,a)=>s+acctBalance(a.code),0);
+}
+function repLabaRugi(){
+  const rev=allAccounts().filter(a=>a.type==='pendapatan'), exp=allAccounts().filter(a=>a.type==='beban');
+  let totRev=0, totExp=0;
+  let h=`<div class="rep"><div class="rep-t">LAPORAN LABA RUGI</div><div class="rep-s">Roxanne Capital · s/d ${repToday()}</div>`;
+  h+=`<div class="rep-sec">Pendapatan</div>`;
+  let any=false; rev.forEach(a=>{const b=acctBalance(a.code); if(Math.abs(b)>0.005){totRev+=b; any=true; h+=repR(a.name,b);}}); if(!any) h+=repR('(belum ada)',0);
+  h+=repR('Total Pendapatan',totRev,'sub');
+  h+=`<div class="rep-sec">Beban</div>`;
+  any=false; exp.forEach(a=>{const b=acctBalance(a.code); if(Math.abs(b)>0.005){totExp+=b; any=true; h+=repR(a.name,b);}}); if(!any) h+=repR('(belum ada)',0);
+  h+=repR('Total Beban',totExp,'sub');
+  h+=repR('LABA BERSIH',totRev-totExp,'tot');
+  return h+`</div>`;
+}
+function repNeraca(){
+  const aset=allAccounts().filter(a=>a.type==='aset'), liab=allAccounts().filter(a=>a.type==='liabilitas'), eku=allAccounts().filter(a=>a.type==='ekuitas');
+  let totAset=0,totLiab=0,totEku=0;
+  let h=`<div class="rep"><div class="rep-t">NERACA</div><div class="rep-s">Roxanne Capital · per ${repToday()}</div>`;
+  h+=`<div class="rep-sec">Aset</div>`;
+  aset.forEach(a=>{const b=acctBalance(a.code); if(Math.abs(b)>0.005){totAset+=b; h+=repR(a.name,b);}});
+  h+=repR('Total Aset',totAset,'tot');
+  h+=`<div class="rep-sec">Liabilitas</div>`;
+  liab.forEach(a=>{const b=acctBalance(a.code); if(Math.abs(b)>0.005){totLiab+=b; h+=repR(a.name,b);}});
+  if(!totLiab) h+=repR('(belum ada)',0);
+  h+=repR('Total Liabilitas',totLiab,'sub');
+  h+=`<div class="rep-sec">Ekuitas</div>`;
+  eku.forEach(a=>{const b=acctBalance(a.code); if(Math.abs(b)>0.005){totEku+=b; h+=repR(a.name,b);}});
+  const lb=labaBerjalan(); if(Math.abs(lb)>0.005){ totEku+=lb; h+=repR('Laba Berjalan',lb);}
+  h+=repR('Total Ekuitas',totEku,'sub');
+  h+=repR('Liabilitas + Ekuitas',totLiab+totEku,'tot');
+  const bal=Math.abs(totAset-(totLiab+totEku))<0.005;
+  h+=`<div class="rep-ok" style="color:${bal?'#0B8F46':'var(--r)'}">${bal?'✓ Neraca seimbang (Aset = Liabilitas + Ekuitas)':'⚠ Tidak seimbang'}</div>`;
+  return h+`</div>`;
+}
+function catArusKas(code){
+  if(code[0]==='4'||code[0]==='5') return 'operasi';
+  if(code==='1100') return 'investasi';
+  if(code[0]==='2'||code[0]==='3') return 'pendanaan';
+  return null; // pocket-to-pocket transfer
+}
+function repArusKas(){
+  const pockets=new Set((S.pockets||[]).map(p=>p.code));
+  const items={operasi:{},investasi:{},pendanaan:{}}, tot={operasi:0,investasi:0,pendanaan:0};
+  (S.ledger||[]).forEach(e=>{
+    const cashLines=e.lines.filter(l=>pockets.has(l.account)), nonCash=e.lines.filter(l=>!pockets.has(l.account));
+    if(!cashLines.length||!nonCash.length) return;
+    const netCash=cashLines.reduce((s,l)=>s+l.debit-l.credit,0);
+    const cp=nonCash.slice().sort((a,b)=>(b.debit+b.credit)-(a.debit+a.credit))[0];
+    const cat=catArusKas(cp.account); if(!cat) return;
+    const nm=acct(cp.account).name;
+    items[cat][nm]=(items[cat][nm]||0)+netCash; tot[cat]+=netCash;
+  });
+  const sec=(title,key)=>{let s=`<div class="rep-sec">Arus Kas ${title}</div>`; const ks=Object.keys(items[key]); if(!ks.length) s+=repR('(belum ada)',0); ks.forEach(k=>s+=repR(k,items[key][k])); s+=repR('Subtotal '+title,tot[key],'sub'); return s;};
+  let h=`<div class="rep"><div class="rep-t">LAPORAN ARUS KAS</div><div class="rep-s">Roxanne Capital · s/d ${repToday()}</div>`;
+  h+=sec('Operasi','operasi')+sec('Investasi','investasi')+sec('Pendanaan','pendanaan');
+  h+=repR('KENAIKAN KAS BERSIH',tot.operasi+tot.investasi+tot.pendanaan,'tot');
+  h+=repR('Kas akhir (semua kantong)',totalLikuid(),'sub');
+  return h+`</div>`;
+}
+function repNeracaSaldo(){
+  const tb=trialBalance(); let totD=0,totK=0;
+  const cell=v=>`<span class="rv" style="width:70px;text-align:right;font-size:11px">${v>0.005?fjPlain(v):'-'}</span>`;
+  let h=`<div class="rep"><div class="rep-t">NERACA SALDO</div><div class="rep-s">Roxanne Capital · per ${repToday()}</div>`;
+  h+=`<div class="rep-r" style="font-weight:900;border-bottom:1.5px solid var(--bdr)"><span class="rl">Akun</span><span style="display:flex;gap:10px"><span class="rv" style="width:70px;text-align:right">Debit</span><span class="rv" style="width:70px;text-align:right">Kredit</span></span></div>`;
+  tb.forEach(r=>{ totD+=r.debit; totK+=r.credit;
+    h+=`<div class="rep-r"><span class="rl" style="font-size:11px">${r.code} · ${r.name}</span><span style="display:flex;gap:10px">${cell(r.debit)}${cell(r.credit)}</span></div>`;});
+  h+=`<div class="rep-r tot"><span class="rl">TOTAL</span><span style="display:flex;gap:10px"><span class="rv" style="width:70px;text-align:right">${fjPlain(totD)}</span><span class="rv" style="width:70px;text-align:right">${fjPlain(totK)}</span></span></div>`;
+  const bal=Math.abs(totD-totK)<0.005;
+  h+=`<div class="rep-ok" style="color:${bal?'#0B8F46':'var(--r)'}">${bal?'✓ Debit = Kredit':'⚠ Tidak seimbang'}</div>`;
+  return h+`</div>`;
+}
+function repJurnal(){
+  const entries=(S.ledger||[]).slice().sort((a,b)=>a.tanggal<b.tanggal?1:(a.tanggal>b.tanggal?-1:0));
+  let h=`<div class="rep"><div class="rep-t">JURNAL UMUM</div><div class="rep-s">Roxanne Capital · ${entries.length} entri</div>`;
+  entries.slice(0,120).forEach(e=>{
+    const lines=e.lines.slice().sort((a,b)=>(b.debit>0?1:0)-(a.debit>0?1:0)); // debits first
+    h+=`<div style="border-bottom:1px solid var(--bdr);padding:7px 0">
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--sub);font-weight:800"><span>${fd(e.tanggal)}</span><span>${e.ref||''}</span></div>
+      <div style="font-size:11.5px;font-weight:800;margin:2px 0 3px">${e.memo}</div>`;
+    lines.forEach(l=>{
+      const isD=l.debit>0.005;
+      h+=`<div style="display:flex;justify-content:space-between;font-size:11px;padding-left:${isD?'0':'18px'}"><span style="color:var(--sub)">${acct(l.account).name}</span><span class="t-num" style="font-weight:700">${isD?fjPlain(l.debit):fjPlain(l.credit)}</span></div>`;
+    });
+    h+=`</div>`;
+  });
+  if(entries.length>120) h+=`<div style="text-align:center;font-size:10px;color:var(--sub);margin-top:8px">120 entri terbaru dari ${entries.length}</div>`;
+  return h+`</div>`;
 }
 function am(s,m){
   // Add m months to date string s (YYYY-MM-DD), timezone-safe
