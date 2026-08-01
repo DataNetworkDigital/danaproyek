@@ -61,22 +61,27 @@ var db=firebase.firestore();
   --dur-fast:150ms;--dur-normal:250ms;--dur-slow:400ms;
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{height:100%;height:-webkit-fill-available;overflow:hidden;font-family:'Nunito',sans-serif;background:var(--bg);color:var(--txt);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;font-variant-numeric:tabular-nums lining-nums;font-feature-settings:"tnum" 1,"lnum" 1,"cv11" 1}
+html,body{min-height:100%;overflow-x:hidden;overscroll-behavior-y:none;font-family:'Nunito',sans-serif;background:var(--bg);color:var(--txt);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;font-variant-numeric:tabular-nums lining-nums;font-feature-settings:"tnum" 1,"lnum" 1,"cv11" 1}
 /* Subtle noise texture on body — anti-flat */
-body{background-image:url("data:image/svg+xml;utf8,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncA type='linear' slope='0.04'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),var(--bg);background-attachment:fixed,fixed;background-size:200px 200px,auto}
+body{background-image:url("data:image/svg+xml;utf8,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncA type='linear' slope='0.04'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),var(--bg);background-attachment:scroll,scroll;background-size:200px 200px,auto}
 /* Numbers always tabular + Geist Mono for finance precision */
 .t-num,.streak-num,.hero-num,.mc .mv,input[type="number"],.iv,.t-hero{font-variant-numeric:tabular-nums lining-nums;font-family:'Geist Mono','SF Mono',ui-monospace,monospace;letter-spacing:-.02em}
 /* Hero number bigger letter-spacing tightening */
 .hero-num{letter-spacing:-.04em}
-#app{max-width:430px;margin:0 auto;height:100dvh;height:100vh;height:-webkit-fill-available;display:flex;flex-direction:column;overflow:hidden;background:var(--bg)}
-@supports(height:100dvh){#app{height:100dvh}}
+#app{max-width:430px;margin:0 auto;min-height:100vh;min-height:-webkit-fill-available;display:flex;flex-direction:column;background:var(--bg)}
+@supports(height:100dvh){#app{min-height:100dvh}}
 .hdr{display:none;height:0;flex-shrink:0;z-index:10}
 .hdr-t{font-size:17px;font-weight:900;color:var(--txt)}.hdr-s{font-size:10px;color:var(--sub);font-weight:700;margin-top:1px}
 .hdr-icon{background:var(--p-l);border:none;border-radius:10px;width:34px;height:34px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:15px}
-.pages{flex:1;overflow:hidden;position:relative}
-body.modal-open .pages{pointer-events:none}
-.page{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior-y:contain;padding:14px 14px 96px;opacity:0;pointer-events:none;transform:translateY(6px);transition:opacity .22s,transform .22s}
-.page.active{opacity:1;pointer-events:all;transform:translateY(0);animation:fadeUp .3s ease-out}
+.pages{flex:1}
+/* Scroll-lock: freeze the document behind an open modal WITHOUT touching pointer-events.
+   top is set inline by JS (lockScroll) to -scrollY so position is preserved and restored. */
+body.modal-open{position:fixed;left:0;right:0;width:100%;overflow:hidden}
+/* Native document scroll: pages are normal-flow blocks, NEVER inner overflow scrollers.
+   Do NOT add overflow-x here — overflow-x:hidden + overflow-y:visible computes overflow-y
+   to auto, recreating the inner momentum scroller that caused the freeze bug. */
+.page{display:none;padding:14px 14px 96px}
+.page.active{display:block;animation:fadeUp .3s ease-out}
 .page::-webkit-scrollbar{width:3px}.page::-webkit-scrollbar-thumb{background:var(--bdr);border-radius:2px}
 /* === PHANTOM GLASS FLOATING NAV === */
 .bnav{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);width:calc(100% - 24px);max-width:402px;height:72px;background:rgba(255,255,255,.7);backdrop-filter:blur(28px) saturate(180%);-webkit-backdrop-filter:blur(28px) saturate(180%);border-radius:26px;box-shadow:0 16px 40px rgba(26,19,37,.12),0 4px 12px rgba(139,92,246,.08),inset 1px 1px 0 rgba(255,255,255,.7);display:flex;padding:6px;z-index:50;border:1px solid rgba(255,255,255,.6)}
@@ -656,7 +661,7 @@ function stats(){
 // ── NAVIGATION ────────────────────────────────────────────────────────
 function closeAllModals(){
   document.querySelectorAll('.mo').forEach(m=>m.classList.remove('op'));
-  document.body.classList.remove('modal-open');
+  unlockScroll();
 }
 function go(p){
   closeAllModals();
@@ -670,6 +675,7 @@ function go(p){
   document.getElementById('HS').textContent=ti[p]?.s||'';
   document.getElementById('HA').innerHTML=`<button class="hdr-icon" onclick="exportJ()" title="Export">⬆️</button><button class="hdr-icon" onclick="importJ()" title="Import">⬇️</button>`;
   document.getElementById('fab').style.display=['m','e'].includes(p)?'flex':'none';
+  window.scrollTo(0,0); // native document scroll: start each tab at the top
   if(p==='b')rB();else if(p==='m')rM();else if(p==='k')rK();else if(p==='e')rE();
 }
 function fabAct(){ if(CP==='m') oPM(); else if(CP==='e') oEM(); }
@@ -687,68 +693,61 @@ function toast(m,opts){
   clearTimeout(_tt);
   _tt=setTimeout(()=>t.classList.remove('show'),dur);
 }
-function om(id){ const el=document.getElementById(id); if(!el)return; el.classList.add('op'); document.body.classList.add('modal-open'); }
+// ── MODAL SCROLL-LOCK ─────────────────────────────────────────────────
+// The document scrolls natively (no overflow:hidden shell, no inner .page
+// scrollers). While ANY modal is open we freeze the document by fixing <body>
+// at its current scroll offset, then restore that exact offset on close.
+// Reference-guarded + idempotent, so close-then-open and double-close modal
+// chains net to the correct locked/unlocked state with no scroll jump.
+// This replaces the old pointer-events juggling + healViewport + 2s watchdog,
+// all of which fought the browser and were the source of the recurring freeze.
+let _scrollLocked=false,_scrollLockY=0;
+function lockScroll(){
+  if(_scrollLocked) return;
+  _scrollLockY=window.scrollY||window.pageYOffset||0;
+  document.body.style.top=(-_scrollLockY)+'px';
+  document.body.classList.add('modal-open');
+  _scrollLocked=true;
+}
+function unlockScroll(){
+  if(!_scrollLocked) return;
+  _scrollLocked=false;
+  document.body.classList.remove('modal-open');
+  document.body.style.top='';
+  window.scrollTo(0,_scrollLockY);
+}
+// Single source of truth: the document is locked iff any modal is open.
+function syncModalState(){
+  if(document.querySelector('.mo.op')) lockScroll();
+  else unlockScroll();
+}
+// iOS momentum-scroll release for the ONLY remaining inner scroller (the .modal
+// body, overflow-y:auto). Replacing an overflow:auto container's content mid-
+// momentum can freeze its touch scrolling until a reflow; a double-rAF overflowY
+// toggle releases it. Called from om() so EVERY modal open/reopen is covered —
+// no per-path discipline to forget (that discipline was the old bug's root cause).
+function releaseScroller(el){
+  if(!el) return;
+  requestAnimationFrame(()=>{
+    const prev=el.style.overflowY;
+    el.style.overflowY='hidden';
+    void el.offsetHeight; // force reflow
+    requestAnimationFrame(()=>{ el.style.overflowY=prev||''; });
+  });
+}
+function om(id){
+  const el=document.getElementById(id); if(!el) return;
+  el.classList.add('op');
+  lockScroll();
+  releaseScroller(el.querySelector('.modal'));
+}
 function cm(id){
-  // Blur any focused input BEFORE hiding the modal. Closing a fixed modal while
-  // the iOS keyboard is up is what strands the window scroll offset (freeze bug).
+  // Blur any focused input before hiding, so the iOS keyboard collapses cleanly.
   const ae=document.activeElement;
   if(ae&&ae.blur&&(ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'||ae.tagName==='SELECT')) ae.blur();
   const el=document.getElementById(id); if(el) el.classList.remove('op');
   syncModalState();
-  // Heal viewport now and again after the keyboard finishes collapsing (~350ms)
-  healViewport('modal-close');
-  setTimeout(()=>healViewport('modal-close-late'),400);
 }
-// Safety: ensure body.modal-open is always synced with the actual open modal state.
-// Prevents stuck "can't scroll" bugs caused by edit flows that close+reopen modals
-// or by errors in render functions that interrupt cleanup.
-function syncModalState(){
-  if(document.querySelector('.mo.op')) document.body.classList.add('modal-open');
-  else document.body.classList.remove('modal-open');
-}
-// ── iOS VIEWPORT FREEZE GUARD ─────────────────────────────────────────
-// Root cause of the "can't scroll until reload" bug: iOS Safari force-scrolls
-// the WINDOW (ignoring overflow:hidden) to keep a focused input visible above
-// the keyboard. If the modal closes while the keyboard is still up, iOS can
-// leave window.scrollY / visualViewport.offsetTop stuck > 0. The visual layer
-// and the touch hit-testing layer then misalign — taps land on the wrong
-// coordinates, so scrolling and buttons appear dead until a reload resets it.
-// healViewport() detects that stranded offset and snaps the window back to 0.
-// Every occurrence is logged to localStorage('dt_freeze_log') as evidence.
-function isEditableFocused(){
-  const ae=document.activeElement;
-  return !!(ae&&(ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'||ae.tagName==='SELECT'));
-}
-function healViewport(reason){
-  if(isEditableFocused()) return; // keyboard legitimately open — don't yank
-  const vv=window.visualViewport;
-  const offY=window.scrollY||window.pageYOffset||document.documentElement.scrollTop||0;
-  const vvTop=vv?vv.offsetTop:0;
-  if(offY>1||vvTop>1){
-    try{
-      const log=JSON.parse(localStorage.getItem('dt_freeze_log')||'[]');
-      log.push({t:new Date().toISOString(),reason,scrollY:Math.round(offY),vvTop:Math.round(vvTop),vvH:vv?Math.round(vv.height):0,winH:window.innerHeight});
-      localStorage.setItem('dt_freeze_log',JSON.stringify(log.slice(-30)));
-    }catch(e){}
-    window.scrollTo(0,0);
-    document.documentElement.scrollTop=0;
-    document.body.scrollTop=0;
-    console.warn('[freeze-guard] viewport offset healed:',reason,'scrollY='+Math.round(offY),'vvTop='+Math.round(vvTop));
-  }
-}
-// Heal whenever an input loses focus (keyboard closing)
-document.addEventListener('focusout',()=>{ setTimeout(()=>healViewport('focusout'),300); });
-// Heal when the visual viewport returns to full height (keyboard fully closed)
-if(window.visualViewport){
-  window.visualViewport.addEventListener('resize',()=>{
-    if(window.visualViewport.height>=window.innerHeight-60) setTimeout(()=>healViewport('vv-resize'),100);
-  });
-}
-// Report past freeze evidence on startup so we can confirm the diagnosis
-try{
-  const fl=JSON.parse(localStorage.getItem('dt_freeze_log')||'[]');
-  if(fl.length) console.warn('[freeze-guard] healed '+fl.length+' stranded-viewport events so far:',fl);
-}catch(e){}
 
 // ── BERANDA ───────────────────────────────────────────────────────────
 let _bSort='default',_bSortDir=1,_bFilter={tersedia:true,aktif:true,selesai:true},_bPanelOpen='';
@@ -2649,23 +2648,14 @@ function rAll(){
   } catch(e) {
     console.error('Render error:', e);
   }
-  // Always self-heal modal-open state after a render — prevents stuck scroll
+  // Keep the scroll-lock consistent with the actual modal state after a render.
+  // Pages are native-flow blocks now, so there is no inner scroller to un-freeze.
   syncModalState();
-  // iOS Safari workaround: replacing innerHTML of a scroll container mid-momentum
-  // can freeze its scrolling until the next layout pass. Nudge a reflow to unfreeze.
-  requestAnimationFrame(()=>{
-    const pg=document.querySelector('.page.active');
-    if(!pg) return;
-    const prev=pg.style.overflowY;
-    pg.style.overflowY='hidden';
-    void pg.offsetHeight; // force reflow
-    pg.style.overflowY=prev||'';
-  });
 }
 
-// Watchdog: every 2s, re-sync modal-open state. Last line of defense against
-// any flow that leaves body.modal-open stuck (pointer-events:none on .pages).
-setInterval(()=>{ syncModalState(); healViewport('watchdog'); }, 2000);
+// (Removed: the 2s healViewport watchdog. Under native document scroll its
+// forced scrollTo(0,0) would yank the user to the top mid-scroll every 2s, and
+// it defended a modal-open freeze that the reference-counted lock makes impossible.)
 
 // ── PIN & ADMIN ──────────────────────────────────────────────────────
 let _adminUnlocked=false;
