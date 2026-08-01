@@ -592,7 +592,7 @@ function rKeu(){
   let body='';
   if(keuTab==='kantong') body=rKeuKantong();
   else if(keuTab==='investor') body=rKeuInvestor();
-  else if(keuTab==='likuiditas') body=`<div class="es"><div class="ei">💧</div><div class="et">Mesin Likuiditas</div><div class="esb">Segera hadir: rekomendasi pindah dana, cash-ready, ROE, cadangan RRPR, dan "safe project size".</div></div>`;
+  else if(keuTab==='likuiditas') body=rKeuLikuiditas();
   else body=rKeuLaporan();
   el.innerHTML=sub+body;
 }
@@ -623,7 +623,8 @@ function rKeuKantong(){
     <button class="btn ou" onclick="keuModal('setor')" style="padding:11px 6px;font-size:12px">💰 Setor</button>
     <button class="btn ou" onclick="keuModal('recon')" style="padding:11px 6px;font-size:12px">✅ Rekon</button>
   </div>
-  <div style="margin-top:10px">
+  <div style="margin-top:10px;display:flex;flex-direction:column;gap:8px">
+    <button class="btn pr fw" onclick="seedRoxanne()" style="font-size:12px">📥 Reset & Seed Data Asli Roxanne</button>
     ${!(S.ledger||[]).length
       ? `<button class="btn ou fw" onclick="keuDummy()" style="font-size:12px">✨ Isi Data Contoh</button>`
       : `<button class="btn ou fw" onclick="keuReset()" style="font-size:12px;color:var(--r)">🗑️ Reset Buku Besar (hapus semua jurnal)</button>`}
@@ -963,6 +964,183 @@ function repJurnal(){
   });
   if(entries.length>120) h+=`<div style="text-align:center;font-size:10px;color:var(--sub);margin-top:8px">120 entri terbaru dari ${entries.length}</div>`;
   return h+`</div>`;
+}
+
+// ── SEED DATA ASLI ROXANNE (per 1 Agu 2026) ───────────────────────────
+function todayISO(){ return new Date().toISOString().split('T')[0]; }
+function addDays(iso,n){ const d=new Date(iso+'T00:00:00'); d.setDate(d.getDate()+n); return d.toISOString().split('T')[0]; }
+function monthsBetween(a,b){ const x=new Date(a+'T00:00:00'),y=new Date(b+'T00:00:00'); return Math.max(1,Math.round((y-x)/2629800000)); }
+// Build forward obligation schedule: monthly bagi hasil on payDay until maturity, then pokok.
+// flexible = perpetual (Papa): rolling 12 months of bagi hasil, no pokok.
+function buildRealSchedule(payDay, maturity, pokok, rate, flexible){
+  const bh=Math.round(pokok*rate/100*1e4)/1e4, sched=[], today=new Date();
+  let d=new Date(today.getFullYear(), today.getMonth(), payDay);
+  if(d<=today) d=new Date(today.getFullYear(), today.getMonth()+1, payDay);
+  const end = flexible ? new Date(today.getFullYear(), today.getMonth()+12, payDay) : new Date(maturity+'T00:00:00');
+  while(d<=end){ sched.push({tanggal:d.toISOString().split('T')[0], tipe:'bagihasil', jumlah:bh, status:'pending'}); d=new Date(d.getFullYear(), d.getMonth()+1, payDay); }
+  if(!flexible) sched.push({tanggal:maturity, tipe:'pokok', jumlah:pokok, status:'pending'});
+  return sched;
+}
+function seedRoxanne(){
+  if(!confirm('Reset SEMUA financial stats lalu isi data ASLI Roxanne (per hari ini)? Data proyek & pemodal lama tidak terpengaruh.')) return;
+  S.ledger=[]; S.investorContracts=[];
+  const mk=(nama,pokok,payDay,maturity,mulai,flexible)=>{
+    const c={id:uid(),nama,pokok,ratePct:2,payDay,tanggalMulai:mulai,tanggalMaturity:maturity,struktur:'bulanan',status:'aktif'};
+    if(flexible) c.flexible=true;
+    c.schedule=buildRealSchedule(payDay,maturity,pokok,2,flexible);
+    c.tenorBulan=flexible?0:monthsBetween(mulai,maturity);
+    return c;
+  };
+  const contracts=[
+    mk('Papa (RRPR)',50,1,null,'2026-06-01',true),
+    mk('Veda (sawah fima)',9,11,'2026-11-11','2026-05-11',false),
+    mk('Veda (hong kong)',10,5,'2026-12-05','2026-06-05',false),
+    mk('Veda',66.15,3,'2026-12-03','2026-08-03',false),
+    mk('Laili',10,11,'2026-11-11','2026-05-11',false),
+    mk('Fuad',32.5,3,'2026-12-03','2026-08-03',false),
+  ];
+  contracts.forEach(c=>{ S.investorContracts.push(c); ledgerPost2(c.tanggalMulai,'Terima dana investor: '+c.nama,'1030','2000',c.pokok,'inv-masuk'); });
+  ledgerPost2('2026-07-13','Modal Gde bersih (setelah pisah Papa + investor)','1010','3000',195.625,'setor-modal');
+  ledgerPost2(todayISO(),'Saldo awal kantong RRPR','1020','3010',13.19,'setor-modal');
+  ledgerPost('2026-08-03','Deploy ke 4 proyek (Ayam Petelor, Pelayaran, Tani & Vila Ngawi, Sawah Wartini)',
+    [{account:'1100',debit:373.275,credit:0},{account:'1010',debit:0,credit:195.625},{account:'1030',debit:0,credit:177.65}],'deploy');
+  if(!S.orgConfig) S.orgConfig={};
+  S.orgConfig.activeProjectNames=['AYAM PETELOR PO','PELAYARAN PO','Tani dan vila Ngawi','SAWAH WARTINI'];
+  S.orgConfig.cushionPct=15; S.orgConfig.investorRateDefault=2;
+  save(); rKeu(); toast('✅ Data asli Roxanne di-seed');
+}
+
+// ── M6: MESIN LIKUIDITAS + REKOMENDASI ────────────────────────────────
+// Dua lapis: aktual (saldo kantong dari ledger) + proyeksi (jadwal kontrak
+// investor = keluar, jadwal proyek = masuk). Inflow proyek = return bersih
+// (gross - fee Mas Hena) + pokok (deploy) di JT. Papa = flexible, dikecualikan
+// dari kewajiban likuiditas. Skenario conservative = inflow proyek digeser +7 hari.
+function m6Inflows(scenario){
+  const names=(S.orgConfig&&S.orgConfig.activeProjectNames)||[];
+  const shift = scenario==='stress' ? 21 : (scenario==='conservative' ? 7 : 0);
+  const hair  = scenario==='stress' ? 0.85 : 1; // stress: haircut return proyek 15%
+  const out=[];
+  (S.projects||[]).filter(p=>names.includes(p.peminjam)).forEach(p=>{
+    const fee=parseFloat(p.adminFeePersen)||0.5, kontrak=parseFloat(p.kontrak||0), deploy=parseFloat(p.jumlah||0);
+    (p.schedule||[]).filter(s=>s.status!=='paid'&&s.status!=='skipped').forEach(s=>{
+      const net=Math.round((parseFloat(s.amount||0)-kontrak*fee/100)*hair*1e4)/1e4;
+      out.push({tanggal:addDays(s.dueDate,shift), jumlah:net, label:p.peminjam+' · return', tipe:'return'});
+    });
+    if(p.tanggalJT) out.push({tanggal:addDays(p.tanggalJT,shift), jumlah:Math.round(deploy*hair*1e4)/1e4, label:p.peminjam+' · pokok balik', tipe:'pokok'});
+  });
+  return out.filter(i=>i.tanggal>=todayISO()).sort((a,b)=>a.tanggal<b.tanggal?-1:1);
+}
+function m6Obligations(){
+  const out=[];
+  invContracts().filter(c=>!c.flexible && c.status!=='selesai').forEach(c=>{
+    (c.schedule||[]).filter(s=>s.status==='pending').forEach(s=>{
+      out.push({tanggal:s.tanggal, jumlah:s.jumlah, tipe:s.tipe, label:c.nama+' · '+(s.tipe==='pokok'?'pokok':'bagi hasil')});
+    });
+  });
+  return out.filter(o=>o.tanggal>=todayISO()).sort((a,b)=>a.tanggal<b.tanggal?-1:1);
+}
+function m6Project(scenario){
+  const start=totalLikuid();
+  const ev=[...m6Inflows(scenario).map(i=>({t:i.tanggal,amt:i.jumlah,...i})),
+            ...m6Obligations().map(o=>({t:o.tanggal,amt:-o.jumlah,...o}))].sort((a,b)=>a.t<b.t?-1:1);
+  let cash=start, minCash=start, minDate=todayISO(), firstDanger=null;
+  const series=[];
+  ev.forEach(e=>{ cash=Math.round((cash+e.amt)*1e4)/1e4; series.push({t:e.t,cash,label:e.label,amt:e.amt}); if(cash<minCash){minCash=cash;minDate=e.t;} if(cash<-0.005&&!firstDanger) firstDanger={t:e.t,cash}; });
+  return {start,minCash,minDate,firstDanger,series};
+}
+function m6NearOblig(days){ return m6Obligations().filter(o=>{const d=du(o.tanggal); return d!==null&&d>=0&&d<=days;}).reduce((s,o)=>s+o.jumlah,0); }
+// Reserve = celah kas TERBURUK di skenario stress (setelah memperhitungkan inflow
+// proyek yang di-buffer + haircut) + cushion. Bukan "largest maturity" mentah, karena
+// untuk fund yang fully-deployed, kewajiban ditutup oleh return proyek yang datang
+// lebih dulu. Jadi cadangan cuma perlu menutup RESIDUAL risiko, bukan total pokok.
+function m6RRPRRequired(){
+  const stress=m6Project('stress');
+  const peakGap=Math.max(0,-stress.minCash);
+  return Math.round((peakGap*1.25 + m6Cushion())*1e4)/1e4;
+}
+function m6Cushion(){ return Math.round(m6NearOblig(30)*((S.orgConfig&&S.orgConfig.cushionPct||15)/100)*1e4)/1e4; }
+function m6SafeProjectSize(){
+  // Attack pakai kas likuid selain RRPR (RRPR = benteng). Sisakan cushion.
+  const cons=m6Project('conservative');
+  const rrpr=pocketBalance('1020');
+  const safe=cons.minCash - rrpr - m6Cushion();
+  return Math.round(Math.max(0,safe)*1e4)/1e4;
+}
+function m6Status(){
+  const cons=m6Project('conservative'), rrpr=pocketBalance('1020'), req=m6RRPRRequired();
+  if(cons.minCash < -0.005 || cons.firstDanger) return {k:'MERAH',c:'#DC2626',bg:'#FEE2E2',msg:'Ada tanggal kas jebol. Kewajiban tidak tertutup di skenario konservatif.'};
+  if(cons.minCash < m6Cushion() || rrpr < req) return {k:'KUNING',c:'#B45309',bg:'#FEF3C7',msg:'Masih tertutup, tapi tipis: kas mendekati cushion atau cadangan RRPR di bawah target.'};
+  return {k:'HIJAU',c:'#0B8F46',bg:'#D1FAE5',msg:'Semua kewajiban tertutup dengan aman di skenario konservatif (inflow proyek diasumsikan telat H+7).'};
+}
+function m6KPIs(){
+  const equity=acctBalance('3000')+acctBalance('3010')+acctBalance('3900')+labaBerjalan();
+  const invLiab=acctBalance('2000');
+  const idleInv=pocketBalance('1030');
+  // laba bulan berjalan (perkiraan): return bersih 30 hari - bagi hasil 30 hari - papa 2%
+  const in30=m6Inflows('base').filter(i=>i.tipe==='return'&&du(i.tanggal)<=30).reduce((s,i)=>s+i.jumlah,0);
+  const bh30=m6NearOblig(30) - m6Obligations().filter(o=>o.tipe==='pokok'&&du(o.tanggal)<=30).reduce((s,o)=>s+o.jumlah,0);
+  const papa=invContracts().filter(c=>c.flexible).reduce((s,c)=>s+parseFloat(c.pokok||0)*0.02,0);
+  const labaBln=Math.round((in30-bh30-papa)*1e4)/1e4;
+  const cons=m6Project('conservative');
+  const runway = cons.firstDanger ? du(cons.firstDanger.t) : null;
+  return {
+    equity:Math.round(equity*1e4)/1e4, invLiab, leverage: equity>0?Math.round(invLiab/equity*100)/100:0,
+    idleInv, idleCost:Math.round(idleInv*0.02*1e4)/1e4, labaBln,
+    roe: equity>0?Math.round(labaBln/equity*1000)/10:0, runway
+  };
+}
+function m6Recommendations(){
+  const recs=[];
+  const sink=pocketBalance('1040');
+  const nextP=m6Obligations().filter(o=>o.tipe==='pokok')[0];
+  if(nextP){
+    const dd=du(nextP.tanggal), need=Math.round((nextP.jumlah - sink)*1e4)/1e4;
+    if(need>0.005 && dd!==null && dd<=30)
+      recs.push({lv: dd<=7?'red':'yellow', t:`Pindahkan ${fj(need)} ke Investor Jatuh Tempo sebelum ${fd(nextP.tanggal)} (${dd}h lagi).`, s:`Pokok ${nextP.label.split(' · ')[0]} ${fj(nextP.jumlah)} jatuh tempo; sinking fund baru ${fj(sink)}.`});
+  }
+  const rrpr=pocketBalance('1020'), req=m6RRPRRequired();
+  if(rrpr < req - 0.005) recs.push({lv:'yellow', t:`Top-up RRPR ${fj(req-rrpr)}.`, s:`Cadangan ${fj(rrpr)}, target ${fj(req)} (celah stress + cushion).`});
+  const idle=pocketBalance('1030');
+  if(idle>0.5) recs.push({lv:'yellow', t:`Deploy ${fj(idle)} dana investor yang nganggur.`, s:`Kena biaya 2%/bln (${fj(idle*0.02)}/bln) padahal belum kerja.`});
+  const safe=m6SafeProjectSize();
+  if(safe>0.5) recs.push({lv:'green', t:`Aman ambil proyek baru sampai ${fj(safe)} hari ini.`, s:`Di atas itu ganggu kemampuan bayar investor (skenario konservatif).`});
+  else {
+    const nextIn=m6Inflows('conservative').find(i=>i.tipe==='pokok');
+    recs.push({lv:'green', t:`Modal hampir fully deployed, cash bebas untuk attack ~Rp 0.`, s: nextIn?`Tunggu ${nextIn.label.split(' · ')[0]} balik ~${fj(nextIn.jumlah)} (${fd(nextIn.tanggal)}) baru bisa ambil proyek baru.`:`Tunggu return proyek masuk dulu.`});
+  }
+  return recs;
+}
+function rKeuLikuiditas(){
+  if(!invContracts().length && !(S.orgConfig&&S.orgConfig.activeProjectNames||[]).length)
+    return `<div class="es"><div class="ei">💧</div><div class="et">Belum ada data</div><div class="esb">Isi kontrak investor + seed data dulu (tab Kantong → Seed Data Roxanne).</div></div>`;
+  const st=m6Status(), cons=m6Project('conservative'), k=m6KPIs();
+  let h=`<div class="card-s" style="background:${st.bg};margin-bottom:12px;text-align:center;padding:16px">
+    <div style="font-size:11px;font-weight:900;letter-spacing:1px;color:${st.c}">STATUS LIKUIDITAS</div>
+    <div style="font-size:28px;font-weight:900;color:${st.c};margin:2px 0">${st.k}</div>
+    <div style="font-size:11px;font-weight:700;color:var(--txt)">${st.msg}</div></div>`;
+  // KPI strip
+  h+=`<div class="cf-strip"><div class="cf-col"><div class="cf-lbl">Kas Terendah</div><div class="cf-val" style="color:${cons.minCash<0?'var(--r)':'#0B8F46'}">${fj(cons.minCash)}</div><div class="cf-sub">${fd(cons.minDate)}</div></div>
+    <div class="cf-col"><div class="cf-lbl">ROE/bln</div><div class="cf-val" style="color:var(--p-deep)">${k.roe}%</div><div class="cf-sub">laba ${fj(k.labaBln)}</div></div>
+    <div class="cf-col"><div class="cf-lbl">Leverage</div><div class="cf-val">${k.leverage}×</div><div class="cf-sub">${k.runway!==null?'runway '+k.runway+'h':'aman'}</div></div></div>`;
+  // recommendations
+  h+=`<div class="rep-sec" style="color:var(--p-deep)">🎯 Rekomendasi Aksi</div>`;
+  m6Recommendations().forEach(r=>{
+    const col={red:'#DC2626',yellow:'#B45309',green:'#0B8F46'}[r.lv], bg={red:'#FEE2E2',yellow:'#FEF3C7',green:'#D1FAE5'}[r.lv];
+    h+=`<div class="card-s" style="margin-bottom:8px;background:${bg};border-left:4px solid ${col}">
+      <div style="font-size:12.5px;font-weight:900;color:${col}">${r.t}</div>
+      <div style="font-size:11px;font-weight:600;color:var(--txt);margin-top:2px">${r.s}</div></div>`;
+  });
+  // cash timeline (next events)
+  h+=`<div class="rep-sec" style="color:var(--p-deep)">📅 Proyeksi Kas (konservatif, inflow H+7)</div><div class="card-s">`;
+  h+=`<div class="rep-r" style="font-weight:900;border-bottom:1.5px solid var(--bdr)"><span class="rl">Kejadian</span><span class="rv">Saldo</span></div>`;
+  h+=`<div class="rep-r"><span class="rl" style="color:var(--sub)">Kas sekarang</span><span class="rv">${fj(cons.start)}</span></div>`;
+  cons.series.slice(0,14).forEach(e=>{
+    h+=`<div class="rep-r"><span class="rl" style="font-size:11px">${fd(e.t)} · ${e.label} <b style="color:${e.amt<0?'var(--r)':'#0B8F46'}">${e.amt<0?'':'+'}${fj(e.amt)}</b></span><span class="rv" style="color:${e.cash<0?'var(--r)':'var(--txt)'}">${fj(e.cash)}</span></div>`;
+  });
+  h+=`</div>`;
+  // idle cost note
+  if(k.idleInv>0.5) h+=`<div class="fc-note" style="margin-top:10px">Dana investor nganggur ${fj(k.idleInv)} → biaya idle ${fj(k.idleCost)}/bln.</div>`;
+  return h;
 }
 function am(s,m){
   // Add m months to date string s (YYYY-MM-DD), timezone-safe
