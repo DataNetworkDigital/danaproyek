@@ -583,14 +583,14 @@ function pocketOptions(sel){
 }
 function rKeu(){
   const el=document.getElementById('p-u'); if(!el) return;
-  const sub=`<div class="tabs" style="margin-bottom:14px">
-    <button class="tab ${keuTab==='kantong'?'on':''}" onclick="swKeu('kantong')">🏦 Kantong</button>
-    <button class="tab ${keuTab==='investor'?'on':''}" onclick="swKeu('investor')">🤝 Investor</button>
-    <button class="tab ${keuTab==='likuiditas'?'on':''}" onclick="swKeu('likuiditas')">💧 Likuiditas</button>
-    <button class="tab ${keuTab==='laporan'?'on':''}" onclick="swKeu('laporan')">📊 Laporan</button>
-  </div>`;
+  const nInbox=(typeof pendingEvents==='function')?pendingEvents().length:0;
+  const tabs=[['kantong','🏦 Kantong'],['inbox','📥 Inbox'+(nInbox?' ('+nInbox+')':'')],['investor','🤝 Investor'],['likuiditas','💧 Likuiditas'],['laporan','📊 Laporan']];
+  let sub=`<div style="display:flex;gap:6px;overflow-x:auto;margin-bottom:14px;padding-bottom:4px;-webkit-overflow-scrolling:touch">`;
+  tabs.forEach(([k,l])=>sub+=`<button class="tab ${keuTab===k?'on':''}" onclick="swKeu('${k}')" style="flex:0 0 auto;padding:9px 12px">${l}</button>`);
+  sub+=`</div>`;
   let body='';
   if(keuTab==='kantong') body=rKeuKantong();
+  else if(keuTab==='inbox') body=rKeuInbox();
   else if(keuTab==='investor') body=rKeuInvestor();
   else if(keuTab==='likuiditas') body=rKeuLikuiditas();
   else body=rKeuLaporan();
@@ -967,18 +967,25 @@ function repJurnal(){
 }
 
 // ── SEED DATA ASLI ROXANNE (per 1 Agu 2026) ───────────────────────────
-function todayISO(){ return new Date().toISOString().split('T')[0]; }
-function addDays(iso,n){ const d=new Date(iso+'T00:00:00'); d.setDate(d.getDate()+n); return d.toISOString().split('T')[0]; }
+// Timezone-safe date helpers (local components, NOT toISOString which shifts UTC).
+function isoLocal(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function todayISO(){ return isoLocal(new Date()); }
+function addDays(iso,n){ const d=new Date(iso+'T00:00:00'); d.setDate(d.getDate()+n); return isoLocal(d); }
 function monthsBetween(a,b){ const x=new Date(a+'T00:00:00'),y=new Date(b+'T00:00:00'); return Math.max(1,Math.round((y-x)/2629800000)); }
 // Build forward obligation schedule: monthly bagi hasil on payDay until maturity, then pokok.
 // flexible = perpetual (Papa): rolling 12 months of bagi hasil, no pokok.
 function buildRealSchedule(payDay, maturity, pokok, rate, flexible){
-  const bh=Math.round(pokok*rate/100*1e4)/1e4, sched=[], today=new Date();
-  let d=new Date(today.getFullYear(), today.getMonth(), payDay);
-  if(d<=today) d=new Date(today.getFullYear(), today.getMonth()+1, payDay);
-  const end = flexible ? new Date(today.getFullYear(), today.getMonth()+12, payDay) : new Date(maturity+'T00:00:00');
-  while(d<=end){ sched.push({tanggal:d.toISOString().split('T')[0], tipe:'bagihasil', jumlah:bh, status:'pending'}); d=new Date(d.getFullYear(), d.getMonth()+1, payDay); }
-  if(!flexible) sched.push({tanggal:maturity, tipe:'pokok', jumlah:pokok, status:'pending'});
+  const bh=Math.round(pokok*rate/100*1e4)/1e4, sched=[], now=new Date();
+  const clampDay=(y,m,d)=>Math.min(d, new Date(y,m+1,0).getDate());
+  let y=now.getFullYear(), m=now.getMonth();
+  if(now.getDate()>=payDay){ m++; } // payDay bulan ini sudah lewat → mulai bulan depan
+  for(let k=0;k<(flexible?12:60);k++){
+    const yy=y+Math.floor((m+k)/12), mm=((m+k)%12+12)%12;
+    const t=`${yy}-${String(mm+1).padStart(2,'0')}-${String(clampDay(yy,mm,payDay)).padStart(2,'0')}`;
+    if(!flexible && t>maturity) break;
+    sched.push({tanggal:t, tipe:'bagihasil', jumlah:bh, status:'pending'});
+  }
+  if(!flexible && maturity) sched.push({tanggal:maturity, tipe:'pokok', jumlah:pokok, status:'pending'});
   return sched;
 }
 function seedRoxanne(){
@@ -1140,6 +1147,93 @@ function rKeuLikuiditas(){
   h+=`</div>`;
   // idle cost note
   if(k.idleInv>0.5) h+=`<div class="fc-note" style="margin-top:10px">Dana investor nganggur ${fj(k.idleInv)} → biaya idle ${fj(k.idleCost)}/bln.</div>`;
+  return h;
+}
+
+// ── M4: INBOX AUTO-POSTING (deteksi otomatis + approval) ──────────────
+// Sistem deteksi transaksi jatuh tempo dari jadwal (kontrak investor + proyek),
+// user tinggal Accept (default), Custom (ubah dulu), atau Skip. Jadi buku selalu
+// cocok Bank Jago tanpa rekonsiliasi manual, tapi user tetap pegang kendali.
+function pendingEvents(){
+  const events=[], look=5; // tampilkan yang jatuh tempo dalam 5 hari atau lewat
+  invContracts().filter(c=>c.status!=='selesai' && !c.flexible).forEach(c=>{ // Papa fleksibel: dikecualikan (rollable)
+    (c.schedule||[]).forEach((s,i)=>{
+      if(s.status!=='pending') return; const dd=du(s.tanggal); if(dd===null||dd>look) return;
+      events.push({id:'inv:'+c.id+':'+i, kind:'inv', cid:c.id, idx:i, tipe:s.tipe, tanggal:s.tanggal, dd, jumlah:s.jumlah, arah:'keluar',
+        judul:(s.tipe==='pokok'?'💰 Kembalikan pokok · ':'📈 Bayar bagi hasil · ')+c.nama});
+    });
+  });
+  const names=(S.orgConfig&&S.orgConfig.activeProjectNames)||[];
+  (S.projects||[]).filter(p=>names.includes(p.peminjam)).forEach(p=>{
+    const fee=parseFloat(p.adminFeePersen)||0.5, kontrak=parseFloat(p.kontrak||0), deploy=parseFloat(p.jumlah||0);
+    (p.schedule||[]).forEach((s,i)=>{
+      if(s.status==='paid'||s.status==='skipped') return; const dd=du(s.dueDate); if(dd===null||dd>look) return;
+      const gross=parseFloat(s.amount||0), feeAmt=Math.round(kontrak*fee/100*1e4)/1e4;
+      events.push({id:'proj:'+p.peminjam+':'+i, kind:'proj', pname:p.peminjam, idx:i, tanggal:s.dueDate, dd, feeAmt, gross,
+        jumlah:Math.round((gross-feeAmt)*1e4)/1e4, arah:'masuk', judul:'📥 Return proyek · '+p.peminjam});
+    });
+    if(p.tanggalJT && !p.pokokRecorded){ const ddj=du(p.tanggalJT); if(ddj!==null&&ddj<=look)
+      events.push({id:'projpokok:'+p.peminjam, kind:'projpokok', pname:p.peminjam, tanggal:p.tanggalJT, dd:ddj, jumlah:deploy, arah:'masuk', judul:'📥 Pokok proyek balik · '+p.peminjam}); }
+  });
+  const skip=window._inboxSkip||{};
+  return events.filter(e=>!skip[e.id]).sort((a,b)=>a.tanggal<b.tanggal?-1:1);
+}
+function inboxPost(ev, pocket, date, amount){
+  amount=(amount!=null)?amount:ev.jumlah;
+  if(ev.kind==='inv'){
+    const c=invContracts().find(x=>x.id===ev.cid); if(!c) return; const s=c.schedule[ev.idx];
+    if(ev.tipe==='pokok') txKembalikanPokokInvestor(date,amount,pocket,'Kembalikan pokok: '+c.nama);
+    else ledgerPost(date,'Bagi hasil: '+c.nama,[{account:'5000',debit:amount,credit:0},{account:pocket,debit:0,credit:amount}],'bayar-bh');
+    s.status='paid'; s.paidDate=date; s.paidFrom=pocket;
+    if(!(c.schedule||[]).some(x=>x.status==='pending')) c.status='selesai';
+  } else if(ev.kind==='proj'){
+    const p=(S.projects||[]).find(x=>x.peminjam===ev.pname); if(!p) return; const s=p.schedule[ev.idx];
+    ledgerPost(date,'Return proyek: '+p.peminjam,[{account:pocket,debit:amount,credit:0},{account:'5020',debit:ev.feeAmt,credit:0},{account:'4000',debit:0,credit:Math.round((amount+ev.feeAmt)*1e4)/1e4}],'return');
+    if(s){ s.status='paid'; s.paidDate=date; }
+  } else if(ev.kind==='projpokok'){
+    const p=(S.projects||[]).find(x=>x.peminjam===ev.pname); if(!p) return;
+    txPokokProyekBalik(date,amount,pocket,'Pokok balik: '+p.peminjam); p.pokokRecorded=true;
+  }
+  save(); rKeu();
+}
+function inboxAccept(id){ const ev=pendingEvents().find(e=>e.id===id); if(!ev) return; inboxPost(ev, ev.arah==='keluar'?'1040':'1000', todayISO(), ev.jumlah); toast('✅ Dicatat'); }
+function inboxSkip(id){ window._inboxSkip=window._inboxSkip||{}; window._inboxSkip[id]=1; rKeu(); toast('Dilewati (muncul lagi nanti)'); }
+function inboxCustom(id){
+  const ev=pendingEvents().find(e=>e.id===id); if(!ev) return;
+  document.getElementById('mo-keu-t').textContent='✏️ Custom';
+  document.getElementById('mo-keu-b').innerHTML=`
+    <div class="fc-note" style="margin-bottom:12px">${ev.judul} · jatuh tempo ${fd(ev.tanggal)}</div>
+    <div class="fg"><label class="fl">Jumlah aktual (jt)</label><input class="fi" id="ib-amt" type="number" step="0.0001" value="${ev.jumlah}"></div>
+    <div class="fg"><label class="fl">${ev.arah==='keluar'?'Bayar dari kantong':'Masuk ke kantong'}</label><select class="fi" id="ib-pocket">${pocketOptions(ev.arah==='keluar'?'1040':'1000')}</select></div>
+    <div class="fg"><label class="fl">Tanggal aktual</label><input class="fi" id="ib-date" type="date" value="${todayISO()}"></div>
+    <button class="btn pr fw" onclick="inboxConfirm('${id}')" style="margin-top:8px">Catat</button>`;
+  om('mo-keu');
+}
+function inboxConfirm(id){
+  const ev=pendingEvents().find(e=>e.id===id); if(!ev) return;
+  const amt=parseFloat(document.getElementById('ib-amt').value||0), pocket=document.getElementById('ib-pocket').value, date=document.getElementById('ib-date').value;
+  if(!(amt>0)){ toast('❌ Jumlah harus > 0'); return; }
+  inboxPost(ev, pocket, date, amt); cm('mo-keu'); toast('✅ Dicatat (custom)');
+}
+function rKeuInbox(){
+  const ev=pendingEvents();
+  let h=`<div class="fc-note" style="margin-bottom:12px">Transaksi terdeteksi otomatis dari jadwal. <b>Accept</b> = catat default · <b>Custom</b> = ubah jumlah/kantong/tanggal · <b>Skip</b> = sembunyikan sementara.</div>`;
+  if(!ev.length) return h+`<div class="es"><div class="ei">✅</div><div class="et">Inbox bersih</div><div class="esb">Tidak ada transaksi jatuh tempo dalam 5 hari ke depan.</div></div>`;
+  ev.forEach(e=>{
+    const col=e.dd<0?'#DC2626':(e.dd<=2?'#B45309':'var(--sub)');
+    h+=`<div class="card-s" style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+        <div style="min-width:0"><div style="font-size:13px;font-weight:900">${e.judul}</div>
+          <div style="font-size:10px;font-weight:800;color:${col}">${fd(e.tanggal)} · ${gl(e.dd)}</div></div>
+        <div class="t-num" style="font-size:15px;font-weight:900;color:${e.arah==='masuk'?'#0B8F46':'var(--r)'};white-space:nowrap">${e.arah==='masuk'?'+':'−'}${fj(e.jumlah)}</div>
+      </div>
+      <div style="display:flex;gap:6px;margin-top:8px">
+        <button class="btn pr" onclick="inboxAccept('${e.id}')" style="flex:1;font-size:11px;padding:8px 4px">✅ Accept</button>
+        <button class="btn ou" onclick="inboxCustom('${e.id}')" style="flex:1;font-size:11px;padding:8px 4px">✏️ Custom</button>
+        <button class="btn ou" onclick="inboxSkip('${e.id}')" style="font-size:11px;padding:8px 10px;color:var(--sub)">Skip</button>
+      </div>
+    </div>`;
+  });
   return h;
 }
 function am(s,m){
