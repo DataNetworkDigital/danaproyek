@@ -766,6 +766,19 @@ function rKeuInvestor(){
       <div style="margin-top:8px;font-size:11px"><button class="sl" onclick="invModal('edit','${c.id}')">✏️ Edit</button> &nbsp;·&nbsp; <button class="sl" onclick="invDetail('${c.id}')" style="color:var(--sub)">📅 Jadwal lengkap</button></div>
     </div>`;
   });
+  const alok=(S.orgConfig&&S.orgConfig.alokasi)||[];
+  if(alok.length){
+    const col={Gde:'#7c3aed',RRPR:'#0891b2',Papa:'#b45309',Veda:'#2563eb',Laili:'#059669',Fuad:'#dc2626'};
+    h+=`<div class="rep-sec" style="color:var(--p-deep);margin-top:16px">🧩 Alokasi Modal ke Proyek</div>
+      <div class="fc-note" style="margin-bottom:8px">Tanggal bayar tiap investor tetap ikut kontrak. Ini cuma "uangnya kerja di proyek mana".</div>`;
+    alok.forEach(a=>{
+      h+=`<div class="card-s" style="margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;font-size:13px;font-weight:900"><span>${a.proyek}</span><span class="t-num" style="color:var(--p-deep)">${fj(a.deploy)}</span></div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:6px">
+        ${a.sumber.map(s=>{const c=col[s.s]||'#6b7280';return `<span style="font-size:10px;font-weight:800;padding:3px 8px;border-radius:7px;background:${c}1a;color:${c}">${s.s} ${fj(s.j)}</span>`;}).join('')}
+        </div></div>`;
+    });
+  }
   return h;
 }
 function invHint(){ const v=document.getElementById('ic-struktur').value, el=document.getElementById('ic-hint'); if(el) el.textContent=(INV_STRUKTUR[v]||INV_STRUKTUR.bulanan).hint; }
@@ -975,22 +988,20 @@ function monthsBetween(a,b){ const x=new Date(a+'T00:00:00'),y=new Date(b+'T00:0
 // Build forward obligation schedule: monthly bagi hasil on payDay until maturity, then pokok.
 // flexible = perpetual (Papa): rolling 12 months of bagi hasil, no pokok.
 function buildRealSchedule(payDay, maturity, pokok, rate, flexible, startISO){
-  const bh=Math.round(pokok*rate/100*1e4)/1e4, sched=[], now=new Date();
+  const bh=Math.round(pokok*rate/100*1e4)/1e4, sched=[], today=todayISO(), now=new Date();
   const clampDay=(y,m,d)=>Math.min(d, new Date(y,m+1,0).getDate());
-  let y, m, count;
-  if(flexible && startISO){ // Papa: accrual dari bulan MULAI (backfill) sampai 12 bln ke depan
-    y=parseInt(startISO.slice(0,4)); m=parseInt(startISO.slice(5,7))-1;
-    count=Math.max(1,(now.getFullYear()-y)*12+(now.getMonth()-m))+13;
-  } else {
-    y=now.getFullYear(); m=now.getMonth();
-    if(now.getDate()>=payDay){ m++; } // payDay bulan ini sudah lewat → mulai bulan depan
-    count=flexible?12:60;
-  }
+  const startY=parseInt(startISO.slice(0,4)), startM=parseInt(startISO.slice(5,7))-1;
+  // Non-flexible: bagi hasil PERTAMA = 1 bulan setelah dana masuk (startISO). Jadi kalau
+  // Veda/Fuad masuk 3 Agu, bayar pertama 3 Sep. Flexible (Papa): akrual mulai bulan masuk.
+  const y=startY, m=flexible ? startM : startM+1;
+  const count=flexible ? Math.max(1,(now.getFullYear()-startY)*12+(now.getMonth()-startM))+13 : 120;
   for(let k=0;k<count;k++){
     const yy=y+Math.floor((m+k)/12), mm=((m+k)%12+12)%12;
     const t=`${yy}-${String(mm+1).padStart(2,'0')}-${String(clampDay(yy,mm,payDay)).padStart(2,'0')}`;
     if(!flexible && t>maturity) break;
-    sched.push({tanggal:t, tipe:'bagihasil', jumlah:bh, status:'pending'});
+    // Non-flexible bagi hasil yang tanggalnya sudah lewat = dianggap sudah dibayar (settled sebelum reset).
+    const st=(!flexible && t<today) ? 'paid' : 'pending';
+    sched.push({tanggal:t, tipe:'bagihasil', jumlah:bh, status:st});
   }
   if(!flexible && maturity) sched.push({tanggal:maturity, tipe:'pokok', jumlah:pokok, status:'pending'});
   return sched;
@@ -1021,6 +1032,13 @@ function seedRoxanne(){
   if(!S.orgConfig) S.orgConfig={};
   S.orgConfig.activeProjectNames=['AYAM PETELOR PO','PELAYARAN PO','Tani dan vila Ngawi','SAWAH WARTINI'];
   S.orgConfig.cushionPct=15; S.orgConfig.investorRateDefault=2;
+  // Alokasi modal ke proyek (tanggal bayar tetap ikut kontrak, ini cuma "uangnya kerja di mana").
+  S.orgConfig.alokasi=[
+    {proyek:'Tani & Vila Ngawi', deploy:189,    sumber:[{s:'Veda',j:66.15},{s:'Fuad',j:32.5},{s:'Papa',j:50},{s:'Gde',j:40.35}]},
+    {proyek:'Sawah Wartini',     deploy:89.775, sumber:[{s:'Veda',j:19},{s:'Laili',j:10},{s:'Gde',j:60.775}]},
+    {proyek:'Ayam Petelor',      deploy:47.25,  sumber:[{s:'Gde',j:47.25}]},
+    {proyek:'Pelayaran',         deploy:47.25,  sumber:[{s:'Gde',j:47.25}]},
+  ];
   save(); rKeu(); toast('✅ Data asli Roxanne di-seed');
 }
 
