@@ -128,6 +128,14 @@ body.modal-open{position:fixed;left:0;right:0;width:100%;overflow:hidden}
 .rep-r.sub{border-top:1px solid var(--bdr);margin-top:2px;font-weight:900}.rep-r.sub .rv{font-weight:900}
 .rep-r.tot{border-top:2px solid var(--txt);margin-top:4px;font-weight:900;font-size:13.5px}.rep-r.tot .rv{font-weight:900}
 .rep-ok{text-align:center;font-size:10px;font-weight:800;margin-top:8px}
+/* Print / PDF export: show only #print-area */
+#print-area{display:none}
+@media print{
+  body.printing>*{display:none!important}
+  body.printing #print-area{display:block!important}
+  body.printing #print-area .rep{box-shadow:none;border:1px solid #ddd}
+  @page{margin:14mm}
+}
 .sh{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}.st{font-size:15px;font-weight:900;color:var(--txt)}
 .sl{font-size:11px;color:var(--p-deep);font-weight:800;cursor:pointer;background:none;border:none;font-family:'Nunito',sans-serif}
 
@@ -339,6 +347,7 @@ body.modal-open{position:fixed;left:0;right:0;width:100%;overflow:hidden}
 <div class="mo" id="mo-keu" onclick="cm('mo-keu')"><div class="modal" onclick="event.stopPropagation()"><button class="mclose" onclick="cm('mo-keu')" aria-label="Tutup">×</button><div class="mh"></div><div class="mtt" id="mo-keu-t">Kantong</div><div id="mo-keu-b"></div></div></div>
 <button class="fab" id="fab" onclick="fabAct()">＋</button>
 <div id="toast"></div>
+<div id="print-area"></div>
 <script>
 // ── STATE ─────────────────────────────────────────────────────────────
 let S = {
@@ -870,16 +879,37 @@ function invDelete(id){
 }
 
 // ── LAPORAN KEUANGAN (M5: 5 laporan format perusahaan terbuka) ────────
-let lapReport='laba-rugi';
-function swLap(r){ lapReport=r; const el=document.getElementById('p-r'); if(el) el.innerHTML=rKeuLaporan(); }
+let lapReport='laba-rugi', lapFrom='', lapTo='';
+function swLap(r){ lapReport=r; rLapPage(); }
+function rLapPage(){ const el=document.getElementById('p-r'); if(el) el.innerHTML=rKeuLaporan(); }
+function lapSetRange(){ lapFrom=document.getElementById('lap-from').value; lapTo=document.getElementById('lap-to').value; rLapPage(); }
+function lapClearRange(){ lapFrom=''; lapTo=''; rLapPage(); }
+// Range-aware account balance: from/to null = no bound. Debit-normal → D−K, else K−D.
+function acctBalRange(code, from, to){
+  let d=0,k=0;
+  (S.ledger||[]).forEach(e=>{ if(from&&e.tanggal<from)return; if(to&&e.tanggal>to)return; e.lines.forEach(l=>{ if(l.account===code){ d+=l.debit; k+=l.credit; } }); });
+  return acct(code).normal==='D' ? d-k : k-d;
+}
 function repR(label, amount, cls){ return `<div class="rep-r ${cls||''}"><span class="rl">${label}</span><span class="rv">${fj(amount)}</span></div>`; }
 function repToday(){ return fd(new Date().toISOString().split('T')[0]); }
+function repPeriod(){ if(lapFrom&&lapTo) return fd(lapFrom)+' s/d '+fd(lapTo); if(lapTo) return 's/d '+fd(lapTo); if(lapFrom) return 'sejak '+fd(lapFrom); return 's/d '+repToday(); }
 function rKeuLaporan(){
   const reports=[['laba-rugi','Laba Rugi'],['neraca','Neraca'],['arus-kas','Arus Kas'],['neraca-saldo','Neraca Saldo'],['jurnal','Jurnal']];
   let h=`<div style="display:flex;gap:6px;overflow-x:auto;margin-bottom:14px;padding-bottom:4px;-webkit-overflow-scrolling:touch">`;
   reports.forEach(([k,l])=>h+=`<button class="tab ${lapReport===k?'on':''}" onclick="swLap('${k}')" style="flex:0 0 auto;padding:8px 14px">${l}</button>`);
   h+=`</div>`;
-  if(!(S.ledger||[]).length) return h+`<div class="es"><div class="ei">📊</div><div class="et">Belum ada data</div><div class="esb">Isi transaksi dulu (tab Kantong → Isi Data Contoh).</div></div>`;
+  if(!(S.ledger||[]).length) return h+`<div class="es"><div class="ei">📊</div><div class="et">Belum ada data</div><div class="esb">Isi transaksi dulu (tab Kantong).</div></div>`;
+  h+=`<div class="card-s" style="margin-bottom:12px">
+    <div class="fr" style="align-items:flex-end">
+      <div class="fg"><label class="fl">Dari tanggal</label><input class="fi" id="lap-from" type="date" value="${lapFrom}"></div>
+      <div class="fg"><label class="fl">Sampai</label><input class="fi" id="lap-to" type="date" value="${lapTo}"></div>
+    </div>
+    <div style="display:flex;gap:6px;margin-top:8px">
+      <button class="btn pr" onclick="lapSetRange()" style="flex:1;font-size:11px;padding:8px 4px">Terapkan</button>
+      <button class="btn ou" onclick="lapClearRange()" style="font-size:11px;padding:8px 10px">Reset</button>
+      <button class="btn ou" onclick="lapExportPDF()" style="font-size:11px;padding:8px 10px">📄 PDF</button>
+      <button class="btn ou" onclick="lapExportCSV()" style="font-size:11px;padding:8px 10px">📊 Excel</button>
+    </div></div>`;
   if(lapReport==='laba-rugi') h+=repLabaRugi();
   else if(lapReport==='neraca') h+=repNeraca();
   else if(lapReport==='arus-kas') h+=repArusKas();
@@ -887,37 +917,38 @@ function rKeuLaporan(){
   else h+=repJurnal();
   return h;
 }
-function labaBerjalan(){
-  return allAccounts().filter(a=>a.type==='pendapatan').reduce((s,a)=>s+acctBalance(a.code),0)
-       - allAccounts().filter(a=>a.type==='beban').reduce((s,a)=>s+acctBalance(a.code),0);
+function labaBerjalan(){ return labaBerjalanAsOf(null); }
+function labaBerjalanAsOf(to){
+  return allAccounts().filter(a=>a.type==='pendapatan').reduce((s,a)=>s+acctBalRange(a.code,null,to),0)
+       - allAccounts().filter(a=>a.type==='beban').reduce((s,a)=>s+acctBalRange(a.code,null,to),0);
 }
 function repLabaRugi(){
   const rev=allAccounts().filter(a=>a.type==='pendapatan'), exp=allAccounts().filter(a=>a.type==='beban');
-  let totRev=0, totExp=0;
-  let h=`<div class="rep"><div class="rep-t">LAPORAN LABA RUGI</div><div class="rep-s">Roxanne Capital · s/d ${repToday()}</div>`;
+  const F=lapFrom||null, T=lapTo||null; let totRev=0, totExp=0;
+  let h=`<div class="rep" id="rep-body"><div class="rep-t">LAPORAN LABA RUGI</div><div class="rep-s">Roxanne Capital · ${repPeriod()}</div>`;
   h+=`<div class="rep-sec">Pendapatan</div>`;
-  let any=false; rev.forEach(a=>{const b=acctBalance(a.code); if(Math.abs(b)>0.005){totRev+=b; any=true; h+=repR(a.name,b);}}); if(!any) h+=repR('(belum ada)',0);
+  let any=false; rev.forEach(a=>{const b=acctBalRange(a.code,F,T); if(Math.abs(b)>0.005){totRev+=b; any=true; h+=repR(a.name,b);}}); if(!any) h+=repR('(belum ada)',0);
   h+=repR('Total Pendapatan',totRev,'sub');
   h+=`<div class="rep-sec">Beban</div>`;
-  any=false; exp.forEach(a=>{const b=acctBalance(a.code); if(Math.abs(b)>0.005){totExp+=b; any=true; h+=repR(a.name,b);}}); if(!any) h+=repR('(belum ada)',0);
+  any=false; exp.forEach(a=>{const b=acctBalRange(a.code,F,T); if(Math.abs(b)>0.005){totExp+=b; any=true; h+=repR(a.name,b);}}); if(!any) h+=repR('(belum ada)',0);
   h+=repR('Total Beban',totExp,'sub');
   h+=repR('LABA BERSIH',totRev-totExp,'tot');
   return h+`</div>`;
 }
 function repNeraca(){
   const aset=allAccounts().filter(a=>a.type==='aset'), liab=allAccounts().filter(a=>a.type==='liabilitas'), eku=allAccounts().filter(a=>a.type==='ekuitas');
-  let totAset=0,totLiab=0,totEku=0;
-  let h=`<div class="rep"><div class="rep-t">NERACA</div><div class="rep-s">Roxanne Capital · per ${repToday()}</div>`;
+  const T=lapTo||null; let totAset=0,totLiab=0,totEku=0;
+  let h=`<div class="rep" id="rep-body"><div class="rep-t">NERACA</div><div class="rep-s">Roxanne Capital · per ${lapTo?fd(lapTo):repToday()}</div>`;
   h+=`<div class="rep-sec">Aset</div>`;
-  aset.forEach(a=>{const b=acctBalance(a.code); if(Math.abs(b)>0.005){totAset+=b; h+=repR(a.name,b);}});
+  aset.forEach(a=>{const b=acctBalRange(a.code,null,T); if(Math.abs(b)>0.005){totAset+=b; h+=repR(a.name,b);}});
   h+=repR('Total Aset',totAset,'tot');
   h+=`<div class="rep-sec">Liabilitas</div>`;
-  liab.forEach(a=>{const b=acctBalance(a.code); if(Math.abs(b)>0.005){totLiab+=b; h+=repR(a.name,b);}});
+  liab.forEach(a=>{const b=acctBalRange(a.code,null,T); if(Math.abs(b)>0.005){totLiab+=b; h+=repR(a.name,b);}});
   if(!totLiab) h+=repR('(belum ada)',0);
   h+=repR('Total Liabilitas',totLiab,'sub');
   h+=`<div class="rep-sec">Ekuitas</div>`;
-  eku.forEach(a=>{const b=acctBalance(a.code); if(Math.abs(b)>0.005){totEku+=b; h+=repR(a.name,b);}});
-  const lb=labaBerjalan(); if(Math.abs(lb)>0.005){ totEku+=lb; h+=repR('Laba Berjalan',lb);}
+  eku.forEach(a=>{const b=acctBalRange(a.code,null,T); if(Math.abs(b)>0.005){totEku+=b; h+=repR(a.name,b);}});
+  const lb=labaBerjalanAsOf(T); if(Math.abs(lb)>0.005){ totEku+=lb; h+=repR('Laba Berjalan',lb);}
   h+=repR('Total Ekuitas',totEku,'sub');
   h+=repR('Liabilitas + Ekuitas',totLiab+totEku,'tot');
   const bal=Math.abs(totAset-(totLiab+totEku))<0.005;
@@ -932,8 +963,10 @@ function catArusKas(code){
 }
 function repArusKas(){
   const pockets=new Set((S.pockets||[]).map(p=>p.code));
+  const F=lapFrom||null, T=lapTo||null;
   const items={operasi:{},investasi:{},pendanaan:{}}, tot={operasi:0,investasi:0,pendanaan:0};
   (S.ledger||[]).forEach(e=>{
+    if(F&&e.tanggal<F)return; if(T&&e.tanggal>T)return;
     const cashLines=e.lines.filter(l=>pockets.has(l.account)), nonCash=e.lines.filter(l=>!pockets.has(l.account));
     if(!cashLines.length||!nonCash.length) return;
     const netCash=cashLines.reduce((s,l)=>s+l.debit-l.credit,0);
@@ -943,16 +976,18 @@ function repArusKas(){
     items[cat][nm]=(items[cat][nm]||0)+netCash; tot[cat]+=netCash;
   });
   const sec=(title,key)=>{let s=`<div class="rep-sec">Arus Kas ${title}</div>`; const ks=Object.keys(items[key]); if(!ks.length) s+=repR('(belum ada)',0); ks.forEach(k=>s+=repR(k,items[key][k])); s+=repR('Subtotal '+title,tot[key],'sub'); return s;};
-  let h=`<div class="rep"><div class="rep-t">LAPORAN ARUS KAS</div><div class="rep-s">Roxanne Capital · s/d ${repToday()}</div>`;
+  let h=`<div class="rep" id="rep-body"><div class="rep-t">LAPORAN ARUS KAS</div><div class="rep-s">Roxanne Capital · ${repPeriod()}</div>`;
   h+=sec('Operasi','operasi')+sec('Investasi','investasi')+sec('Pendanaan','pendanaan');
   h+=repR('KENAIKAN KAS BERSIH',tot.operasi+tot.investasi+tot.pendanaan,'tot');
-  h+=repR('Kas akhir (semua kantong)',totalLikuid(),'sub');
+  h+=repR('Kas akhir semua kantong (s/d hari ini)',totalLikuid(),'sub');
   return h+`</div>`;
 }
 function repNeracaSaldo(){
-  const tb=trialBalance(); let totD=0,totK=0;
+  const T=lapTo||null;
+  const tb=allAccounts().map(a=>{const bal=acctBalRange(a.code,null,T);return {code:a.code,name:a.name,debit:a.normal==='D'?Math.max(bal,0):Math.max(-bal,0),credit:a.normal==='K'?Math.max(bal,0):Math.max(-bal,0),balance:bal};}).filter(r=>Math.abs(r.balance)>0.005);
+  let totD=0,totK=0;
   const cell=v=>`<span class="rv" style="width:70px;text-align:right;font-size:11px">${v>0.005?fjPlain(v):'-'}</span>`;
-  let h=`<div class="rep"><div class="rep-t">NERACA SALDO</div><div class="rep-s">Roxanne Capital · per ${repToday()}</div>`;
+  let h=`<div class="rep" id="rep-body"><div class="rep-t">NERACA SALDO</div><div class="rep-s">Roxanne Capital · per ${lapTo?fd(lapTo):repToday()}</div>`;
   h+=`<div class="rep-r" style="font-weight:900;border-bottom:1.5px solid var(--bdr)"><span class="rl">Akun</span><span style="display:flex;gap:10px"><span class="rv" style="width:70px;text-align:right">Debit</span><span class="rv" style="width:70px;text-align:right">Kredit</span></span></div>`;
   tb.forEach(r=>{ totD+=r.debit; totK+=r.credit;
     h+=`<div class="rep-r"><span class="rl" style="font-size:11px">${r.code} · ${r.name}</span><span style="display:flex;gap:10px">${cell(r.debit)}${cell(r.credit)}</span></div>`;});
@@ -962,8 +997,9 @@ function repNeracaSaldo(){
   return h+`</div>`;
 }
 function repJurnal(){
-  const entries=(S.ledger||[]).slice().sort((a,b)=>a.tanggal<b.tanggal?1:(a.tanggal>b.tanggal?-1:0));
-  let h=`<div class="rep"><div class="rep-t">JURNAL UMUM</div><div class="rep-s">Roxanne Capital · ${entries.length} entri</div>`;
+  const F=lapFrom||null, T=lapTo||null;
+  const entries=(S.ledger||[]).filter(e=>(!F||e.tanggal>=F)&&(!T||e.tanggal<=T)).slice().sort((a,b)=>a.tanggal<b.tanggal?1:(a.tanggal>b.tanggal?-1:0));
+  let h=`<div class="rep" id="rep-body"><div class="rep-t">JURNAL UMUM</div><div class="rep-s">Roxanne Capital · ${repPeriod()} · ${entries.length} entri</div>`;
   entries.slice(0,120).forEach(e=>{
     const lines=e.lines.slice().sort((a,b)=>(b.debit>0?1:0)-(a.debit>0?1:0)); // debits first
     h+=`<div style="border-bottom:1px solid var(--bdr);padding:7px 0">
@@ -977,6 +1013,47 @@ function repJurnal(){
   });
   if(entries.length>120) h+=`<div style="text-align:center;font-size:10px;color:var(--sub);margin-top:8px">120 entri terbaru dari ${entries.length}</div>`;
   return h+`</div>`;
+}
+// ── EXPORT LAPORAN (PDF via print + Excel via CSV) ────────────────────
+function lapCSV(){
+  const F=lapFrom||null, T=lapTo||null, rows=[], push=(...c)=>rows.push(c);
+  if(lapReport==='laba-rugi'){
+    push('LAPORAN LABA RUGI - Roxanne Capital',repPeriod()); push('Akun','Jumlah (jt)');
+    let tr=0,te=0; push('PENDAPATAN');
+    allAccounts().filter(a=>a.type==='pendapatan').forEach(a=>{const b=acctBalRange(a.code,F,T); if(Math.abs(b)>0.005){tr+=b;push(a.name,b);}});
+    push('Total Pendapatan',tr); push('BEBAN');
+    allAccounts().filter(a=>a.type==='beban').forEach(a=>{const b=acctBalRange(a.code,F,T); if(Math.abs(b)>0.005){te+=b;push(a.name,b);}});
+    push('Total Beban',te); push('LABA BERSIH',tr-te);
+  } else if(lapReport==='neraca'){
+    push('NERACA - Roxanne Capital',lapTo?fd(lapTo):repToday()); push('Akun','Saldo (jt)');
+    ['aset','liabilitas','ekuitas'].forEach(ty=>{push(ty.toUpperCase()); allAccounts().filter(a=>a.type===ty).forEach(a=>{const b=acctBalRange(a.code,null,T); if(Math.abs(b)>0.005)push(a.name,b);});});
+    push('Laba Berjalan',labaBerjalanAsOf(T));
+  } else if(lapReport==='neraca-saldo'){
+    push('NERACA SALDO - Roxanne Capital',lapTo?fd(lapTo):repToday()); push('Kode','Akun','Debit','Kredit');
+    allAccounts().forEach(a=>{const bal=acctBalRange(a.code,null,T); if(Math.abs(bal)>0.005) push(a.code,a.name,a.normal==='D'?Math.max(bal,0):'',a.normal==='K'?Math.max(bal,0):'');});
+  } else if(lapReport==='arus-kas'){
+    push('LAPORAN ARUS KAS - Roxanne Capital',repPeriod()); push('Tanggal','Keterangan','Kategori','Arus Kas (jt)');
+    const pockets=new Set((S.pockets||[]).map(p=>p.code));
+    (S.ledger||[]).forEach(e=>{ if(F&&e.tanggal<F)return; if(T&&e.tanggal>T)return; const cl=e.lines.filter(l=>pockets.has(l.account)),nc=e.lines.filter(l=>!pockets.has(l.account)); if(!cl.length||!nc.length)return; const net=cl.reduce((s,l)=>s+l.debit-l.credit,0); const cp=nc.slice().sort((a,b)=>(b.debit+b.credit)-(a.debit+a.credit))[0]; const cat=catArusKas(cp.account); if(!cat)return; push(e.tanggal,e.memo,cat,net); });
+  } else {
+    push('JURNAL UMUM - Roxanne Capital',repPeriod()); push('Tanggal','Memo','Akun','Debit','Kredit');
+    (S.ledger||[]).filter(e=>(!F||e.tanggal>=F)&&(!T||e.tanggal<=T)).sort((a,b)=>a.tanggal<b.tanggal?-1:1).forEach(e=>{ e.lines.forEach(l=>push(e.tanggal,e.memo,acct(l.account).name,l.debit||'',l.credit||'')); });
+  }
+  return rows;
+}
+function lapExportCSV(){
+  const csv=lapCSV().map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\r\n');
+  const blob=new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='roxanne-'+lapReport+'-'+todayISO()+'.csv';
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),1500);
+  toast('✅ Excel (CSV) diunduh');
+}
+function lapExportPDF(){
+  const el=document.getElementById('rep-body'); const pa=document.getElementById('print-area');
+  if(!el||!pa){ toast('Buka laporannya dulu'); return; }
+  pa.innerHTML='<div style="padding:20px 16px;font-family:Nunito,sans-serif;max-width:640px;margin:0 auto">'+el.outerHTML+'</div>';
+  document.body.classList.add('printing');
+  setTimeout(()=>{ window.print(); document.body.classList.remove('printing'); }, 120);
 }
 
 // ── SEED DATA ASLI ROXANNE (per 1 Agu 2026) ───────────────────────────
