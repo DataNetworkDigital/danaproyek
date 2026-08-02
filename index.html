@@ -974,12 +974,19 @@ function addDays(iso,n){ const d=new Date(iso+'T00:00:00'); d.setDate(d.getDate(
 function monthsBetween(a,b){ const x=new Date(a+'T00:00:00'),y=new Date(b+'T00:00:00'); return Math.max(1,Math.round((y-x)/2629800000)); }
 // Build forward obligation schedule: monthly bagi hasil on payDay until maturity, then pokok.
 // flexible = perpetual (Papa): rolling 12 months of bagi hasil, no pokok.
-function buildRealSchedule(payDay, maturity, pokok, rate, flexible){
+function buildRealSchedule(payDay, maturity, pokok, rate, flexible, startISO){
   const bh=Math.round(pokok*rate/100*1e4)/1e4, sched=[], now=new Date();
   const clampDay=(y,m,d)=>Math.min(d, new Date(y,m+1,0).getDate());
-  let y=now.getFullYear(), m=now.getMonth();
-  if(now.getDate()>=payDay){ m++; } // payDay bulan ini sudah lewat → mulai bulan depan
-  for(let k=0;k<(flexible?12:60);k++){
+  let y, m, count;
+  if(flexible && startISO){ // Papa: accrual dari bulan MULAI (backfill) sampai 12 bln ke depan
+    y=parseInt(startISO.slice(0,4)); m=parseInt(startISO.slice(5,7))-1;
+    count=Math.max(1,(now.getFullYear()-y)*12+(now.getMonth()-m))+13;
+  } else {
+    y=now.getFullYear(); m=now.getMonth();
+    if(now.getDate()>=payDay){ m++; } // payDay bulan ini sudah lewat → mulai bulan depan
+    count=flexible?12:60;
+  }
+  for(let k=0;k<count;k++){
     const yy=y+Math.floor((m+k)/12), mm=((m+k)%12+12)%12;
     const t=`${yy}-${String(mm+1).padStart(2,'0')}-${String(clampDay(yy,mm,payDay)).padStart(2,'0')}`;
     if(!flexible && t>maturity) break;
@@ -994,7 +1001,7 @@ function seedRoxanne(){
   const mk=(nama,pokok,payDay,maturity,mulai,flexible)=>{
     const c={id:uid(),nama,pokok,ratePct:2,payDay,tanggalMulai:mulai,tanggalMaturity:maturity,struktur:'bulanan',status:'aktif'};
     if(flexible) c.flexible=true;
-    c.schedule=buildRealSchedule(payDay,maturity,pokok,2,flexible);
+    c.schedule=buildRealSchedule(payDay,maturity,pokok,2,flexible,mulai);
     c.tenorBulan=flexible?0:monthsBetween(mulai,maturity);
     return c;
   };
@@ -1156,11 +1163,19 @@ function rKeuLikuiditas(){
 // cocok Bank Jago tanpa rekonsiliasi manual, tapi user tetap pegang kendali.
 function pendingEvents(){
   const events=[], look=5; // tampilkan yang jatuh tempo dalam 5 hari atau lewat
-  invContracts().filter(c=>c.status!=='selesai' && !c.flexible).forEach(c=>{ // Papa fleksibel: dikecualikan (rollable)
+  invContracts().filter(c=>c.status!=='selesai' && !c.flexible).forEach(c=>{
     (c.schedule||[]).forEach((s,i)=>{
       if(s.status!=='pending') return; const dd=du(s.tanggal); if(dd===null||dd>look) return;
       events.push({id:'inv:'+c.id+':'+i, kind:'inv', cid:c.id, idx:i, tipe:s.tipe, tanggal:s.tanggal, dd, jumlah:s.jumlah, arah:'keluar',
         judul:(s.tipe==='pokok'?'💰 Kembalikan pokok · ':'📈 Bayar bagi hasil · ')+c.nama});
+    });
+  });
+  // Papa fleksibel: bagi hasil dicatat sebagai AKRUAL (bukan dibayar, dana diputar terus)
+  invContracts().filter(c=>c.status!=='selesai' && c.flexible).forEach(c=>{
+    (c.schedule||[]).forEach((s,i)=>{
+      if(s.status!=='pending' || s.tipe!=='bagihasil') return; const dd=du(s.tanggal); if(dd===null||dd>look) return;
+      events.push({id:'acc:'+c.id+':'+i, kind:'accrue', cid:c.id, idx:i, tanggal:s.tanggal, dd, jumlah:s.jumlah, arah:'akrual',
+        judul:'📝 Catat bagi hasil (akrual) · '+c.nama});
     });
   });
   const names=(S.orgConfig&&S.orgConfig.activeProjectNames)||[];
@@ -1193,6 +1208,10 @@ function inboxPost(ev, pocket, date, amount){
   } else if(ev.kind==='projpokok'){
     const p=(S.projects||[]).find(x=>x.peminjam===ev.pname); if(!p) return;
     txPokokProyekBalik(date,amount,pocket,'Pokok balik: '+p.peminjam); p.pokokRecorded=true;
+  } else if(ev.kind==='accrue'){
+    const c=invContracts().find(x=>x.id===ev.cid); if(!c) return; const s=c.schedule[ev.idx];
+    ledgerPost(date,'Akrual bagi hasil: '+c.nama,[{account:'5000',debit:amount,credit:0},{account:'2010',debit:0,credit:amount}],'akrual-bh'); // dicatat, belum dibayar
+    s.status='paid'; s.paidDate=date;
   }
   save(); rKeu();
 }
@@ -1201,17 +1220,20 @@ function inboxSkip(id){ window._inboxSkip=window._inboxSkip||{}; window._inboxSk
 function inboxCustom(id){
   const ev=pendingEvents().find(e=>e.id===id); if(!ev) return;
   document.getElementById('mo-keu-t').textContent='✏️ Custom';
+  const pocketFg = ev.arah==='akrual' ? '' :
+    `<div class="fg"><label class="fl">${ev.arah==='keluar'?'Bayar dari kantong':'Masuk ke kantong'}</label><select class="fi" id="ib-pocket">${pocketOptions(ev.arah==='keluar'?'1040':'1000')}</select></div>`;
   document.getElementById('mo-keu-b').innerHTML=`
-    <div class="fc-note" style="margin-bottom:12px">${ev.judul} · jatuh tempo ${fd(ev.tanggal)}</div>
+    <div class="fc-note" style="margin-bottom:12px">${ev.judul} · ${ev.arah==='akrual'?'akrual (dicatat, belum dibayar)':'jatuh tempo'} ${fd(ev.tanggal)}</div>
     <div class="fg"><label class="fl">Jumlah aktual (jt)</label><input class="fi" id="ib-amt" type="number" step="0.0001" value="${ev.jumlah}"></div>
-    <div class="fg"><label class="fl">${ev.arah==='keluar'?'Bayar dari kantong':'Masuk ke kantong'}</label><select class="fi" id="ib-pocket">${pocketOptions(ev.arah==='keluar'?'1040':'1000')}</select></div>
+    ${pocketFg}
     <div class="fg"><label class="fl">Tanggal aktual</label><input class="fi" id="ib-date" type="date" value="${todayISO()}"></div>
     <button class="btn pr fw" onclick="inboxConfirm('${id}')" style="margin-top:8px">Catat</button>`;
   om('mo-keu');
 }
 function inboxConfirm(id){
   const ev=pendingEvents().find(e=>e.id===id); if(!ev) return;
-  const amt=parseFloat(document.getElementById('ib-amt').value||0), pocket=document.getElementById('ib-pocket').value, date=document.getElementById('ib-date').value;
+  const pocketEl=document.getElementById('ib-pocket');
+  const amt=parseFloat(document.getElementById('ib-amt').value||0), pocket=pocketEl?pocketEl.value:'1000', date=document.getElementById('ib-date').value;
   if(!(amt>0)){ toast('❌ Jumlah harus > 0'); return; }
   inboxPost(ev, pocket, date, amt); cm('mo-keu'); toast('✅ Dicatat (custom)');
 }
@@ -1225,7 +1247,7 @@ function rKeuInbox(){
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
         <div style="min-width:0"><div style="font-size:13px;font-weight:900">${e.judul}</div>
           <div style="font-size:10px;font-weight:800;color:${col}">${fd(e.tanggal)} · ${gl(e.dd)}</div></div>
-        <div class="t-num" style="font-size:15px;font-weight:900;color:${e.arah==='masuk'?'#0B8F46':'var(--r)'};white-space:nowrap">${e.arah==='masuk'?'+':'−'}${fj(e.jumlah)}</div>
+        <div class="t-num" style="font-size:15px;font-weight:900;color:${e.arah==='masuk'?'#0B8F46':(e.arah==='akrual'?'var(--sub)':'var(--r)')};white-space:nowrap">${e.arah==='masuk'?'+':(e.arah==='akrual'?'~':'−')}${fj(e.jumlah)}</div>
       </div>
       <div style="display:flex;gap:6px;margin-top:8px">
         <button class="btn pr" onclick="inboxAccept('${e.id}')" style="flex:1;font-size:11px;padding:8px 4px">✅ Accept</button>
@@ -1481,7 +1503,7 @@ function go(p){
   document.getElementById('p-'+p).classList.add('active');
   document.getElementById('n-'+p).classList.add('on');
   CP=p;
-  const ti={b:{t:'💸 DanaTrack',s:'Portfolio Manager'},m:{t:'📋 Proyek',s:'Kelola semua proyek'},k:{t:'📅 Kalender',s:'Jadwal & cashflow'},e:{t:'🤝 Pemodal',s:'Owner, investor & utang'},u:{t:'🏦 Keuangan',s:'Kantong, likuiditas & laporan'}};
+  const ti={b:{t:'💸 DanaTrack',s:'Portfolio Manager'},m:{t:'📋 Proyek',s:'Kelola semua proyek'},k:{t:'📅 Kalender',s:'Jadwal & cashflow'},e:{t:'🤝 Pemodal',s:'Owner, investor & pembiayaan'},u:{t:'🏦 Keuangan',s:'Kantong, likuiditas & laporan'}};
   document.getElementById('HT').textContent=ti[p]?.t||'';
   document.getElementById('HS').textContent=ti[p]?.s||'';
   document.getElementById('HA').innerHTML=`<button class="hdr-icon" onclick="exportJ()" title="Export">⬆️</button><button class="hdr-icon" onclick="importJ()" title="Import">⬇️</button>`;
@@ -2019,7 +2041,7 @@ function rK(){
     </div>
     <div class="cf-strip">
       <div class="cf-col"><div class="cf-lbl">Income</div><div class="cf-val" style="color:#0B8F46">${fj(totalIncome)}</div></div>
-      <div class="cf-col"><div class="cf-lbl">Outgoing</div><div class="cf-val" style="color:var(--r)">${fj(totalOut)}</div><div class="cf-sub">U ${fj(totalUtang)} · BH ${fj(totalBagiHasil)}${totalAdminFee>0?` · AF ${fj(totalAdminFee)}`:''}</div></div>
+      <div class="cf-col"><div class="cf-lbl">Outgoing</div><div class="cf-val" style="color:var(--r)">${fj(totalOut)}</div><div class="cf-sub">Pinj ${fj(totalUtang)} · BH ${fj(totalBagiHasil)}${totalAdminFee>0?` · AF ${fj(totalAdminFee)}`:''}</div></div>
       <div class="cf-col"><div class="cf-lbl">Net</div><div class="cf-val" style="color:${net>=0?'#0B8F46':'var(--r)'}">${fj(net)}</div></div>
     </div>
     <div style="background:var(--card);border-radius:14px;padding:10px;box-shadow:var(--sh);margin-bottom:14px">
@@ -2146,9 +2168,9 @@ function rE(){
   }
 
   // === Utang section ===
-  h+=`<div class="sh" style="margin-top:18px"><div class="st">🏦 Utang / Pinjaman</div><span style="font-size:10px;color:var(--sub);font-weight:700">${pinj.length}</span></div>`;
+  h+=`<div class="sh" style="margin-top:18px"><div class="st">🏦 Pinjaman</div><span style="font-size:10px;color:var(--sub);font-weight:700">${pinj.length}</span></div>`;
   if(pinj.length===0){
-    h+=`<div class="es" style="padding:24px 16px"><div class="ei">🏦</div><div class="et">Belum ada utang</div><div class="esb">Catat KUR, pinjaman keluarga, dll</div></div>`;
+    h+=`<div class="es" style="padding:24px 16px"><div class="ei">🏦</div><div class="et">Belum ada pinjaman</div><div class="esb">Catat KUR, pinjaman keluarga, dll</div></div>`;
   } else {
     pinj.forEach(e=>{ h+=extCard(e); });
   }
@@ -2172,7 +2194,7 @@ function ownerCard(e){
     </div>
     <div style="background:rgba(255,255,255,.7);border-radius:10px;padding:8px 10px;font-size:10.5px">
       <div class="fb" style="margin-bottom:4px"><span class="tg">💰 Cash pribadi</span><b>${fj(m.cash)}</b></div>
-      ${m.utang>0?`<div class="fb" style="margin-bottom:4px"><span class="tg">🏦 Utang (${m.utangSources.length})</span><b style="color:#0369A1">${fj(m.utang)}</b></div>`:''}
+      ${m.utang>0?`<div class="fb" style="margin-bottom:4px"><span class="tg">🏦 Pinjaman (${m.utangSources.length})</span><b style="color:#0369A1">${fj(m.utang)}</b></div>`:''}
       <div class="dv" style="margin:6px 0"></div>
       <div class="fb"><span class="tg">Deployed</span><b style="color:#0B8F46">${fj(m.deployed)}</b></div>
       <div class="fb mt6"><span class="tg">Idle</span><b style="color:${m.idle<0?'var(--r)':'#B56B00'}">${fj(m.idle)}</b></div>
@@ -3069,7 +3091,7 @@ function buildEF(e, tipe){
     <div class="fg">
       <label class="fl" style="display:flex;justify-content:space-between;align-items:center">
         <span>Assign ke Owner</span>
-        <span style="font-size:10px;color:var(--sub);font-weight:700">Wajib total = jumlah utang</span>
+        <span style="font-size:10px;color:var(--sub);font-weight:700">Wajib total = jumlah pinjaman</span>
       </label>
       <div id="utang-owner-rows" style="display:flex;flex-direction:column;gap:8px;margin-bottom:6px"></div>
       <button type="button" id="add-utang-owner-btn" style="background:var(--p-l);color:var(--p-darker);border:none;border-radius:8px;padding:7px 12px;font-size:11px;font-weight:800;cursor:pointer;font-family:Nunito,sans-serif">+ Tambah Owner</button>
@@ -3300,7 +3322,7 @@ function updUtangOwnerSummary(){
   const utangTotal=parseFloat(document.getElementById('fe-j')?.value||0);
   const remaining=utangTotal-total;
   const el=document.getElementById('utang-owner-summary');if(!el)return;
-  if(utangTotal===0){el.textContent='Isi jumlah utang dulu';return;}
+  if(utangTotal===0){el.textContent='Isi jumlah pinjaman dulu';return;}
   const okColor=Math.abs(remaining)<0.01?'#0B8F46':remaining<0?'var(--r)':'#B45309';
   const okLbl=Math.abs(remaining)<0.01?'✓ Pas':remaining<0?`Kelebihan ${fj(-remaining)}`:`Sisa ${fj(remaining)}`;
   el.innerHTML=`Total alokasi: <b>${fj(total)}</b> · <span style="color:${okColor}">${okLbl}</span>`;
