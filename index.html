@@ -1018,9 +1018,9 @@ function seedRoxanne(){
   };
   const contracts=[
     mk('Papa (RRPR)',50,1,null,'2026-06-01',true),
-    mk('Veda (sawah fima)',9,11,'2026-11-11','2026-05-11',false),
-    mk('Veda (hong kong)',10,5,'2026-12-05','2026-06-05',false),
-    mk('Veda',66.15,3,'2026-12-03','2026-08-03',false),
+    mk('Veda 9jt',9,11,'2026-11-11','2026-05-11',false),
+    mk('Veda 10jt',10,5,'2026-12-05','2026-06-05',false),
+    mk('Veda 66,15jt',66.15,3,'2026-12-03','2026-08-03',false),
     mk('Laili',10,11,'2026-11-11','2026-05-11',false),
     mk('Fuad',32.5,3,'2026-12-03','2026-08-03',false),
   ];
@@ -1922,112 +1922,33 @@ function swMT(t){ MT=t; rM(); }
 // ── KALENDER ──────────────────────────────────────────────────────────
 let _kalMonth=null,_kalYear=null;
 function getCalendarEvents(year,month){
-  // Returns map: YYYY-MM-DD → [{type, label, amount, color}]
+  // New model: income = return proyek AKTIF, outgoing = kewajiban dari KONTRAK investor
+  // (bukan proyek mati). Urutan tiap hari: return → Fee Mas Hena → bagi hasil → pokok.
   const events={};
-  const monthStart=new Date(Date.UTC(year,month,1));
-  const monthEnd=new Date(Date.UTC(year,month+1,0));
-  const inMonth=(s)=>{
-    if(!s) return false;
-    const d=new Date(s+'T00:00:00Z');
-    return d>=monthStart && d<=monthEnd;
-  };
-  // 1. Income: payment schedule items (paid + pending) from active projects
-  S.projects.forEach(p=>{
-    const rt=p.returnType||'sekali';
-    if(rt==='bulanan'&&p.schedule){
-      p.schedule.forEach(s=>{
-        if(s.status==='skipped') return;
-        if(!inMonth(s.dueDate)) return;
-        events[s.dueDate]=events[s.dueDate]||[];
-        events[s.dueDate].push({
-          type:'income',
-          label:p.peminjam,
-          amount:parseFloat(s.paidAmount||s.amount||0),
-          paid:s.status==='paid',
-          pid:p.id,
-          isFinal:s.isFinal,
-        });
-      });
-    } else {
-      // sekali: single event at tanggalJT
-      if(inMonth(p.tanggalJT)&&(p.status==='aktif'||p.status==='terlambat')){
-        events[p.tanggalJT]=events[p.tanggalJT]||[];
-        events[p.tanggalJT].push({
-          type:'income',
-          label:p.peminjam,
-          amount:kontrakP(p),
-          paid:(p.payments||[]).length>0,
-          pid:p.id,
-        });
-      }
-    }
+  const monthStart=new Date(Date.UTC(year,month,1)), monthEnd=new Date(Date.UTC(year,month+1,0));
+  const inMonth=(s)=>{ if(!s) return false; const d=new Date(s+'T00:00:00Z'); return d>=monthStart && d<=monthEnd; };
+  const push=(date,ev)=>{ (events[date]=events[date]||[]).push(ev); };
+  const activeNames=(S.orgConfig&&S.orgConfig.activeProjectNames)||[];
+  // 1. Return proyek aktif (gross) + Fee Mas Hena tepat SETELAHNYA (dibayar duluan) + pokok balik di JT
+  (S.projects||[]).filter(p=>activeNames.includes(p.peminjam)).forEach(p=>{
+    const fee=parseFloat(p.adminFeePersen)||0.5, kontrak=parseFloat(p.kontrak||0);
+    (p.schedule||[]).forEach(s=>{
+      if(s.status==='skipped'||!inMonth(s.dueDate)) return;
+      push(s.dueDate,{type:'income',label:'Return · '+p.peminjam,amount:parseFloat(s.paidAmount||s.amount||0),paid:s.status==='paid',order:1});
+      const feeAmt=Math.round(kontrak*fee/100*1e4)/1e4;
+      if(feeAmt>0.005) push(s.dueDate,{type:'adminfee',label:'Fee Mas Hena · '+p.peminjam,amount:feeAmt,paid:s.status==='paid',order:2});
+    });
+    if(inMonth(p.tanggalJT)) push(p.tanggalJT,{type:'income',label:'Pokok balik · '+p.peminjam,amount:parseFloat(p.jumlah||0),order:1});
   });
-  // 2. Utang: pinjaman jadwalBayar — varies by tipePinjaman
-  S.external.filter(e=>e.tipe==='pinjaman'&&e.status!=='selesai').forEach(e=>{
-    if(!e.jadwalBayar) return;
-    const tp=e.tipePinjaman||'angsuran';
-    const j=parseFloat(e.jumlah||0);
-    const bungaBln=j*parseFloat(e.bungaPct||0)/100;
-    if(tp==='jatuh_tempo'){
-      if(!inMonth(e.jadwalBayar)) return;
-      const totalBunga=bungaBln*(e.durasi||0);
-      events[e.jadwalBayar]=events[e.jadwalBayar]||[];
-      events[e.jadwalBayar].push({type:'utang',label:e.nama+' (pokok+bunga)',amount:j+totalBunga});
-    } else if(tp==='bunga_saja'){
-      if(inMonth(e.jadwalBayar)){
-        events[e.jadwalBayar]=events[e.jadwalBayar]||[];
-        events[e.jadwalBayar].push({type:'utang',label:e.nama+' (bunga)',amount:bungaBln});
-      }
-    } else {
-      if(!inMonth(e.jadwalBayar)) return;
-      events[e.jadwalBayar]=events[e.jadwalBayar]||[];
-      events[e.jadwalBayar].push({type:'utang',label:e.nama,amount:parseFloat(e.cicilanBulan||0)});
-    }
-  });
-  // 3. Bagi hasil ke investor non-owner: per paid schedule item, compute investor share
-  S.projects.forEach(p=>{
-    const rt=p.returnType||'sekali';
-    if(rt!=='bulanan'||!p.schedule) return;
-    const nonOwnerInvs=S.external.filter(e=>e.tipe==='investor'&&!e.isOwner&&(e.alokasi||[]).some(a=>a.pid===p.id));
-    if(nonOwnerInvs.length===0) return;
-    p.schedule.forEach(s=>{
-      if(s.status==='skipped') return;
-      if(!inMonth(s.dueDate)) return;
-      const monthlyGross=parseFloat(s.amount||0);
-      nonOwnerInvs.forEach(inv=>{
-        const a=inv.alokasi.find(x=>x.pid===p.id);
-        if(!a) return;
-        const base=publicKontrakP(p);
-        if(base<=0) return;
-        const share=monthlyGross*(parseFloat(a.jumlah||0)/base);
-        if(share<=0) return;
-        events[s.dueDate]=events[s.dueDate]||[];
-        events[s.dueDate].push({
-          type:'bagihasil',
-          label:`${inv.nama} (${p.peminjam})`,
-          amount:share,
-        });
-      });
+  // 2. Kewajiban investor dari KONTRAK (Papa fleksibel dikecualikan — itu akrual, bukan kas)
+  invContracts().filter(c=>!c.flexible && c.status!=='selesai').forEach(c=>{
+    (c.schedule||[]).forEach(s=>{
+      if(s.status==='skipped'||!inMonth(s.tanggal)) return;
+      if(s.tipe==='bagihasil') push(s.tanggal,{type:'bagihasil',label:'Bagi hasil · '+c.nama,amount:s.jumlah,paid:s.status==='paid',order:3});
+      else push(s.tanggal,{type:'pokok',label:'Pokok investor · '+c.nama,amount:s.jumlah,paid:s.status==='paid',order:4});
     });
   });
-  // 4. Admin fee (marketing) — per schedule month, for projects with fee > 0
-  S.projects.forEach(p=>{
-    if(adminFeePersen(p)<=0) return;
-    const rt=p.returnType||'sekali';
-    if(rt!=='bulanan'||!p.schedule) return;
-    const monthlyFee=adminFeeMonthly(p);
-    if(monthlyFee<=0) return;
-    p.schedule.forEach(s=>{
-      if(s.status==='skipped') return;
-      if(!inMonth(s.dueDate)) return;
-      events[s.dueDate]=events[s.dueDate]||[];
-      events[s.dueDate].push({
-        type:'adminfee',
-        label:`${adminFeeRecipient(p)} (${p.peminjam})`,
-        amount:monthlyFee,
-      });
-    });
-  });
+  Object.keys(events).forEach(d=>events[d].sort((a,b)=>(a.order||9)-(b.order||9)));
   return events;
 }
 function rK(){
@@ -2037,14 +1958,14 @@ function rK(){
   const year=_kalYear,month=_kalMonth;
   const events=getCalendarEvents(year,month);
   // Compute totals
-  let totalIncome=0,totalUtang=0,totalBagiHasil=0,totalAdminFee=0;
+  let totalIncome=0,totalBagiHasil=0,totalAdminFee=0,totalPokok=0;
   Object.values(events).flat().forEach(e=>{
     if(e.type==='income') totalIncome+=e.amount;
-    else if(e.type==='utang') totalUtang+=e.amount;
     else if(e.type==='bagihasil') totalBagiHasil+=e.amount;
     else if(e.type==='adminfee') totalAdminFee+=e.amount;
+    else if(e.type==='pokok') totalPokok+=e.amount;
   });
-  const totalOut=totalUtang+totalBagiHasil+totalAdminFee;
+  const totalOut=totalBagiHasil+totalAdminFee+totalPokok;
   const net=totalIncome-totalOut;
   const monthNames=['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
   const todayISO=new Date().toISOString().split('T')[0];
@@ -2061,7 +1982,7 @@ function rK(){
     </div>
     <div class="cf-strip">
       <div class="cf-col"><div class="cf-lbl">Income</div><div class="cf-val" style="color:#0B8F46">${fj(totalIncome)}</div></div>
-      <div class="cf-col"><div class="cf-lbl">Outgoing</div><div class="cf-val" style="color:var(--r)">${fj(totalOut)}</div><div class="cf-sub">Pinj ${fj(totalUtang)} · BH ${fj(totalBagiHasil)}${totalAdminFee>0?` · AF ${fj(totalAdminFee)}`:''}</div></div>
+      <div class="cf-col"><div class="cf-lbl">Keluar</div><div class="cf-val" style="color:var(--r)">${fj(totalOut)}</div><div class="cf-sub">${[totalBagiHasil>0.005?'Bagi hasil '+fj(totalBagiHasil):'',totalAdminFee>0.005?'Fee Mas Hena '+fj(totalAdminFee):'',totalPokok>0.005?'Pokok '+fj(totalPokok):''].filter(Boolean).join(' · ')||'—'}</div></div>
       <div class="cf-col"><div class="cf-lbl">Net</div><div class="cf-val" style="color:${net>=0?'#0B8F46':'var(--r)'}">${fj(net)}</div></div>
     </div>
     <div style="background:var(--card);border-radius:14px;padding:10px;box-shadow:var(--sh);margin-bottom:14px">
@@ -2101,10 +2022,10 @@ function rK(){
       h+=`<div style="background:var(--card);border-radius:12px;padding:10px 12px;margin-bottom:8px;border:1px solid var(--bdr)">
         <div style="font-size:11px;font-weight:900;color:var(--p-darker);margin-bottom:5px">${fd(date)}</div>
         ${evs.map(e=>{
-          const color=e.type==='income'?'#0B8F46':e.type==='utang'?'#1D4ED8':e.type==='adminfee'?'#7C3AED':'#B45309';
-          const icon=e.type==='income'?'🟢':e.type==='utang'?'🔴':e.type==='adminfee'?'💼':'🟠';
+          const color=e.type==='income'?'#0B8F46':e.type==='adminfee'?'#7C3AED':e.type==='pokok'?'#DC2626':'#B45309';
+          const icon=e.type==='income'?'🟢':e.type==='adminfee'?'💼':e.type==='pokok'?'🔴':'🟠';
           const sign=e.type==='income'?'+':'-';
-          return `<div class="fb txx" style="padding:3px 0"><span>${icon} ${e.label}${e.paid?' ✓':''}${e.isFinal?' +pokok':''}</span><span style="color:${color};font-weight:800">${sign}${fj(e.amount)}</span></div>`;
+          return `<div class="fb txx" style="padding:3px 0"><span>${icon} ${e.label}${e.paid?' ✓':''}</span><span style="color:${color};font-weight:800">${sign}${fj(e.amount)}</span></div>`;
         }).join('')}
       </div>`;
     });
