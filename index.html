@@ -113,6 +113,14 @@ body.modal-open{position:fixed;left:0;right:0;width:100%;overflow:hidden}
 .cf-strip .cf-lbl{font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.8px;color:var(--sub);margin-bottom:4px}
 .cf-strip .cf-val{font-size:15px;font-weight:900;font-variant-numeric:tabular-nums;font-family:'Geist Mono','SF Mono',monospace;line-height:1.2}
 .cf-strip .cf-sub{font-size:9px;color:var(--sub);font-weight:700;margin-top:3px;line-height:1.3}
+/* Metric hub (M6 v2) — clickable KPI cards w/ drill-down */
+.mtr-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:4px}
+.mtr-card{background:var(--clay-card);border-radius:14px;padding:11px 12px;box-shadow:var(--clay-out-sm);border:1px solid rgba(255,255,255,.9);cursor:pointer;position:relative;transition:transform .1s,box-shadow .1s;-webkit-tap-highlight-color:transparent}
+.mtr-card:active{transform:scale(.975);box-shadow:var(--clay-in-sm)}
+.mtr-card .mc-lbl{font-size:9.5px;font-weight:900;text-transform:uppercase;letter-spacing:.4px;color:var(--sub);display:flex;align-items:center;gap:3px;padding-right:12px}
+.mtr-card .mc-val{font-size:18px;font-weight:900;font-variant-numeric:tabular-nums;font-family:'Geist Mono','SF Mono',monospace;line-height:1.15;margin-top:3px}
+.mtr-card .mc-sub{font-size:9px;color:var(--sub);font-weight:700;margin-top:2px;line-height:1.25}
+.mtr-card .mc-i{position:absolute;top:8px;right:9px;font-size:10px;color:var(--sub);opacity:.45}
 .pinj-summary{border-radius:12px;padding:10px 14px;font-size:11px;font-weight:700;color:#0369A1;background:var(--b-l);display:none}
 .pinj-summary.show{display:block}
 .pinj-summary .ps-row{display:flex;justify-content:space-between;align-items:center;padding:2px 0}
@@ -1219,18 +1227,138 @@ function m6Recommendations(){
   }
   return recs;
 }
+// ── M6 v2: PUSAT METRIK INTERNAL (bahan jualan) + DRILL-DOWN ──────────
+// Tiap metrik derivasi dari ledger/jadwal, dan bisa diklik untuk lihat rumus
+// + angka yang dipakai. Dua grup: Kesehatan/Likuiditas (defend) & Kinerja/Skala
+// (attack). Semua auto-update kalau proyek/kontrak berubah (dihitung on-render).
+function mtrList(){
+  const r4=x=>Math.round(x*1e4)/1e4, fpc=x=>(x==null?'—':(Math.round(x*10)/10)+'%'), fx=x=>(Math.round(x*100)/100)+'×';
+  const modalGde=acctBalance('3000'),modalRRPR=acctBalance('3010'),labaDitahan=acctBalance('3900'),labaBjl=labaBerjalan();
+  const E=r4(modalGde+modalRRPR+labaDitahan+labaBjl), INV=acctBalance('2000'), DEP=acctBalance('1100'), LIK=r4(totalLikuid()), AUM=r4(LIK+DEP);
+  const in30=m6Inflows('base').filter(i=>i.tipe==='return'&&du(i.tanggal)>=0&&du(i.tanggal)<=30).reduce((s,i)=>s+i.jumlah,0);
+  const oblig=m6Obligations();
+  const bh30=oblig.filter(o=>o.tipe!=='pokok'&&du(o.tanggal)>=0&&du(o.tanggal)<=30).reduce((s,o)=>s+o.jumlah,0);
+  const pok30=oblig.filter(o=>o.tipe==='pokok'&&du(o.tanggal)>=0&&du(o.tanggal)<=30).reduce((s,o)=>s+o.jumlah,0);
+  const papa=invContracts().filter(c=>c.flexible).reduce((s,c)=>s+parseFloat(c.pokok||0)*0.02,0);
+  const labaBln=r4(in30-bh30-papa);
+  const cons=m6Project('conservative');
+  const runwayCons=cons.firstDanger?du(cons.firstDanger.t):null;
+  let nnCash=LIK, runwayNN=null;
+  for(const o of oblig){ nnCash=r4(nnCash-o.jumlah); if(nnCash<-0.005){ runwayNN=du(o.tanggal); break; } }
+  const inflow30c=m6Inflows('conservative').filter(i=>du(i.tanggal)>=0&&du(i.tanggal)<=30).reduce((s,i)=>s+i.jumlah,0);
+  const oblig30=r4(bh30+pok30);
+  const coverage=oblig30>0.005?(LIK+inflow30c)/oblig30:null;
+  const rrpr=pocketBalance('1020'), rrprReq=m6RRPRRequired();
+  const stress=m6Project('stress'), stressGap=Math.max(0,-stress.minCash);
+  const leverage=E>0?r4(INV/E):0, roe=E>0?r4(labaBln/E*100):0, roiAset=DEP>0?r4(labaBln/DEP*100):0;
+  const yieldBln=DEP>0?in30/DEP*100:0, spread=yieldBln-2;
+  let ot=0,totPay=0;
+  invContracts().forEach(c=>(c.schedule||[]).forEach(s=>{ if(s.status==='paid'&&s.paidDate){ totPay++; if(s.paidDate<=s.tanggal) ot++; } }));
+  (S.projects||[]).forEach(p=>(p.schedule||[]).forEach(s=>{ if(s.status==='paid'&&s.paidDate){ totPay++; if(s.paidDate<=s.dueDate) ot++; } }));
+  const onTime=totPay>0?r4(ot/totPay*100):null;
+  const names=(S.orgConfig&&S.orgConfig.activeProjectNames)||[];
+  const exps=(S.projects||[]).filter(p=>names.includes(p.peminjam)).map(p=>({n:p.peminjam,v:parseFloat(p.jumlah||0)})).sort((a,b)=>b.v-a.v);
+  const totExp=exps.reduce((s,e)=>s+e.v,0), conc=totExp>0?r4(exps[0].v/totExp*100):0;
+  const idle=pocketBalance('1030'), idleCost=r4(idle*0.02);
+  const M=[];
+  // ── KESEHATAN & LIKUIDITAS ──
+  M.push({id:'kasrendah',grp:'health',icon:'💧',label:'Kas Terendah',val:fj(cons.minCash),sub:fd(cons.minDate),color:cons.minCash<0?'var(--r)':'#0B8F46',
+    calc:{rumus:'Titik kas paling rendah sepanjang proyeksi konservatif (inflow proyek diasumsikan telat H+7).',
+      steps:[{k:'Kas likuid sekarang',v:fj(cons.start)},{k:'Titik terendah',v:fj(cons.minCash),strong:1},{k:'Tanggal',v:fd(cons.minDate)}],
+      note:cons.minCash<0?'⚠️ Kas menyentuh negatif di skenario konservatif — ada kewajiban yang belum tertutup.':'Kas tetap positif di titik terendah. Semua kewajiban tertutup walau inflow telat 7 hari.'}});
+  M.push({id:'coverage',grp:'health',icon:'🛡️',label:'Coverage 30h',val:coverage==null?'∞':fx(coverage),sub:coverage==null?'tak ada kewajiban':'kas+inflow ÷ wajib',color:coverage==null||coverage>=1.5?'#0B8F46':(coverage>=1?'#B45309':'var(--r)'),
+    calc:{rumus:'(Kas likuid + inflow andal 30h) ÷ kewajiban 30h. Di atas 1× = mampu bayar; makin tinggi makin aman.',
+      steps:[{k:'Kas likuid',v:fj(LIK)},{k:'+ Inflow proyek 30h (konservatif)',v:fj(r4(inflow30c))},{k:'= Sumber bayar',v:fj(r4(LIK+inflow30c)),strong:1},{k:'Kewajiban 30h (bagi hasil+pokok)',v:fj(oblig30)},{k:'Coverage',v:coverage==null?'∞':fx(coverage),strong:1}],
+      note:'Rasio klasik private-credit. Target ≥ 1,5×. Di bawah 1× = ada risiko gagal bayar bila inflow meleset.'}});
+  M.push({id:'rrpr',grp:'health',icon:'🏦',label:'Cadangan RRPR',val:fj(rrpr),sub:'target '+fj(rrprReq),color:rrpr>=rrprReq?'#0B8F46':'var(--r)',
+    calc:{rumus:'Target = celah kas terburuk (skenario stress) × 1,25 + cushion.',
+      steps:[{k:'Celah stress terburuk',v:fj(stressGap)},{k:'× 1,25 (margin aman)',v:fj(r4(stressGap*1.25))},{k:'+ Cushion',v:fj(m6Cushion())},{k:'= Target cadangan',v:fj(rrprReq),strong:1},{k:'Saldo RRPR sekarang',v:fj(rrpr),strong:1},{k:'Selisih',v:fj(r4(rrpr-rrprReq))}],
+      note:rrpr>=rrprReq?'Cadangan cukup menambal skenario terburuk. RRPR = benteng terakhir, bukan modal serang.':'Cadangan di bawah target — top-up disarankan (lihat Rekomendasi Aksi).'}});
+  M.push({id:'runway',grp:'health',icon:'⏳',label:'Runway',val:runwayCons==null?'Aman':runwayCons+'h',sub:runwayNN==null?'tahan semua kewajiban':'tanpa uang baru: '+runwayNN+'h',color:runwayCons==null?'#0B8F46':'var(--r)',
+    calc:{rumus:'Berapa hari sampai kas jebol pertama kali.',
+      steps:[{k:'Konservatif (dgn inflow proyek H+7)',v:runwayCons==null?'tak jebol':runwayCons+' hari'},{k:'Tanpa uang baru (obligasi saja)',v:runwayNN==null?'tahan semua':runwayNN+' hari'}],
+      note:'Konservatif = memperhitungkan return proyek masuk (telat H+7). Tanpa-uang-baru = skenario terparah, cuma andalkan kas sekarang.'}});
+  // ── KINERJA & SKALA ──
+  M.push({id:'aum',grp:'perf',icon:'🏛️',label:'Dana Kelolaan',val:fj(AUM),sub:'total aset (AUM)',color:'var(--p-deep)',
+    calc:{rumus:'Total aset dikelola = kas likuid semua kantong + dana yang sedang di proyek.',
+      steps:[{k:'Kas likuid (semua kantong)',v:fj(LIK)},{k:'+ Dana di proyek',v:fj(DEP)},{k:'= AUM',v:fj(AUM),strong:1}],
+      note:'Setara: modal sendiri + dana investor + kewajiban lain. Ukuran skala fund.'}});
+  M.push({id:'ekuitas',grp:'perf',icon:'👑',label:'Modal Sendiri',val:fj(E),sub:'ekuitas owner',color:'#7c3aed',
+    calc:{rumus:'Modal Gde + Modal RRPR + Laba Ditahan + Laba Berjalan.',
+      steps:[{k:'Modal Gde',v:fj(modalGde)},{k:'Modal RRPR',v:fj(modalRRPR)},{k:'Laba ditahan',v:fj(labaDitahan)},{k:'Laba berjalan',v:fj(labaBjl)},{k:'= Ekuitas',v:fj(E),strong:1}],
+      note:'Uang pemilik yang bekerja di fund. Dasar perhitungan ROE & leverage.'}});
+  M.push({id:'danainv',grp:'perf',icon:'🤝',label:'Dana Investor',val:fj(INV),sub:invContracts().length+' kontrak',color:'#2563eb',
+    calc:{rumus:'Total pokok investor yang dipercayakan (akun 2000).',
+      steps: invContracts().map(c=>({k:c.nama+(c.flexible?' · fleksibel':''),v:fj(parseFloat(c.pokok||0))})).concat([{k:'= Total pokok',v:fj(INV),strong:1}]),
+      note:'Semua bagi hasil tetap 2%/bln. Selisih di atas 2% jadi laba fund (spread).'}});
+  M.push({id:'leverage',grp:'perf',icon:'⚖️',label:'Leverage',val:fx(leverage),sub:'dana investor ÷ modal',color:'var(--txt)',
+    calc:{rumus:'Dana Investor ÷ Modal Sendiri.',
+      steps:[{k:'Dana investor',v:fj(INV)},{k:'÷ Modal sendiri',v:fj(E)},{k:'= Leverage',v:fx(leverage),strong:1}],
+      note:'Tiap Rp 1 modal sendiri menggerakkan Rp '+leverage.toFixed(2)+' dana investor. Ini yang bikin ROE > ROI.'}});
+  M.push({id:'roe',grp:'perf',icon:'🚀',label:'ROE / bln',val:fpc(roe),sub:'laba '+fj(labaBln),color:'var(--p-deep)',
+    calc:{rumus:'Laba bersih bulanan ÷ Modal Sendiri × 100%.',
+      steps:[{k:'Return proyek bersih 30h',v:fj(r4(in30))},{k:'− Bagi hasil investor 30h',v:fj(r4(bh30))},{k:'− Bagi hasil Papa (2%, akrual)',v:fj(r4(papa))},{k:'= Laba bersih/bln',v:fj(labaBln),strong:1},{k:'÷ Ekuitas',v:fj(E)},{k:'= ROE/bln',v:fpc(roe),strong:1}],
+      note:'ROE ('+fpc(roe)+') jauh di atas ROI aset ('+fpc(roiAset)+') karena leverage dana investor murah 2%.'}});
+  M.push({id:'roi',grp:'perf',icon:'📊',label:'ROI Aset/bln',val:fpc(roiAset),sub:'yield proyek '+fpc(yieldBln),color:'#0891b2',
+    calc:{rumus:'Laba bersih bulanan ÷ Dana di Proyek × 100% (belum pakai leverage).',
+      steps:[{k:'Laba bersih/bln',v:fj(labaBln)},{k:'÷ Dana di proyek',v:fj(DEP)},{k:'= ROI aset/bln',v:fpc(roiAset),strong:1}],
+      note:'Return "polos" tanpa leverage. Bandingkan dgn ROE '+fpc(roe)+' untuk lihat efek leverage.'}});
+  M.push({id:'spread',grp:'perf',icon:'✂️',label:'Spread',val:fpc(spread),sub:'yield '+fpc(yieldBln)+' − 2%',color:spread>0?'#0B8F46':'var(--r)',
+    calc:{rumus:'Imbal hasil proyek per bulan − biaya investor 2%.',
+      steps:[{k:'Imbal hasil proyek/bln (net fee)',v:fpc(yieldBln)},{k:'− Biaya investor',v:'2%'},{k:'= Spread',v:fpc(spread),strong:1}],
+      note:'Model bisnis fund: himpun dana 2%, tanam di proyek '+fpc(yieldBln)+', ambil selisih. Berbasis inflow bersih 30h ÷ dana di proyek.'}});
+  M.push({id:'ontime',grp:'perf',icon:'✅',label:'On-Time Rate',val:onTime==null?'—':fpc(onTime),sub:totPay>0?ot+'/'+totPay+' tepat waktu':'belum ada riwayat',color:onTime==null?'var(--sub)':(onTime>=99?'#0B8F46':'#B45309'),
+    calc:{rumus:'Pembayaran tepat waktu ÷ total pembayaran tercatat × 100%.',
+      steps:[{k:'Pembayaran tepat waktu',v:''+ot},{k:'Total pembayaran',v:''+totPay},{k:'= On-time rate',v:onTime==null?'—':fpc(onTime),strong:1}],
+      note:totPay>0?'Track record ketepatan bayar ke investor. Terisi otomatis tiap kamu Accept transaksi di Inbox.':'Belum ada pembayaran ber-tanggal. Metrik ini terisi otomatis begitu kamu mulai mencatat pembayaran lewat Inbox.'}});
+  M.push({id:'konsentrasi',grp:'perf',icon:'🎯',label:'Konsentrasi',val:fpc(conc),sub:exps.length?'terbesar: '+exps[0].n:'—',color:conc<=35?'#0B8F46':(conc<=55?'#B45309':'var(--r)'),
+    calc:{rumus:'Eksposur proyek terbesar ÷ total dana di proyek × 100%.',
+      steps: exps.map(e=>({k:e.n,v:fj(e.v)+' ('+(totExp>0?Math.round(e.v/totExp*100):0)+'%)'})).concat([{k:'= Total deploy',v:fj(r4(totExp)),strong:1}]),
+      note:'Makin rendah makin tersebar (aman). Konsentrasi tinggi = fund bergantung pada satu proyek.'}});
+  M.push({id:'idle',grp:'perf',icon:'😴',label:'Biaya Idle',val:fj(idleCost),sub:'dana nganggur '+fj(idle),color:idle>0.5?'var(--r)':'#0B8F46',
+    calc:{rumus:'Dana investor belum dideploy × 2%/bln.',
+      steps:[{k:'Dana investor nganggur',v:fj(idle)},{k:'× biaya 2%/bln',v:''},{k:'= Biaya idle/bln',v:fj(idleCost),strong:1}],
+      note:idle>0.5?'Uang investor yang belum kerja tetap kena 2%. Segera deploy atau kurangi raise.':'Bagus — hampir tak ada dana nganggur.'}});
+  return M;
+}
+function mtrCardHTML(m){
+  return `<div class="mtr-card" onclick="mtrDrill('${m.id}')">
+    <div class="mc-i">ⓘ</div>
+    <div class="mc-lbl">${m.icon} ${m.label}</div>
+    <div class="mc-val" style="color:${m.color||'var(--txt)'}">${m.val}</div>
+    ${m.sub?`<div class="mc-sub">${m.sub}</div>`:''}</div>`;
+}
+function mtrDrill(id){
+  const m=mtrList().find(x=>x.id===id); if(!m) return;
+  document.getElementById('mo-keu-t').textContent=m.icon+' '+m.label;
+  let b=`<div style="text-align:center;margin:2px 0 14px">
+    <div style="font-size:30px;font-weight:900;color:${m.color||'var(--p-deep)'};font-family:'Geist Mono','SF Mono',monospace;line-height:1.1">${m.val}</div>
+    ${m.sub?`<div style="font-size:11px;color:var(--sub);font-weight:700;margin-top:2px">${m.sub}</div>`:''}</div>`;
+  if(m.calc){
+    b+=`<div class="rep-sec" style="margin-top:4px">Rumus</div><div class="fc-note" style="margin-bottom:12px">${m.calc.rumus}</div>`;
+    b+=`<div class="rep-sec">Perhitungan</div><div class="card-s" style="margin-bottom:12px">`;
+    m.calc.steps.forEach(s=>{ b+=`<div class="rep-r"${s.strong?' style="border-top:1.5px solid var(--bdr);margin-top:2px;padding-top:5px"':''}><span class="rl"${s.strong?' style="font-weight:900"':''}>${s.k}</span><span class="rv"${s.strong?' style="font-weight:900"':''}>${s.v}</span></div>`; });
+    b+=`</div>`;
+    if(m.calc.note) b+=`<div class="fc-note">${m.calc.note}</div>`;
+  }
+  document.getElementById('mo-keu-b').innerHTML=b;
+  om('mo-keu');
+}
 function rKeuLikuiditas(){
   if(!invContracts().length && !(S.orgConfig&&S.orgConfig.activeProjectNames||[]).length)
     return `<div class="es"><div class="ei">💧</div><div class="et">Belum ada data</div><div class="esb">Isi kontrak investor + seed data dulu (tab Kantong → Seed Data Roxanne).</div></div>`;
-  const st=m6Status(), cons=m6Project('conservative'), k=m6KPIs();
+  const st=m6Status(), cons=m6Project('conservative'), mets=mtrList();
   let h=`<div class="card-s" style="background:${st.bg};margin-bottom:12px;text-align:center;padding:16px">
     <div style="font-size:11px;font-weight:900;letter-spacing:1px;color:${st.c}">STATUS LIKUIDITAS</div>
     <div style="font-size:28px;font-weight:900;color:${st.c};margin:2px 0">${st.k}</div>
     <div style="font-size:11px;font-weight:700;color:var(--txt)">${st.msg}</div></div>`;
-  // KPI strip
-  h+=`<div class="cf-strip"><div class="cf-col"><div class="cf-lbl">Kas Terendah</div><div class="cf-val" style="color:${cons.minCash<0?'var(--r)':'#0B8F46'}">${fj(cons.minCash)}</div><div class="cf-sub">${fd(cons.minDate)}</div></div>
-    <div class="cf-col"><div class="cf-lbl">ROE/bln</div><div class="cf-val" style="color:var(--p-deep)">${k.roe}%</div><div class="cf-sub">laba ${fj(k.labaBln)}</div></div>
-    <div class="cf-col"><div class="cf-lbl">Leverage</div><div class="cf-val">${k.leverage}×</div><div class="cf-sub">${k.runway!==null?'runway '+k.runway+'h':'aman'}</div></div></div>`;
+  h+=`<div class="fc-note" style="margin-bottom:10px">💡 Ketuk metrik mana pun untuk lihat rumus + angka lengkapnya. Semua ikut berubah otomatis kalau proyek/kontrak berubah.</div>`;
+  // metric hub — health
+  h+=`<div class="rep-sec" style="color:var(--p-deep)">📊 Kesehatan & Likuiditas</div>`;
+  h+=`<div class="mtr-grid">`+mets.filter(m=>m.grp==='health').map(mtrCardHTML).join('')+`</div>`;
+  // metric hub — performance (sales material)
+  h+=`<div class="rep-sec" style="color:var(--p-deep)">📈 Kinerja & Skala <span style="font-weight:700;font-size:9px;color:var(--sub);text-transform:none;letter-spacing:0">· bahan jualan ke investor</span></div>`;
+  h+=`<div class="mtr-grid">`+mets.filter(m=>m.grp==='perf').map(mtrCardHTML).join('')+`</div>`;
   // recommendations
   h+=`<div class="rep-sec" style="color:var(--p-deep)">🎯 Rekomendasi Aksi</div>`;
   m6Recommendations().forEach(r=>{
@@ -1247,8 +1375,6 @@ function rKeuLikuiditas(){
     h+=`<div class="rep-r"><span class="rl" style="font-size:11px">${fd(e.t)} · ${e.label} <b style="color:${e.amt<0?'var(--r)':'#0B8F46'}">${e.amt<0?'':'+'}${fj(e.amt)}</b></span><span class="rv" style="color:${e.cash<0?'var(--r)':'var(--txt)'}">${fj(e.cash)}</span></div>`;
   });
   h+=`</div>`;
-  // idle cost note
-  if(k.idleInv>0.5) h+=`<div class="fc-note" style="margin-top:10px">Dana investor nganggur ${fj(k.idleInv)} → biaya idle ${fj(k.idleCost)}/bln.</div>`;
   return h;
 }
 
