@@ -318,12 +318,14 @@ body.modal-open{position:fixed;left:0;right:0;width:100%;overflow:hidden}
     <div class="page" id="p-k"></div>
     <div class="page" id="p-e"></div>
     <div class="page" id="p-u"></div>
+    <div class="page" id="p-l"></div>
+    <div class="page" id="p-r"></div>
   </div>
   <nav class="bnav" id="nav">
     <button class="ni on" onclick="go('b')" id="n-b"><span class="ico">🏠</span><span class="lbl">Beranda</span></button>
-    <button class="ni" onclick="go('m')" id="n-m" style="display:none"><span class="ico">📋</span><span class="lbl">Proyek</span></button>
-    <button class="ni" onclick="go('e')" id="n-e" style="display:none"><span class="ico">🤝</span><span class="lbl">Pemodal</span></button>
     <button class="ni" onclick="go('u')" id="n-u" style="display:none"><span class="ico">🏦</span><span class="lbl">Keuangan</span></button>
+    <button class="ni" onclick="go('l')" id="n-l" style="display:none"><span class="ico">💧</span><span class="lbl">Likuiditas</span></button>
+    <button class="ni" onclick="go('r')" id="n-r" style="display:none"><span class="ico">📊</span><span class="lbl">Laporan</span></button>
     <button class="ni" onclick="go('k')" id="n-k" style="display:none"><span class="ico">📅</span><span class="lbl">Kalender</span></button>
     <button class="ni" onclick="showPin()" id="n-admin"><span class="ico">🔐</span><span class="lbl">Admin</span></button>
   </nav>
@@ -584,16 +586,14 @@ function pocketOptions(sel){
 function rKeu(){
   const el=document.getElementById('p-u'); if(!el) return;
   const nInbox=(typeof pendingEvents==='function')?pendingEvents().length:0;
-  const tabs=[['kantong','🏦 Kantong'],['inbox','📥 Inbox'+(nInbox?' ('+nInbox+')':'')],['investor','🤝 Investor'],['likuiditas','💧 Likuiditas'],['laporan','📊 Laporan']];
+  const tabs=[['kantong','🏦 Kantong'],['inbox','📥 Inbox'+(nInbox?' ('+nInbox+')':'')],['investor','🤝 Investor']];
   let sub=`<div style="display:flex;gap:6px;overflow-x:auto;margin-bottom:14px;padding-bottom:4px;-webkit-overflow-scrolling:touch">`;
   tabs.forEach(([k,l])=>sub+=`<button class="tab ${keuTab===k?'on':''}" onclick="swKeu('${k}')" style="flex:0 0 auto;padding:9px 12px">${l}</button>`);
   sub+=`</div>`;
   let body='';
-  if(keuTab==='kantong') body=rKeuKantong();
-  else if(keuTab==='inbox') body=rKeuInbox();
+  if(keuTab==='inbox') body=rKeuInbox();
   else if(keuTab==='investor') body=rKeuInvestor();
-  else if(keuTab==='likuiditas') body=rKeuLikuiditas();
-  else body=rKeuLaporan();
+  else body=rKeuKantong();
   el.innerHTML=sub+body;
 }
 function rKeuKantong(){
@@ -858,7 +858,7 @@ function invDelete(id){
 
 // ── LAPORAN KEUANGAN (M5: 5 laporan format perusahaan terbuka) ────────
 let lapReport='laba-rugi';
-function swLap(r){ lapReport=r; rKeu(); }
+function swLap(r){ lapReport=r; const el=document.getElementById('p-r'); if(el) el.innerHTML=rKeuLaporan(); }
 function repR(label, amount, cls){ return `<div class="rep-r ${cls||''}"><span class="rl">${label}</span><span class="rv">${fj(amount)}</span></div>`; }
 function repToday(){ return fd(new Date().toISOString().split('T')[0]); }
 function rKeuLaporan(){
@@ -1501,17 +1501,19 @@ function go(p){
   document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));
   document.querySelectorAll('.ni').forEach(x=>x.classList.remove('on'));
   document.getElementById('p-'+p).classList.add('active');
-  document.getElementById('n-'+p).classList.add('on');
+  const _nb=document.getElementById('n-'+p); if(_nb) _nb.classList.add('on');
   CP=p;
-  const ti={b:{t:'💸 DanaTrack',s:'Portfolio Manager'},m:{t:'📋 Proyek',s:'Kelola semua proyek'},k:{t:'📅 Kalender',s:'Jadwal & cashflow'},e:{t:'🤝 Pemodal',s:'Owner, investor & pembiayaan'},u:{t:'🏦 Keuangan',s:'Kantong, likuiditas & laporan'}};
+  const ti={b:{t:'💸 DanaTrack',s:'Portfolio Manager'},k:{t:'📅 Kalender',s:'Jadwal & cashflow'},u:{t:'🏦 Keuangan',s:'Kantong, inbox & investor'},l:{t:'💧 Likuiditas',s:'Cash-ready, ROE & rekomendasi'},r:{t:'📊 Laporan',s:'Jurnal, neraca, laba rugi, arus kas'}};
   document.getElementById('HT').textContent=ti[p]?.t||'';
   document.getElementById('HS').textContent=ti[p]?.s||'';
   document.getElementById('HA').innerHTML=`<button class="hdr-icon" onclick="exportJ()" title="Export">⬆️</button><button class="hdr-icon" onclick="importJ()" title="Import">⬇️</button>`;
-  document.getElementById('fab').style.display=['m','e'].includes(p)?'flex':'none';
+  document.getElementById('fab').style.display=['b'].includes(p)?'flex':'none';
   window.scrollTo(0,0); // native document scroll: start each tab at the top
-  if(p==='b')rB();else if(p==='m')rM();else if(p==='k')rK();else if(p==='e')rE();else if(p==='u')rKeu();
+  if(p==='b')rB();else if(p==='k')rK();else if(p==='u')rKeu();
+  else if(p==='l')document.getElementById('p-l').innerHTML=rKeuLikuiditas();
+  else if(p==='r')document.getElementById('p-r').innerHTML=rKeuLaporan();
 }
-function fabAct(){ if(CP==='m') oPM(); else if(CP==='e') oEM(); }
+function fabAct(){ if(CP==='b') oPM(); }
 let _tt;
 function toast(m,opts){
   const t=document.getElementById('toast');
@@ -1792,7 +1794,7 @@ function rB(){
     list.sort((a,b)=>(order[a.status]??1)-(order[b.status]??1));
   }
   if(list.length===0){
-    h+=`<div class="es"><div class="ei">🌱</div><div class="et">Belum ada proyek</div><div class="esb">Mulai tambahkan proyek pertama Anda</div>${_adminUnlocked?`<button class="btn vio" style="margin-top:14px" onclick="go('m');setTimeout(oPM,200)">＋ Tambah Proyek Pertama</button>`:''}</div>`;
+    h+=`<div class="es"><div class="ei">🌱</div><div class="et">Belum ada proyek</div><div class="esb">Mulai tambahkan proyek pertama Anda</div>${_adminUnlocked?`<button class="btn vio" style="margin-top:14px" onclick="oPM()">＋ Tambah Proyek Pertama</button>`:''}</div>`;
   } else {
     if(_bSort==='default'){
       const groups=[
@@ -3475,8 +3477,11 @@ function rAll(){
   fixProjectStatuses();
   try {
     if(CP==='b') rB();
-    else if(CP==='m') rM();
     else if(CP==='k') rK();
+    else if(CP==='u') rKeu();
+    else if(CP==='l'){const el=document.getElementById('p-l'); if(el) el.innerHTML=rKeuLikuiditas();}
+    else if(CP==='r'){const el=document.getElementById('p-r'); if(el) el.innerHTML=rKeuLaporan();}
+    else if(CP==='m') rM();
     else if(CP==='e') rE();
   } catch(e) {
     console.error('Render error:', e);
@@ -3516,7 +3521,7 @@ function buildPinPad(){
 }
 
 function showPin(){
-  if(_adminUnlocked){go('m');return;}
+  if(_adminUnlocked){go('b');return;}
   buildPinPad();
   om('mo-pin');
 }
@@ -3525,16 +3530,13 @@ async function unlockAdmin(){
   _adminUnlocked=true;
   cm('mo-pin');
   // Show admin tabs, hide admin button
-  document.getElementById('n-m').style.display='';
-  document.getElementById('n-k').style.display='';
-  document.getElementById('n-e').style.display='';
-  document.getElementById('n-u').style.display='';
+  ['n-u','n-l','n-r','n-k'].forEach(id=>{const el=document.getElementById(id); if(el) el.style.display='';});
   document.getElementById('n-admin').style.display='none';
   // Load from Firestore
   await loadFromFirestore();
   rAll();
   toast('🔓 Admin unlocked!');
-  go('m');
+  go('b');
 }
 
 // ── INIT ──────────────────────────────────────────────────────────────
