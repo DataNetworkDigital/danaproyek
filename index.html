@@ -356,6 +356,8 @@ body.modal-open{position:fixed;left:0;right:0;width:100%;overflow:hidden}
 <button class="fab" id="fab" onclick="fabAct()">＋</button>
 <div id="toast"></div>
 <div id="print-area"></div>
+<!-- Pure treasury decision engine (loaded first so window.Treasury exists). -->
+<script src="treasury.js"></script>
 <script>
 // ── STATE ─────────────────────────────────────────────────────────────
 let S = {
@@ -408,7 +410,53 @@ function migrateSchema(){
   if(!Array.isArray(S.ledger)) S.ledger=[];
   if(!Array.isArray(S.investorContracts)) S.investorContracts=[];
   if(!S.orgConfig) S.orgConfig={ ownerSplitMode:'prorata', investorRateDefault:2 };
+  // 3. Treasury v4 — engine config (editable assumptions, no scattered magic numbers).
+  if(!S.orgConfig.treasury){
+    S.orgConfig.treasury={
+      timing:{base:0,conservative:7,stress:21},
+      inflowQuality:{
+        base:{received:1,approved:1,invoiced:1,contracted:1,pipeline:0},
+        conservative:{received:1,approved:0.9,invoiced:0.8,contracted:0.7,pipeline:0},
+        stress:{received:1,approved:0.75,invoiced:0.6,contracted:0.4,pipeline:0}},
+      papaCall:{base:0,conservative:0.25,stress:1}, papaNoticeDays:30,
+      cushionPct:(S.orgConfig.cushionPct!=null?S.orgConfig.cushionPct:15), rrprMultiplier:1.25, sinkHorizonDays:60, investorRatePct:2
+    };
+  }
+  // 4. Unified capital model (CapitalProvider/Contract/Allocation) — additive + idempotent.
+  //    Backup once before the first v4 migration; migrate() itself never touches the ledger.
+  if(window.Treasury){
+    if(S.schemaVersion!==Treasury.SCHEMA_VERSION){
+      try{ localStorage.setItem('dt_v3_pre_v4_'+Date.now(), localStorage.getItem('dt_v3')||JSON.stringify(S)); }catch(e){}
+    }
+    try{ Treasury.migrate(S); }catch(e){ console.warn('[migrate v4]',e); }
+  }
 }
+// ── TREASURY ENGINE ADAPTERS ──────────────────────────────────────────
+// Bridge the app's S into the pure engine's expected shape. Active projects
+// only (liquidity is about live deals). Fee uses nullish handling (0 = valid).
+function resolveNum(v,def){ return window.Treasury?Treasury.resolveNumber(v,def):(v===''||v==null||isNaN(parseFloat(v))?def:parseFloat(v)); }
+function engineProjects(){
+  const names=(S.orgConfig&&S.orgConfig.activeProjectNames)||[];
+  return (S.projects||[]).filter(p=>names.includes(p.peminjam)).map(p=>{
+    const fee=resolveNum(p.adminFeePersen,0.5), kontrak=parseFloat(p.kontrak||0), deploy=parseFloat(p.jumlah||0);
+    const q=p.inflowQuality||'contracted';
+    if((p.returnType||'sekali')==='bulanan'){
+      const rets=(p.schedule||[]).filter(s=>s.status!=='skipped').map(s=>({date:s.dueDate, amount:Math.max(0,parseFloat(s.amount||0)-kontrak*fee/100), status:s.status==='paid'?'paid':'pending'}));
+      return {id:p.id||p.peminjam, name:p.peminjam, deploy, type:'monthly', monthlyReturns:rets, principalDate:p.tanggalJT, principalPaid:!!p.pokokRecorded, inflowQuality:q, status:p.status};
+    }
+    const profit=Math.max(0, kontrak-deploy-kontrak*fee/100);
+    return {id:p.id||p.peminjam, name:p.peminjam, deploy, type:'onetime', profit, principalDate:p.tanggalJT, principalPaid:!!p.pokokRecorded, inflowQuality:q, status:p.status};
+  });
+}
+function engineState(){
+  return {
+    accounts: allAccounts(), pockets: S.pockets||[], ledger: S.ledger||[],
+    contracts: S.capitalContracts||[], providers: S.capitalProviders||[],
+    allocations: S.capitalAllocations||[], projects: engineProjects(),
+    orgConfig: S.orgConfig||{}, today: todayISO(),
+  };
+}
+function engineCfg(){ return Treasury.cfgOf(S.orgConfig||{}); }
 function setSync(state, ts){
   const el=document.getElementById('sync-ind');if(!el)return;
   el.style.display='block';
@@ -457,6 +505,10 @@ function isProdOrigin(){
   const h=location.hostname;
   return h.endsWith('github.io')||h.endsWith('datanetworkdigital.com');
 }
+// Dev gate: destructive controls (seed/reset/dummy) are hidden in normal
+// production. Available on non-prod origins, or on prod only with ?dev=1.
+// Nothing is deleted — the tools still exist, just not reachable by accident.
+function isDevMode(){ return /[?&]dev=1/.test(location.search) || !isProdOrigin(); }
 async function saveToFirestore(){
   if(!_adminUnlocked||_saving)return;
   if(!isProdOrigin()){
@@ -638,18 +690,19 @@ function rKeuKantong(){
   h+=`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:12px">
     <button class="btn pr" onclick="keuModal('transfer')" style="padding:11px 6px;font-size:12px">🔀 Transfer</button>
     <button class="btn ou" onclick="keuModal('setor')" style="padding:11px 6px;font-size:12px">💰 Setor</button>
-    <button class="btn ou" onclick="keuModal('recon')" style="padding:11px 6px;font-size:12px">✅ Rekon</button>
+    <button class="btn ou" onclick="integrityModal()" style="padding:11px 6px;font-size:12px">✅ Cek Integritas</button>
   </div>
-  <div style="margin-top:10px;display:flex;flex-direction:column;gap:8px">
+  ${isDevMode()?`<div style="margin-top:10px;display:flex;flex-direction:column;gap:8px">
+    <div class="fc-note" style="color:var(--r);font-weight:800">⚠️ Mode dev — kontrol destruktif (tidak muncul di produksi normal).</div>
     <button class="btn pr fw" onclick="seedRoxanne()" style="font-size:12px">📥 Reset & Seed Data Asli Roxanne</button>
     ${!(S.ledger||[]).length
       ? `<button class="btn ou fw" onclick="keuDummy()" style="font-size:12px">✨ Isi Data Contoh</button>`
       : `<button class="btn ou fw" onclick="keuReset()" style="font-size:12px;color:var(--r)">🗑️ Reset Buku Besar (hapus semua jurnal)</button>`}
-  </div>`;
+  </div>`:''}`;
   return h;
 }
 function keuModal(type){
-  const title={transfer:'🔀 Transfer Antar Kantong',setor:'💰 Setor Modal Owner',recon:'✅ Rekonsiliasi Bank Jago'}[type]||'Kantong';
+  const title={transfer:'🔀 Transfer Antar Kantong',setor:'💰 Setor Modal Owner'}[type]||'Kantong';
   document.getElementById('mo-keu-t').textContent=title;
   const ds=new Date().toISOString().split('T')[0];
   let b='';
@@ -666,16 +719,6 @@ function keuModal(type){
     <div class="fg"><label class="fl">Jumlah (jt)</label><input class="fi" id="k-amt" type="number" step="0.0001" placeholder="0"></div>
     <div class="fg"><label class="fl">Tanggal</label><input class="fi" id="k-date" type="date" value="${ds}"></div>
     <button class="btn pr fw" onclick="keuSaveSetor()" style="margin-top:8px">Simpan Setoran</button>`;
-  } else if(type==='recon'){
-    const pockets=[...(S.pockets||[])].sort((a,b)=>a.prioritas-b.prioritas);
-    b=`<div class="fc-note" style="margin-bottom:12px">Isi saldo <b>aktual di Bank Jago</b> tiap kantong. Sistem catat penyesuaian biar sama persis. Kosongkan kalau sudah cocok.</div>`;
-    pockets.forEach(p=>{
-      const bal=pocketBalance(p.code);
-      b+=`<div class="fr" style="align-items:flex-end"><div class="fg" style="flex:1.2"><label class="fl">${p.nama}</label><div style="font-size:11px;color:var(--sub);font-weight:700">Sistem: ${fj(bal)}</div></div>
-      <div class="fg"><label class="fl">Aktual (jt)</label><input class="fi k-actual" data-code="${p.code}" data-sys="${bal}" type="number" step="0.0001" placeholder="${bal.toFixed(2)}"></div></div>`;
-    });
-    b+=`<div class="fg"><label class="fl">Tanggal</label><input class="fi" id="k-date" type="date" value="${ds}"></div>
-    <button class="btn pr fw" onclick="keuSaveRecon()" style="margin-top:8px">Catat Penyesuaian</button>`;
   }
   document.getElementById('mo-keu-b').innerHTML=b;
   om('mo-keu');
@@ -695,19 +738,83 @@ function keuSaveSetor(){
   txSetorModal(date, pocket, amt);
   save(); cm('mo-keu'); rKeu(); toast('✅ Setoran modal dicatat');
 }
-function keuSaveRecon(){
-  const date=document.getElementById('k-date').value; let n=0;
-  document.querySelectorAll('.k-actual').forEach(inp=>{
-    if(inp.value==='') return;
+// ── CEK INTEGRITAS BANK JAGO (pengganti Rekon) ────────────────────────
+// Tidak pernah menambal selisih otomatis ke ekuitas (3990). Menampilkan
+// selisih per kantong, lalu bantu user MENGKLASIFIKASIKAN transaksi yang
+// belum tercatat dan mencatat transaksi ASLINYA. Setelah itu selisih = 0.
+// Akun 3990 tetap ada untuk histori lama, tapi tak ada jalur baru ke sana.
+const IG_CLASSES={
+  in:[
+    {k:'investor_receipt', l:'Terima dana investor',        dr:'POCKET', cr:'2000'},
+    {k:'project_return',   l:'Return proyek (pendapatan)',   dr:'POCKET', cr:'4000'},
+    {k:'project_principal',l:'Pokok proyek balik',           dr:'POCKET', cr:'1100'},
+    {k:'owner_capital',    l:'Setoran modal owner',          dr:'POCKET', cr:'OWNER'},
+    {k:'transfer_in',      l:'Transfer masuk antar kantong', dr:'POCKET', cr:'1000'},
+    {k:'other_in',         l:'Lainnya (pilih akun)',         dr:'POCKET', cr:'PICK'},
+  ],
+  out:[
+    {k:'investor_bagihasil', l:'Bayar bagi hasil investor',    dr:'2010', cr:'POCKET'},
+    {k:'investor_pokok',     l:'Kembalikan pokok investor',    dr:'2000', cr:'POCKET'},
+    {k:'project_deploy',     l:'Deploy ke proyek',             dr:'1100', cr:'POCKET'},
+    {k:'bank_fee',           l:'Biaya bank',                   dr:'5030', cr:'POCKET'},
+    {k:'operational',        l:'Beban operasional',            dr:'5030', cr:'POCKET'},
+    {k:'transfer_out',       l:'Transfer keluar antar kantong',dr:'1000', cr:'POCKET'},
+    {k:'other_out',          l:'Lainnya (pilih akun)',         dr:'PICK', cr:'POCKET'},
+  ],
+};
+function integrityModal(){
+  document.getElementById('mo-keu-t').textContent='✅ Cek Integritas Bank Jago';
+  const pockets=[...(S.pockets||[])].sort((a,b)=>a.prioritas-b.prioritas);
+  const last=S.orgConfig&&S.orgConfig.lastIntegrityCheck;
+  let b=`<div class="fc-note" style="margin-bottom:10px">Bandingkan saldo <b>website</b> vs <b>Bank Jago</b> asli. Kalau beda, sistem <b>tidak</b> menambal otomatis ke ekuitas. Kamu klasifikasikan transaksi yang belum tercatat, lalu sistem mencatat transaksi <b>aslinya</b> — selisih balik nol.</div>`;
+  if(last) b+=`<div class="fc-note" style="margin-bottom:10px">🕑 Cek terakhir: ${fd(last.date)}${last.by?' · '+last.by:''} · ${last.unresolved||0} selisih belum beres.</div>`;
+  pockets.forEach(p=>{ const bal=pocketBalance(p.code);
+    b+=`<div class="fr" style="align-items:flex-end"><div class="fg" style="flex:1.2"><label class="fl">${p.nama}</label><div style="font-size:11px;color:var(--sub);font-weight:700">Website: ${fj(bal)}</div></div>
+      <div class="fg"><label class="fl">Aktual Bank Jago (jt)</label><input class="fi ig-actual" data-code="${p.code}" data-sys="${bal}" type="number" step="0.0001" placeholder="${bal.toFixed(2)}"></div></div>`; });
+  b+=`<div id="ig-out" style="margin-top:8px"></div>
+    <button class="btn pr fw" onclick="igCheck()" style="margin-top:8px">Cek Selisih</button>`;
+  document.getElementById('mo-keu-b').innerHTML=b; om('mo-keu');
+}
+function igScan(){
+  const rows=[]; document.querySelectorAll('.ig-actual').forEach(inp=>{ if(inp.value==='')return;
     const code=inp.dataset.code, sys=parseFloat(inp.dataset.sys||0), actual=parseFloat(inp.value||0);
-    const diff=Math.round((actual-sys)*1e4)/1e4;
-    if(Math.abs(diff)<0.005) return;
-    if(diff>0) ledgerPost2(date, 'Penyesuaian rekonsiliasi '+acct(code).name, code, '3990', diff, 'recon');
-    else       ledgerPost2(date, 'Penyesuaian rekonsiliasi '+acct(code).name, '3990', code, -diff, 'recon');
-    n++;
-  });
-  save(); cm('mo-keu'); rKeu();
-  toast(n?`✅ ${n} penyesuaian dicatat`:'✅ Semua sudah cocok');
+    rows.push({code,sys,actual,diff:Math.round((actual-sys)*1e4)/1e4}); });
+  return rows;
+}
+function igAcctOptions(){ return allAccounts().map(a=>`<option value="${a.code}">${a.code} · ${a.name}</option>`).join(''); }
+function igCheck(){
+  const rows=igScan(), bad=rows.filter(r=>Math.abs(r.diff)>=0.005), out=document.getElementById('ig-out');
+  if(!rows.length){ out.innerHTML=`<div class="fc-note">Isi minimal satu saldo aktual dulu.</div>`; return; }
+  if(!bad.length){ out.innerHTML=`<div class="card-s" style="background:#D1FAE5;color:#065F46;font-weight:800;text-align:center">✅ Semua kantong cocok dengan Bank Jago.</div>`; recordIntegrity(0); return; }
+  window._igBad=bad;
+  let h=`<div class="fc-note" style="color:var(--r);font-weight:800;margin-bottom:8px">⚠️ ${bad.length} kantong beda. Catat transaksi ASLI penyebabnya (bukan tambalan ke ekuitas):</div>`;
+  bad.forEach((r,i)=>{ const dir=r.diff>0?'in':'out';
+    h+=`<div class="card-s" style="margin-bottom:8px">
+      <div style="font-weight:900;font-size:12.5px">${acct(r.code).name}: selisih ${r.diff>0?'+':''}${fj(r.diff)}</div>
+      <div style="font-size:10.5px;color:var(--sub);margin:2px 0 6px">${r.diff>0?'Bank Jago LEBIH banyak → ada uang MASUK belum tercatat.':'Bank Jago LEBIH sedikit → ada uang KELUAR belum tercatat.'}</div>
+      <select class="fi ig-class" data-idx="${i}" style="font-size:12px">${IG_CLASSES[dir].map(c=>`<option value="${c.k}">${c.l}</option>`).join('')}</select>
+      <select class="fi ig-acct" data-idx="${i}" style="font-size:12px;margin-top:4px"><option value="">(akun untuk "Lainnya")</option>${igAcctOptions()}</select>
+      <button class="btn pr fw" onclick="igResolve(${i})" style="margin-top:6px;font-size:11px">Catat transaksi asli</button>
+    </div>`; });
+  out.innerHTML=h; recordIntegrity(bad.length);
+}
+function igResolve(i){
+  const bad=window._igBad||[]; const r=bad[i]; if(!r) return;
+  const classSel=document.querySelector('.ig-class[data-idx="'+i+'"]');
+  const acctSel=document.querySelector('.ig-acct[data-idx="'+i+'"]');
+  const dir=r.diff>0?'in':'out', amt=Math.abs(r.diff);
+  const def=IG_CLASSES[dir].find(c=>c.k===classSel.value); if(!def) return;
+  const pick=acctSel&&acctSel.value; const owner=r.code==='1020'?'3010':'3000';
+  const res=(x)=> x==='POCKET'?r.code : x==='OWNER'?owner : x==='PICK'?(pick||'5030') : x;
+  const dr=res(def.dr), cr=res(def.cr);
+  if((def.dr==='PICK'||def.cr==='PICK') && !pick){ toast('❌ Pilih akun dulu untuk "Lainnya"'); return; }
+  ledgerPost2(todayISO(), 'Integritas: '+def.l+' — '+acct(r.code).name, dr, cr, amt, 'integrity');
+  save(); toast('✅ Transaksi asli dicatat'); integrityModal();
+}
+function recordIntegrity(unresolved){
+  if(!S.orgConfig) S.orgConfig={};
+  S.orgConfig.lastIntegrityCheck={date:todayISO(), by:(_adminUnlocked?'admin':''), unresolved:unresolved};
+  save();
 }
 function keuDummy(){
   const today=new Date(), d=x=>{const t=new Date(today);t.setDate(t.getDate()-x);return t.toISOString().split('T')[0];};
@@ -1138,7 +1245,7 @@ function m6Inflows(scenario){
   const hair  = scenario==='stress' ? 0.85 : 1; // stress: haircut return proyek 15%
   const out=[];
   (S.projects||[]).filter(p=>names.includes(p.peminjam)).forEach(p=>{
-    const fee=parseFloat(p.adminFeePersen)||0.5, kontrak=parseFloat(p.kontrak||0), deploy=parseFloat(p.jumlah||0);
+    const fee=resolveNum(p.adminFeePersen,0.5), kontrak=parseFloat(p.kontrak||0), deploy=parseFloat(p.jumlah||0);
     (p.schedule||[]).filter(s=>s.status!=='paid'&&s.status!=='skipped').forEach(s=>{
       const net=Math.round((parseFloat(s.amount||0)-kontrak*fee/100)*hair*1e4)/1e4;
       out.push({tanggal:addDays(s.dueDate,shift), jumlah:net, label:p.peminjam+' · return', tipe:'return'});
@@ -1401,7 +1508,7 @@ function pendingEvents(){
   });
   const names=(S.orgConfig&&S.orgConfig.activeProjectNames)||[];
   (S.projects||[]).filter(p=>names.includes(p.peminjam)).forEach(p=>{
-    const fee=parseFloat(p.adminFeePersen)||0.5, kontrak=parseFloat(p.kontrak||0), deploy=parseFloat(p.jumlah||0);
+    const fee=resolveNum(p.adminFeePersen,0.5), kontrak=parseFloat(p.kontrak||0), deploy=parseFloat(p.jumlah||0);
     (p.schedule||[]).forEach((s,i)=>{
       if(s.status==='paid'||s.status==='skipped') return; const dd=du(s.dueDate); if(dd===null||dd>look) return;
       const gross=parseFloat(s.amount||0), feeAmt=Math.round(kontrak*fee/100*1e4)/1e4;
@@ -2134,7 +2241,7 @@ function getCalendarEvents(year,month){
   const activeNames=(S.orgConfig&&S.orgConfig.activeProjectNames)||[];
   // 1. Return proyek aktif (gross) + Fee Mas Hena tepat SETELAHNYA (dibayar duluan) + pokok balik di JT
   (S.projects||[]).filter(p=>activeNames.includes(p.peminjam)).forEach(p=>{
-    const fee=parseFloat(p.adminFeePersen)||0.5, kontrak=parseFloat(p.kontrak||0);
+    const fee=resolveNum(p.adminFeePersen,0.5), kontrak=parseFloat(p.kontrak||0);
     (p.schedule||[]).forEach(s=>{
       if(s.status==='skipped'||!inMonth(s.dueDate)) return;
       push(s.dueDate,{type:'income',label:'Return · '+p.peminjam,amount:parseFloat(s.paidAmount||s.amount||0),paid:s.status==='paid',order:1});
