@@ -253,6 +253,20 @@ test('15. schema migration runs twice without duplicating data or entries', () =
   assert.ok(papa && /Fleksibel Pihak Berelasi/.test(papa.name), 'Papa named as flexible related party, not RRPR');
 });
 
+// ── 15b. re-seed (source contract ids change) must not leave stale duplicates ─
+test('15b. re-migrating after contracts are replaced does not duplicate (no stale Papa)', () => {
+  const base = { investorContracts: [{ id: 'old1', nama: 'Papa (RRPR)', pokok: 50, flexible: true, schedule: [] }], projects: [], orgConfig: {}, ledger: [] };
+  T.migrate(base);
+  assert.strictEqual(base.capitalContracts.filter((c) => c.flexible).length, 1);
+  // simulate a re-seed: investorContracts replaced with a NEW id (as uid() would produce)
+  base.investorContracts = [{ id: 'new1', nama: 'Papa (RRPR)', pokok: 50, flexible: true, schedule: [] }];
+  T.migrate(base);
+  const flexContracts = base.capitalContracts.filter((c) => c.flexible);
+  assert.strictEqual(flexContracts.length, 1, 'old ctr:old1 removed, only ctr:new1 remains');
+  const flexPrincipal = flexContracts.reduce((s, c) => s + c.principal, 0);
+  assert.strictEqual(flexPrincipal, 50, 'flexible principal is 50, not 100 (no stale duplicate)');
+});
+
 // ── bonus: metrics sanity on opening position ───────────────────────────────
 test('bonus. opening metrics: leverage>0, ROE denom = owner equity, AUM = 386.465', () => {
   const m = T.metrics(openingState(), CFG, TODAY);

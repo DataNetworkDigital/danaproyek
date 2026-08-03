@@ -330,6 +330,7 @@ body.modal-open{position:fixed;left:0;right:0;width:100%;overflow:hidden}
   </div>
   <div class="pages">
     <div class="page active" id="p-b"></div>
+    <div class="page" id="p-p"></div>
     <div class="page" id="p-m"></div>
     <div class="page" id="p-k"></div>
     <div class="page" id="p-e"></div>
@@ -338,11 +339,10 @@ body.modal-open{position:fixed;left:0;right:0;width:100%;overflow:hidden}
     <div class="page" id="p-r"></div>
   </div>
   <nav class="bnav" id="nav">
-    <button class="ni on" onclick="go('b')" id="n-b"><span class="ico">🏠</span><span class="lbl">Beranda</span></button>
-    <button class="ni" onclick="go('u')" id="n-u" style="display:none"><span class="ico">🏦</span><span class="lbl">Keuangan</span></button>
-    <button class="ni" onclick="go('l')" id="n-l" style="display:none"><span class="ico">💧</span><span class="lbl">Likuiditas</span></button>
+    <button class="ni on" onclick="go('b')" id="n-b"><span class="ico">🏠</span><span class="lbl">Ringkasan</span></button>
+    <button class="ni" onclick="go('p')" id="n-p" style="display:none"><span class="ico">🏗️</span><span class="lbl">Proyek</span></button>
+    <button class="ni" onclick="go('u')" id="n-u" style="display:none"><span class="ico">🏛️</span><span class="lbl">Treasury</span></button>
     <button class="ni" onclick="go('r')" id="n-r" style="display:none"><span class="ico">📊</span><span class="lbl">Laporan</span></button>
-    <button class="ni" onclick="go('k')" id="n-k" style="display:none"><span class="ico">📅</span><span class="lbl">Kalender</span></button>
     <button class="ni" onclick="showPin()" id="n-admin"><span class="ico">🔐</span><span class="lbl">Admin</span></button>
   </nav>
 </div>
@@ -635,7 +635,7 @@ function txKembalikanPokokInvestor(tanggal, jumlah, fromCode, memo){
 }
 
 // ── KEUANGAN MODULE (M2: Kantong + rekonsiliasi) ──────────────────────
-let keuTab='kantong';
+let keuTab='treasury';
 function swKeu(t){ keuTab=t; rKeu(); }
 function pocketMeta(role){
   const m={
@@ -655,14 +655,15 @@ function pocketOptions(sel){
 function rKeu(){
   const el=document.getElementById('p-u'); if(!el) return;
   const nInbox=(typeof pendingEvents==='function')?pendingEvents().length:0;
-  const tabs=[['kantong','🏦 Kantong'],['inbox','📥 Inbox'+(nInbox?' ('+nInbox+')':'')],['investor','🤝 Investor']];
+  const tabs=[['treasury','📊 Treasury'],['kantong','🏦 Kantong'],['investor','🤝 Investor'],['inbox','📥 Inbox'+(nInbox?' ('+nInbox+')':'')]];
   let sub=`<div style="display:flex;gap:6px;overflow-x:auto;margin-bottom:14px;padding-bottom:4px;-webkit-overflow-scrolling:touch">`;
   tabs.forEach(([k,l])=>sub+=`<button class="tab ${keuTab===k?'on':''}" onclick="swKeu('${k}')" style="flex:0 0 auto;padding:9px 12px">${l}</button>`);
   sub+=`</div>`;
   let body='';
   if(keuTab==='inbox') body=rKeuInbox();
   else if(keuTab==='investor') body=rKeuInvestor();
-  else body=rKeuKantong();
+  else if(keuTab==='kantong') body=rKeuKantong();
+  else body=rTreasuryHub();
   el.innerHTML=sub+body;
 }
 function rKeuKantong(){
@@ -1231,6 +1232,7 @@ function seedRoxanne(){
     {proyek:'Ayam Petelor',      deploy:47.25,  sumber:[{s:'Gde',j:47.25}]},
     {proyek:'Pelayaran',         deploy:47.25,  sumber:[{s:'Gde',j:47.25}]},
   ];
+  if(window.Treasury){ try{ Treasury.migrate(S); }catch(e){ console.warn('[seed migrate]',e); } }
   save(); rKeu(); toast('✅ Data asli Roxanne di-seed');
 }
 
@@ -1333,6 +1335,165 @@ function m6Recommendations(){
     recs.push({lv:'green', t:`Modal hampir fully deployed, cash bebas untuk attack ~Rp 0.`, s: nextIn?`Tunggu ${nextIn.label.split(' · ')[0]} balik ~${fj(nextIn.jumlah)} (${fd(nextIn.tanggal)}) baru bisa ambil proyek baru.`:`Tunggu return proyek masuk dulu.`});
   }
   return recs;
+}
+// ══ TREASURY HUB (engine-powered decision cockpit) ═══════════════════
+// Semua angka di sini berasal dari treasury.js (pure engine): opening checks,
+// skenario likuiditas, maturity ladder, matriks alokasi, metrik, rekomendasi.
+function tFpc(x){ return (x==null)?'—':(Math.round(x*10)/10)+'%'; }
+function tFx(x){ return (Math.round(x*100)/100)+'×'; }
+function rTreasuryHub(){
+  if(!window.Treasury) return `<div class="es"><div class="ei">⚙️</div><div class="et">Engine belum termuat</div><div class="esb">treasury.js gagal load. Muat ulang halaman.</div></div>`;
+  const st=engineState(), cfg=engineCfg(), today=todayISO();
+  let h='';
+  // 1) opening-position integrity
+  const oc=Treasury.openingChecks(st);
+  const allOk=oc.checks.every(c=>c.ok);
+  h+=`<div class="rep-sec" style="color:var(--p-deep)">🔎 Cek Posisi Awal</div>
+    <div class="card-s" style="margin-bottom:12px;border-left:4px solid ${allOk?'#0B8F46':'#B45309'}">`;
+  oc.checks.forEach(c=>{ h+=`<div class="rep-r"><span class="rl">${c.ok?'✅':'⚠️'} ${c.label}</span><span class="rv">${fj(c.actual)}</span></div>`; });
+  h+=`</div>`;
+  // 2) liquidity scenarios
+  const scs=['base','conservative','stress'].map(s=>({s,p:Treasury.projectScenario(st,cfg,s,today), rrpr:Treasury.requiredRRPR(st,cfg,today)}));
+  const rrprActual=Treasury.pocketBal(st,Treasury.POCKET.RRPR);
+  h+=`<div class="rep-sec" style="color:var(--p-deep)">🌊 Skenario Likuiditas</div>`;
+  h+=`<div class="mtr-grid" style="grid-template-columns:1fr 1fr 1fr">`;
+  const scLabel={base:'Base',conservative:'Konservatif',stress:'Stress'};
+  scs.forEach(({s,p})=>{ const bad=p.minCash<-0.005; h+=`<div class="mtr-card" onclick="tScenario('${s}')">
+    <div class="mc-i">ⓘ</div><div class="mc-lbl">${scLabel[s]}</div>
+    <div class="mc-val" style="color:${bad?'var(--r)':'#0B8F46'};font-size:15px">${fj(p.minCash)}</div>
+    <div class="mc-sub">kas terendah${p.firstBreach?' · jebol '+fd(p.firstBreach):''}</div></div>`; });
+  h+=`</div>`;
+  h+=`<div class="fc-note" style="margin:2px 0 12px">Cadangan RRPR: <b>${fj(rrprActual)}</b> dari target <b>${fj(scs[1].rrpr)}</b> (celah stress ×1,25 + cushion). ${rrprActual>=scs[1].rrpr?'✅ cukup':'⚠️ di bawah target'}. Ketuk kartu untuk lihat timeline kejadian.</div>`;
+  // 3) metrics grid (drill-down)
+  const m=Treasury.metrics(st,cfg,today);
+  window._tMetrics=m; window._tCfg=cfg;
+  h+=`<div class="rep-sec" style="color:var(--p-deep)">📈 Metrik Perusahaan <span style="font-weight:700;font-size:9px;color:var(--sub);text-transform:none;letter-spacing:0">· bahan jualan investor · ketuk untuk rumus</span></div>`;
+  const cards=[
+    ['aum','🏛️','Dana Kelolaan',fj(m.AUM),'AUM'],
+    ['equity','👑','Modal Sendiri',fj(m.ownerEquity),'ekuitas owner (Papa TIDAK termasuk)'],
+    ['reg','🤝','Investor Reguler',fj(m.regularLiab),'kewajiban reguler'],
+    ['flex','🧩','Investor Fleksibel',fj(m.flexLiab),'Papa · pihak berelasi'],
+    ['lev','⚖️','Leverage',tFx(m.leverage),'dana investor ÷ modal'],
+    ['roe','🚀','ROE/bln',tFpc(m.roe),'laba ÷ ekuitas'],
+    ['roi','📊','ROI Aset/bln',tFpc(m.roiAset),'laba ÷ dana proyek'],
+    ['spread','✂️','Spread',tFpc(m.spread),'yield − 2%'],
+    ['free','⚔️','Modal Serang Aman',fj(m.freeAttack),'siap deploy hari ini'],
+    ['rrpr','🛡️','RRPR vs Target',fj(m.rrprActual),'target '+fj(m.rrprRequired)],
+  ];
+  h+=`<div class="mtr-grid">`+cards.map(c=>`<div class="mtr-card" onclick="tDrill('${c[0]}')"><div class="mc-i">ⓘ</div><div class="mc-lbl">${c[1]} ${c[2]}</div><div class="mc-val" style="font-size:16px">${c[3]}</div><div class="mc-sub">${c[4]}</div></div>`).join('')+`</div>`;
+  // 4) investor split (Papa separated)
+  h+=`<div class="rep-sec" style="color:var(--p-deep)">🤝 Struktur Investor</div><div class="card-s" style="margin-bottom:12px">
+    <div class="rep-r"><span class="rl">Investor Reguler</span><span class="rv">${fj(m.regularLiab)}</span></div>
+    <div class="rep-r"><span class="rl">Investor Fleksibel Pihak Berelasi (Papa)</span><span class="rv">${fj(m.flexLiab)}</span></div>
+    <div class="rep-r" style="border-top:1.5px solid var(--bdr);font-weight:900;margin-top:2px;padding-top:5px"><span class="rl">Total Investor</span><span class="rv">${fj(m.investorLiab)}</span></div></div>`;
+  // 5) maturity ladder
+  const ladder=Treasury.maturityLadder(st,cfg,today,'conservative');
+  h+=`<div class="rep-sec" style="color:var(--p-deep)">📅 Maturity Ladder <span style="font-weight:700;font-size:9px;color:var(--sub);text-transform:none;letter-spacing:0">· konservatif</span></div>`;
+  h+=`<div class="card-s" style="overflow-x:auto;margin-bottom:12px"><table style="width:100%;border-collapse:collapse;font-size:11px;min-width:440px">
+    <tr style="font-weight:900;border-bottom:1.5px solid var(--bdr)"><td style="padding:4px">Horizon</td><td style="text-align:right">Pokok</td><td style="text-align:right">Bagi hasil</td><td style="text-align:right">Papa call</td><td style="text-align:right">Inflow layak</td><td style="text-align:right">Sinking</td><td style="text-align:right">Belum tertutup</td></tr>`;
+  ladder.forEach(r=>{ h+=`<tr style="border-bottom:1px solid var(--bdr)"><td style="padding:4px;font-weight:800">${r.days}h</td><td style="text-align:right">${fj(r.principal)}</td><td style="text-align:right">${fj(r.ret)}</td><td style="text-align:right">${fj(r.papaCall)}</td><td style="text-align:right;color:#0B8F46">${fj(r.inflow)}</td><td style="text-align:right">${fj(r.sinking)}</td><td style="text-align:right;color:${r.uncovered>0.005?'var(--r)':'var(--sub)'};font-weight:800">${fj(r.uncovered)}</td></tr>`; });
+  h+=`</table></div>`;
+  // 6) capital allocation matrix
+  h+=tMatrix(st);
+  // 7) recommendation tools
+  h+=`<div class="rep-sec" style="color:var(--p-deep)">🎯 Alat Rekomendasi</div>
+    <div class="card-s" style="margin-bottom:8px">
+      <div style="font-weight:900;font-size:12.5px;margin-bottom:6px">💧 Return proyek masuk → alokasikan</div>
+      <div style="display:flex;gap:6px"><input class="fi" id="t-ret-amt" type="number" step="0.01" placeholder="jumlah (jt)" style="flex:1"><button class="btn pr" onclick="tWaterfall()" style="padding:8px 14px;font-size:12px">Hitung</button></div>
+      <div id="t-ret-out" style="margin-top:8px"></div></div>
+    <div class="card-s" style="margin-bottom:12px">
+      <div style="font-weight:900;font-size:12.5px;margin-bottom:6px">🚀 Proyek baru → sumber dana + keamanan</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap"><input class="fi" id="t-dep-amt" type="number" step="0.01" placeholder="deploy (jt)" style="flex:1;min-width:120px"><input class="fi" id="t-dep-jt" type="date" style="flex:1;min-width:120px"><button class="btn pr" onclick="tFunding()" style="padding:8px 14px;font-size:12px">Cek</button></div>
+      <label style="font-size:10.5px;color:var(--sub);font-weight:700;display:flex;align-items:center;gap:5px;margin-top:6px"><input type="checkbox" id="t-dep-emg"> mode darurat (boleh pakai RRPR)</label>
+      <div id="t-dep-out" style="margin-top:8px"></div></div>`;
+  return h;
+}
+function tMatrix(st){
+  const allocs=st.allocations||[];
+  if(!allocs.length) return `<div class="rep-sec" style="color:var(--p-deep)">🧩 Matriks Alokasi Modal</div><div class="fc-note" style="margin-bottom:12px">Belum ada alokasi termigrasi.</div>`;
+  const provIds=[...new Set(allocs.map(a=>a.providerId))];
+  const provName=(id)=>{ const p=(st.providers||[]).find(x=>x.id===id); return p?p.name.split(' ')[0]:id.replace('prov:',''); };
+  const projIds=[...new Set(allocs.map(a=>a.projectId))];
+  const projName=(id)=>{ const a=allocs.find(x=>x.projectId===id); return a?(a.projectName||id):id; };
+  const deployOf=(pid)=>{ const p=(st.projects||[]).find(x=>x.id===pid||x.name===pid); if(p) return p.deploy; const a=allocs.find(x=>x.projectId===pid); return a? (( (st.orgConfig.alokasi||[]).find(r=>r.proyek===a.projectName)||{}).deploy||0):0; };
+  let h=`<div class="rep-sec" style="color:var(--p-deep)">🧩 Alokasi Internal Modal</div>
+    <div class="fc-note" style="margin-bottom:8px">Alokasi manajemen untuk pencatatan internal; bukan ring-fencing kontraktual.</div>
+    <div class="card-s" style="overflow-x:auto;margin-bottom:12px"><table style="width:100%;border-collapse:collapse;font-size:11px;min-width:${120+provIds.length*70+120}px">
+    <tr style="font-weight:900;border-bottom:1.5px solid var(--bdr)"><td style="padding:4px">Proyek</td>${provIds.map(p=>`<td style="text-align:right;padding:4px">${provName(p)}</td>`).join('')}<td style="text-align:right">Total</td><td style="text-align:right">Deploy</td><td style="text-align:center">✓</td></tr>`;
+  projIds.forEach(pid=>{
+    const rowTot=Treasury.R4(allocs.filter(a=>a.projectId===pid).reduce((s,a)=>s+a.amount,0));
+    const dep=Treasury.R4(deployOf(pid)); const ok=Math.abs(rowTot-dep)<0.005;
+    h+=`<tr style="border-bottom:1px solid var(--bdr)"><td style="padding:4px;font-weight:800">${projName(pid)}</td>`;
+    provIds.forEach(prov=>{ const a=allocs.find(x=>x.projectId===pid&&x.providerId===prov); h+=`<td style="text-align:right">${a?fjPlain(a.amount):'·'}</td>`; });
+    h+=`<td style="text-align:right;font-weight:800">${fjPlain(rowTot)}</td><td style="text-align:right">${fjPlain(dep)}</td><td style="text-align:center">${ok?'✅':'⚠️'}</td></tr>`;
+  });
+  // column totals
+  h+=`<tr style="border-top:1.5px solid var(--bdr);font-weight:900"><td style="padding:4px">Total</td>`;
+  provIds.forEach(prov=>{ const t=Treasury.R4(allocs.filter(a=>a.providerId===prov).reduce((s,a)=>s+a.amount,0)); h+=`<td style="text-align:right">${fjPlain(t)}</td>`; });
+  const grand=Treasury.R4(allocs.reduce((s,a)=>s+a.amount,0));
+  h+=`<td style="text-align:right">${fjPlain(grand)}</td><td></td><td></td></tr></table></div>`;
+  return h;
+}
+function tScenario(s){
+  const st=engineState(), cfg=engineCfg(), p=Treasury.projectScenario(st,cfg,s,todayISO());
+  const lbl={base:'Base (tanpa telat)',conservative:'Konservatif (+7h)',stress:'Stress (+21h, haircut, Papa 100%)'}[s];
+  document.getElementById('mo-keu-t').textContent='🌊 '+lbl;
+  let b=`<div class="rep-r" style="font-weight:900"><span class="rl">Kas sekarang</span><span class="rv">${fj(p.start)}</span></div>`;
+  b+=`<div class="fc-note" style="margin:8px 0">Kas terendah ${fj(p.minCash)} pada ${fd(p.minDate)}${p.firstBreach?' · pertama jebol '+fd(p.firstBreach):''} · celah maks ${fj(p.maxGap)}.</div>`;
+  b+=`<div class="card-s">`;
+  (p.events.slice(0,20)).forEach(e=>{ b+=`<div class="rep-r"><span class="rl" style="font-size:11px">${fd(e.date)} · ${e.label} <b style="color:${e.amount<0?'var(--r)':'#0B8F46'}">${e.amount<0?'':'+'}${fj(e.amount)}</b></span><span class="rv" style="color:${e.cash<0?'var(--r)':'var(--txt)'}">${fj(e.cash)}</span></div>`; });
+  if(!p.events.length) b+=`<div class="fc-note">Tak ada kejadian ke depan.</div>`;
+  b+=`</div>`;
+  document.getElementById('mo-keu-b').innerHTML=b; om('mo-keu');
+}
+function tDrill(key){
+  const m=window._tMetrics; if(!m) return;
+  const D={
+    aum:['🏛️ Dana Kelolaan (AUM)',fj(m.AUM),'Kas likuid semua kantong + dana di proyek.',[['Kas likuid',fj(m.liquid)],['+ Dana di proyek',fj(m.deployed)],['= AUM',fj(m.AUM)]],'Ukuran skala fund. Setara modal sendiri + dana investor + kewajiban lain.'],
+    equity:['👑 Modal Sendiri',fj(m.ownerEquity),'Modal Gde + Modal RRPR + Laba Ditahan + Laba Berjalan. Papa TIDAK termasuk (Papa = liabilitas).',[['Ekuitas owner',fj(m.ownerEquity)]],'Denominator ROE cuma pakai ekuitas sejati ini.'],
+    reg:['🤝 Investor Reguler',fj(m.regularLiab),'Total pokok investor reguler (non-fleksibel).',[['Reguler',fj(m.regularLiab)],['Fleksibel (Papa)',fj(m.flexLiab)],['Total',fj(m.investorLiab)]],'Semua bagi hasil tetap 2%/bln.'],
+    flex:['🧩 Investor Fleksibel Pihak Berelasi',fj(m.flexLiab),'Papa: pokok tetap liabilitas + masuk leverage, TAPI tak dihitung ekuitas. Return diakru tiap bulan.',[['Papa (fleksibel)',fj(m.flexLiab)]],'Ada asumsi penarikan: base 0%, konservatif 25%, stress 100% (di skenario likuiditas).'],
+    lev:['⚖️ Leverage',tFx(m.leverage),'Dana Investor (termasuk Papa) ÷ Modal Sendiri.',[['Dana investor',fj(m.investorLiab)],['÷ Modal sendiri',fj(m.ownerEquity)],['= Leverage',tFx(m.leverage)]],'Tiap Rp1 modal menggerakkan Rp'+m.leverage.toFixed(2)+' dana investor.'],
+    roe:['🚀 ROE / bln',tFpc(m.roe),'Laba bersih bulanan ÷ Modal Sendiri.',[['Laba bersih/bln',fj(m.labaBln)],['÷ Ekuitas',fj(m.ownerEquity)],['= ROE',tFpc(m.roe)]],'ROE ('+tFpc(m.roe)+') > ROI aset ('+tFpc(m.roiAset)+') karena leverage dana murah 2%.'],
+    roi:['📊 ROI Aset / bln',tFpc(m.roiAset),'Laba bersih bulanan ÷ Dana di Proyek (tanpa leverage).',[['Laba bersih/bln',fj(m.labaBln)],['÷ Dana proyek',fj(m.deployed)],['= ROI',tFpc(m.roiAset)]],'Return polos aset sebelum efek leverage.'],
+    spread:['✂️ Spread',tFpc(m.spread),'Imbal hasil proyek/bln − biaya investor 2%.',[['Yield proyek/bln',tFpc(m.yieldBln)],['− Biaya investor','2%'],['= Spread',tFpc(m.spread)]],'Model bisnis: himpun 2%, tanam di proyek, ambil selisih.'],
+    free:['⚔️ Modal Serang Aman',fj(m.freeAttack),'Kas serang (Gde + investor idle) − kewajiban dekat belum tertutup − cushion. RRPR & sinking TIDAK dihitung.',[['Modal serang aman',fj(m.freeAttack)]],'Di posisi fully-deployed ini ~Rp0: RRPR 13,19 bukan modal serang.'],
+    rrpr:['🛡️ RRPR vs Target',fj(m.rrprActual),'Cadangan aktual vs target (celah stress ×1,25 + cushion).',[['Aktual',fj(m.rrprActual)],['Target',fj(m.rrprRequired)],['Selisih',fj(Treasury.R4(m.rrprActual-m.rrprRequired))]],'RRPR = benteng terakhir, bukan modal serang.'],
+  }[key];
+  if(!D) return;
+  document.getElementById('mo-keu-t').textContent=D[0];
+  let b=`<div style="text-align:center;margin:2px 0 14px"><div style="font-size:28px;font-weight:900;color:var(--p-deep);font-family:'Geist Mono','SF Mono',monospace">${D[1]}</div></div>`;
+  b+=`<div class="rep-sec" style="margin-top:4px">Rumus</div><div class="fc-note" style="margin-bottom:12px">${D[2]}</div>`;
+  b+=`<div class="rep-sec">Perhitungan</div><div class="card-s" style="margin-bottom:12px">`;
+  D[3].forEach((r,i)=>{ const strong=i===D[3].length-1; b+=`<div class="rep-r"${strong?' style="border-top:1.5px solid var(--bdr);margin-top:2px;padding-top:5px;font-weight:900"':''}><span class="rl">${r[0]}</span><span class="rv"${strong?' style="font-weight:900"':''}>${r[1]}</span></div>`; });
+  b+=`</div><div class="fc-note">${D[4]}</div>`;
+  document.getElementById('mo-keu-b').innerHTML=b; om('mo-keu');
+}
+function tWaterfall(){
+  const amt=parseFloat(document.getElementById('t-ret-amt').value||0);
+  if(!(amt>0)){ document.getElementById('t-ret-out').innerHTML='<div class="fc-note" style="color:var(--r)">Isi jumlah dulu.</div>'; return; }
+  const w=Treasury.returnWaterfall(engineState(),engineCfg(),amt,todayISO());
+  let h=`<div class="card-s" style="background:var(--clay-card)">`;
+  w.steps.forEach(s=>{ h+=`<div class="rep-r"><span class="rl" style="font-size:11px">${s.to}<div style="font-size:9.5px;color:var(--sub)">${s.why}</div></span><span class="rv" style="font-weight:800">${fj(s.amount)}</span></div>`; });
+  h+=`</div>`;
+  document.getElementById('t-ret-out').innerHTML=h;
+}
+function tFunding(){
+  const dep=parseFloat(document.getElementById('t-dep-amt').value||0);
+  const jt=document.getElementById('t-dep-jt').value, emg=document.getElementById('t-dep-emg').checked;
+  if(!(dep>0)){ document.getElementById('t-dep-out').innerHTML='<div class="fc-note" style="color:var(--r)">Isi jumlah deploy dulu.</div>'; return; }
+  const r=Treasury.fundingRecommendation(engineState(),engineCfg(),dep,{today:todayISO(),maturityDate:jt||undefined,emergency:emg});
+  const badge=r.ok?'<span style="color:#0B8F46;font-weight:900">✅ AMAN</span>':'<span style="color:var(--r);font-weight:900">⛔ DITAHAN</span>';
+  let h=`<div class="card-s"><div style="margin-bottom:6px">${badge}</div>
+    <div class="rep-r"><span class="rl">Dari Investor Idle</span><span class="rv">${fj(r.sources.idleInvestor)}</span></div>
+    <div class="rep-r"><span class="rl">Dari Gde</span><span class="rv">${fj(r.sources.gde)}</span></div>
+    <div class="rep-r"><span class="rl">Dari RRPR (darurat)</span><span class="rv">${fj(r.sources.rrpr)}</span></div>
+    ${r.shortfall>0.005?`<div class="rep-r" style="color:var(--r)"><span class="rl">Kurang</span><span class="rv">${fj(r.shortfall)}</span></div>`:''}
+    <div class="rep-r" style="border-top:1.5px solid var(--bdr);margin-top:2px;padding-top:5px"><span class="rl">Kas terendah setelah deploy</span><span class="rv" style="color:${r.after.minCash<0?'var(--r)':'#0B8F46'}">${fj(r.after.minCash)}</span></div>
+    <div class="rep-r"><span class="rl">RRPR wajib: sebelum → sesudah</span><span class="rv">${fj(r.before.rrprRequired)} → ${fj(r.after.rrprRequired)}</span></div>`;
+  if(r.blockReasons.length) h+=`<div class="fc-note" style="color:var(--r);margin-top:6px">${r.blockReasons.map(x=>'• '+x).join('<br>')}</div>`;
+  h+=`</div>`;
+  document.getElementById('t-dep-out').innerHTML=h;
 }
 // ── M6 v2: PUSAT METRIK INTERNAL (bahan jualan) + DRILL-DOWN ──────────
 // Tiap metrik derivasi dari ledger/jadwal, dan bisa diklik untuk lihat rumus
@@ -1831,17 +1992,17 @@ function go(p){
   document.getElementById('p-'+p).classList.add('active');
   const _nb=document.getElementById('n-'+p); if(_nb) _nb.classList.add('on');
   CP=p;
-  const ti={b:{t:'💸 DanaTrack',s:'Portfolio Manager'},k:{t:'📅 Kalender',s:'Jadwal & cashflow'},u:{t:'🏦 Keuangan',s:'Kantong, inbox & investor'},l:{t:'💧 Likuiditas',s:'Cash-ready, ROE & rekomendasi'},r:{t:'📊 Laporan',s:'Jurnal, neraca, laba rugi, arus kas'}};
+  const ti={b:{t:'💸 DanaTrack',s:'Ringkasan portfolio'},p:{t:'🏗️ Proyek',s:'Daftar & kelola proyek'},k:{t:'📅 Kalender',s:'Jadwal & cashflow'},u:{t:'🏛️ Treasury',s:'Likuiditas, kantong, investor & rekomendasi'},l:{t:'💧 Likuiditas',s:'Cash-ready, ROE & rekomendasi'},r:{t:'📊 Laporan',s:'Jurnal, neraca, laba rugi, arus kas'}};
   document.getElementById('HT').textContent=ti[p]?.t||'';
   document.getElementById('HS').textContent=ti[p]?.s||'';
   document.getElementById('HA').innerHTML=`<button class="hdr-icon" onclick="exportJ()" title="Export">⬆️</button><button class="hdr-icon" onclick="importJ()" title="Import">⬇️</button>`;
-  document.getElementById('fab').style.display=['b'].includes(p)?'flex':'none';
+  document.getElementById('fab').style.display=['p'].includes(p)?'flex':'none';
   window.scrollTo(0,0); // native document scroll: start each tab at the top
-  if(p==='b')rB();else if(p==='k')rK();else if(p==='u')rKeu();
+  if(p==='b')rB();else if(p==='p')rProyek();else if(p==='k')rK();else if(p==='u')rKeu();
   else if(p==='l')document.getElementById('p-l').innerHTML=rKeuLikuiditas();
   else if(p==='r')document.getElementById('p-r').innerHTML=rKeuLaporan();
 }
-function fabAct(){ if(CP==='b') oPM(); }
+function fabAct(){ if(CP==='p'||CP==='b') oPM(); }
 let _tt;
 function toast(m,opts){
   const t=document.getElementById('toast');
@@ -1985,6 +2146,16 @@ function returnSplit(list){
   return {proj,realized,scheduled:Math.max(0,parseFloat((proj-realized).toFixed(2)))};
 }
 
+function rProyek(){
+  const el=document.getElementById('p-p'); if(!el) return;
+  const list=(S.projects||[]);
+  let h=`<div class="rep-sec" style="color:var(--p-deep)">🏗️ Semua Proyek</div>`;
+  if(!list.length){ el.innerHTML=h+`<div class="es"><div class="ei">🌱</div><div class="et">Belum ada proyek</div>${_adminUnlocked?`<button class="btn vio" style="margin-top:14px" onclick="oPM()">＋ Tambah Proyek</button>`:''}</div>`; return; }
+  const aktif=list.filter(p=>p.status!=='selesai'), selesai=list.filter(p=>p.status==='selesai');
+  if(aktif.length){ h+=`<div style="font-size:11px;font-weight:800;color:var(--sub);margin:4px 0 6px">Aktif (${aktif.length})</div>`; aktif.forEach(p=>h+=pCard(p,_adminUnlocked)); }
+  if(selesai.length){ h+=`<div style="font-size:11px;font-weight:800;color:var(--sub);margin:12px 0 6px">Selesai (${selesai.length})</div>`; selesai.forEach(p=>h+=pCard(p,_adminUnlocked)); }
+  el.innerHTML=h;
+}
 function rB(){
   const tersediaC=S.projects.filter(p=>p.status==='tersedia').length;
   const aktifC=S.projects.filter(p=>p.status==='aktif'||p.status==='terlambat').length;
@@ -3726,6 +3897,7 @@ function rAll(){
   fixProjectStatuses();
   try {
     if(CP==='b') rB();
+    else if(CP==='p') rProyek();
     else if(CP==='k') rK();
     else if(CP==='u') rKeu();
     else if(CP==='l'){const el=document.getElementById('p-l'); if(el) el.innerHTML=rKeuLikuiditas();}
@@ -3779,7 +3951,7 @@ async function unlockAdmin(){
   _adminUnlocked=true;
   cm('mo-pin');
   // Show admin tabs, hide admin button
-  ['n-u','n-l','n-r','n-k'].forEach(id=>{const el=document.getElementById(id); if(el) el.style.display='';});
+  ['n-p','n-u','n-r'].forEach(id=>{const el=document.getElementById(id); if(el) el.style.display='';});
   document.getElementById('n-admin').style.display='none';
   // Load from Firestore
   await loadFromFirestore();

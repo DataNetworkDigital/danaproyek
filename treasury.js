@@ -448,57 +448,67 @@
   // Additive + versioned. Never destroys S.investorContracts / S.external /
   // S.orgConfig.alokasi. Stable IDs => running twice changes nothing.
   const SCHEMA_VERSION = 4;
+  // Rebuild the derived unified model deterministically each run. Anything the
+  // engine derives (ids prefixed prov:/ctr:/alloc:) is regenerated from the
+  // legacy sources so re-seeding (which replaces contract ids) can't leave stale
+  // duplicates; any manually-added rows (other id prefixes) are preserved.
   function migrate(state) {
-    state.capitalProviders = state.capitalProviders || [];
-    state.capitalContracts = state.capitalContracts || [];
-    state.capitalAllocations = state.capitalAllocations || [];
-    const upsert = (arr, obj) => { const i = arr.findIndex((x) => x.id === obj.id); if (i >= 0) arr[i] = Object.assign({}, arr[i], obj); else arr.push(obj); };
+    const keepP = (state.capitalProviders || []).filter((x) => !/^prov:/.test(x.id));
+    const keepC = (state.capitalContracts || []).filter((x) => !/^ctr:/.test(x.id));
+    const keepA = (state.capitalAllocations || []).filter((x) => !/^alloc:/.test(x.id));
+    const P = [], C = [], A = [];
+    const upP = (obj) => { const i = P.findIndex((x) => x.id === obj.id); if (i >= 0) P[i] = Object.assign({}, P[i], obj); else P.push(obj); };
 
     // 1) owners (Gde + RRPR) as owner_equity providers
-    upsert(state.capitalProviders, { id: 'prov:gde', name: 'Gde', classification: 'owner_equity', subtype: 'owner_gde', relatedParty: false, active: true });
-    upsert(state.capitalProviders, { id: 'prov:rrpr', name: 'RRPR', classification: 'owner_equity', subtype: 'owner_rrpr', relatedParty: false, active: true });
+    upP({ id: 'prov:gde', name: 'Gde', classification: 'owner_equity', subtype: 'owner_gde', relatedParty: false, active: true });
+    upP({ id: 'prov:rrpr', name: 'RRPR', classification: 'owner_equity', subtype: 'owner_rrpr', relatedParty: false, active: true });
 
-    // 2) investor contracts → providers + contracts
+    // 2) investor contracts → providers + contracts (fully rebuilt from source)
     (state.investorContracts || []).forEach((c) => {
       const flexible = !!c.flexible;
       const nameKey = (c.nama || 'inv').toLowerCase().split(/\s|\(/)[0]; // veda/laili/fuad/papa
       const provId = 'prov:' + nameKey;
       const subtype = flexible ? 'related_party_flexible' : 'regular';
-      const dispName = flexible ? 'Papa — Investor Fleksibel Pihak Berelasi' : (c.nama || 'Investor');
-      upsert(state.capitalProviders, { id: provId, name: flexible ? dispName : nameKey.charAt(0).toUpperCase() + nameKey.slice(1), classification: 'investor_debt', subtype, relatedParty: flexible, active: c.status !== 'selesai' });
-      upsert(state.capitalContracts, {
+      const dispName = flexible ? 'Papa — Investor Fleksibel Pihak Berelasi' : (nameKey.charAt(0).toUpperCase() + nameKey.slice(1));
+      upP({ id: provId, name: dispName, classification: 'investor_debt', subtype, relatedParty: flexible, active: c.status !== 'selesai' });
+      C.push({
         id: 'ctr:' + c.id, providerId: provId, principal: R4(c.pokok), ratePct: c.ratePct != null ? c.ratePct : 2,
         startDate: c.tanggalMulai, maturityDate: c.tanggalMaturity || null, flexible, noticeDays: flexible ? (c.noticeDays || 30) : null,
         withdrawalNotice: c.withdrawalNotice || null, schedule: c.schedule || [], status: c.status || 'aktif', legacyName: c.nama,
       });
     });
 
-    // 3) project allocations from orgConfig.alokasi (name → provider, project name → projectId)
-    const projByName = {};
-    (state.projects || []).forEach((p) => { if (p.peminjam) projByName[normName(p.peminjam)] = p; });
+    // 3) project allocations from orgConfig.alokasi (name → provider, name → active projectId)
     (((state.orgConfig || {}).alokasi) || []).forEach((row) => {
       const proj = matchProject(state, row.proyek);
       const projId = proj ? (proj.id || proj.peminjam) : row.proyek;
       (row.sumber || []).forEach((src) => {
         const key = normName(src.s).split(/\s/)[0];
-        const provId = 'prov:' + key;
-        upsert(state.capitalAllocations, {
-          id: 'alloc:' + normName(row.proyek) + ':' + key, providerId: provId, contractId: null,
+        A.push({
+          id: 'alloc:' + normName(row.proyek) + ':' + key, providerId: 'prov:' + key, contractId: null,
           projectId: projId, amount: R4(src.j), allocatedAt: (state.orgConfig && state.orgConfig.seedDate) || null, status: 'active', projectName: row.proyek, sourceName: src.s,
         });
       });
     });
 
+    state.capitalProviders = keepP.concat(P);
+    state.capitalContracts = keepC.concat(C);
+    state.capitalAllocations = keepA.concat(A);
     state.schemaVersion = SCHEMA_VERSION;
     return state;
   }
   function normName(s) { return String(s || '').toLowerCase().replace(/&/g, '').replace(/\s+/g, ' ').trim(); }
+  function keyName(s) { return normName(s).replace(/\bpo\b/g, '').replace(/\bdan\b/g, '').replace(/\bvila\b/g, '').replace(/\s+/g, ' ').trim(); }
+  // Match an allocation row to a project. Restrict to the ACTIVE project set so a
+  // loose name can't collide with dozens of dead/legacy projects (the spec's
+  // name-fragility warning). Exact-normalized match first, fuzzy only as fallback.
   function matchProject(state, name) {
-    const n = normName(name).replace(/\bpo\b/g, '').replace(/\bdan\b/g, '').replace(/\bvila\b/g, '').replace(/\s+/g, ' ').trim();
-    return (state.projects || []).find((p) => {
-      const pn = normName(p.peminjam).replace(/\bpo\b/g, '').replace(/\bdan\b/g, '').replace(/\bvila\b/g, '').replace(/\s+/g, ' ').trim();
-      return pn.indexOf(n.split(' ')[0]) >= 0 || n.indexOf(pn.split(' ')[0]) >= 0;
-    });
+    const active = (state.orgConfig && state.orgConfig.activeProjectNames) || [];
+    const pool = (state.projects || []).filter((p) => !active.length || active.indexOf(p.peminjam) >= 0);
+    const n = keyName(name);
+    let hit = pool.find((p) => keyName(p.peminjam) === n);
+    if (hit) return hit;
+    return pool.find((p) => { const pn = keyName(p.peminjam); return pn.indexOf(n.split(' ')[0]) >= 0 || n.indexOf(pn.split(' ')[0]) >= 0; });
   }
 
   return {
