@@ -1,0 +1,43 @@
+rules_version = '2';
+// ============================================================================
+// Roxanne Capital / DanaTrack — Firestore security rules
+// ----------------------------------------------------------------------------
+// Target model:
+//   - The full private financial state lives in  danatrack/main_data  and is
+//     readable/writable ONLY by an authenticated admin (custom claim admin==true).
+//   - A sanitized, public-safe portfolio summary lives in
+//     danatrack_public/summary  and is world-readable but admin-write only.
+//   - Everything else is denied.
+//
+// This file is checked into the repo but is NOT auto-deployed by GitHub Pages.
+// Apply it deliberately from the Firebase console or CLI AFTER you have created
+// your admin account and granted the admin claim (see FIREBASE_SETUP.md), or you
+// will lock the app out of its own data.
+//
+// Do NOT hardcode a UID here. Admin authority comes from a custom claim so it is
+// configuration, not code.
+// ============================================================================
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAdmin() {
+      return request.auth != null && request.auth.token.admin == true;
+    }
+
+    // Private full state — admin only.
+    match /danatrack/{doc} {
+      allow read, write: if isAdmin();
+    }
+
+    // Sanitized public portfolio summary — world-readable, admin-write.
+    match /danatrack_public/{doc} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Deny everything else by default.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

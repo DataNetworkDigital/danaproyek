@@ -372,6 +372,45 @@ let charts={};
 let _pin='', _saving=false, _saveTimer=null;
 const DOC_ID='main_data';
 
+// ── SECURITY (see FIREBASE_SETUP.md) ──────────────────────────────────
+// Dormant until the Firebase console setup is done. While false: existing PIN
+// unlock + full-doc load (today's behavior) so nobody gets locked out. The real
+// security boundary is firestore.rules (server-side), not this flag.
+const USE_FIREBASE_AUTH=false;
+const PUBLIC_DOC='summary';
+// Sanitized, public-safe projection: portfolio-level only. NO ledger, NO investor
+// identities/amounts, NO pocket balances, NO owner capital.
+function publicSummary(){
+  return {
+    updatedAt:new Date().toISOString(),
+    projects:(S.projects||[]).map(p=>({ id:p.id, nama:p.peminjam, status:p.status,
+      nilai:(typeof publicKontrakP==='function')?publicKontrakP(p):null,
+      returnLabel:(typeof retLabelUmum==='function')?retLabelUmum(p):null,
+      mulai:p.tanggalMulai||p.startDate||null, tempo:p.tanggalJT||null })),
+    ringkas:{ jumlahProyek:(S.projects||[]).length,
+      aktif:(S.projects||[]).filter(p=>p.status==='aktif'||p.status==='terlambat').length }
+  };
+}
+async function publishPublicSummary(){
+  if(!isProdOrigin()||typeof db==='undefined') return;
+  try{ await db.collection('danatrack_public').doc(PUBLIC_DOC).set(publicSummary()); }catch(e){ console.warn('public summary:',e); }
+}
+// Firebase-Auth admin login (used only when USE_FIREBASE_AUTH). Requires the
+// firebase-auth-compat SDK + a custom claim admin==true (see FIREBASE_SETUP.md).
+async function adminLogin(email,pass){
+  if(!USE_FIREBASE_AUTH){ toast('Auth belum diaktifkan'); return; }
+  if(!firebase.auth){ alert('Muat firebase-auth-compat SDK dulu (lihat FIREBASE_SETUP.md).'); return; }
+  try{
+    await firebase.auth().signInWithEmailAndPassword(email,pass);
+    const tok=await firebase.auth().currentUser.getIdTokenResult();
+    if(!tok.claims||!tok.claims.admin){ toast('Akun ini bukan admin'); await firebase.auth().signOut(); return; }
+    _adminUnlocked=true; cm('mo-pin');
+    ['n-p','n-u','n-r'].forEach(id=>{const el=document.getElementById(id); if(el) el.style.display='';});
+    const na=document.getElementById('n-admin'); if(na) na.style.display='none';
+    await loadFromFirestore(); rAll(); go('b'); toast('🔓 Admin');
+  }catch(e){ toast('Login gagal'); console.warn('adminLogin',e); }
+}
+
 function load(){
   try{const s=localStorage.getItem('dt_v3');if(s)S={...S,...JSON.parse(s)};}catch(e){}
   migrateSchema();
@@ -521,6 +560,7 @@ async function saveToFirestore(){
   try{
     const ts=new Date().toISOString();
     await db.collection('danatrack').doc(DOC_ID).set({state:JSON.parse(JSON.stringify(S)),updatedAt:ts},{merge:true});
+    if(USE_FIREBASE_AUTH) publishPublicSummary(); // dormant until auth is enabled
     setSync('synced',ts);
   }catch(e){console.warn('Firestore save:',e);setSync('error');}
   _saving=false;
