@@ -462,7 +462,7 @@ test('T4d. maxSafeTicket finds the largest non-breaching ticket', () => {
   assert.ok(best.ticket >= 0 && best.ticket < 25, 'downsized below the breaking ticket');
   const check = T.guaranteeGate(st, cfg, { ticket: best.ticket, profit: 0, maturityDate: '2026-12-20' },
     T.pickSourcesForDeal(st, cfg, { ticket: best.ticket, maturityDate: '2026-12-20', today: TODAY }).mix, TODAY);
-  assert.notStrictEqual(check.verdict, 'RED', 'the recommended max ticket is actually safe');
+  assert.strictEqual(check.verdict, 'GREEN', 'a ticket we label "aman" must keep a real buffer, not just avoid RED');
 });
 
 // ── Task 5: tiered return schedule ──────────────────────────────────────────
@@ -517,4 +517,51 @@ test('T4e. shortfall (cannot fund) is RED, never GREEN/YELLOW', () => {
   assert.strictEqual(g.verdict, 'RED', 'unfundable deal must be RED');
   assert.ok(/cukup|kurang/i.test(g.reason), 'reason names the funding gap: ' + g.reason);
   assert.strictEqual(g.shortfall, 100);
+});
+
+// ── Review findings C1-C3: the ladder must not lean optimistic ───────────────
+test('C1. an overdue unpaid investor obligation still breaks the guarantee', () => {
+  const st = S({
+    ledger: [entry('2026-07-01', [dr('1010', 120), cr('3000', 120)])],
+    providers: [{ id: 'p1', classification: 'investor_debt', subtype: 'regular' }],
+    contracts: [{ id: 'c1', providerId: 'p1', principal: 100, nama: 'Investor A', schedule: [
+      { tanggal: '2026-07-15', jumlah: 100, tipe: 'pokok', status: 'pending' }, // PAST DUE, unpaid
+      { tanggal: '2026-11-03', jumlah: 2, tipe: 'bagihasil', status: 'pending' },
+    ] }],
+  });
+  const cfg = T.cfgOf({});
+  const deal = { ticket: 40, maturityDate: '2026-12-01', today: TODAY };
+  const g = T.guaranteeGate(st, cfg, deal, [{ code: '1010', amount: 40 }], TODAY);
+  assert.strictEqual(g.verdict, 'RED', 'money already owed cannot vanish from the guarantee');
+});
+
+test('C2. a late/unpaid project inflow is not counted as cash in hand', () => {
+  const st = S({
+    ledger: [entry('2026-08-01', [dr('1010', 5), cr('3000', 5)])],
+    providers: [{ id: 'p1', classification: 'investor_debt', subtype: 'regular' }],
+    contracts: [{ id: 'c1', providerId: 'p1', principal: 50, nama: 'Investor A', schedule: [
+      { tanggal: '2026-09-03', jumlah: 50, tipe: 'pokok', status: 'pending' },
+    ] }],
+    // borrower matured 2 months ago and still has not paid
+    projects: [{ id: 'pr1', name: 'Telat', deploy: 60, type: 'onetime', profit: 10,
+      principalDate: '2026-06-01', inflowQuality: 'contracted' }],
+  });
+  const l = T.paymentLadder(st, T.cfgOf({}), TODAY, {});
+  assert.strictEqual(l.rows[0].covered, false, 'a defaulting borrower is not spendable cash');
+  assert.ok(l.rows[0].cumulativeCash < 0);
+});
+
+test('C3. an inflow landing the same day as a payment cannot fund it (cash-in-advance)', () => {
+  const st = S({
+    ledger: [entry('2026-08-01', [dr('1010', 10), cr('3000', 10)])],
+    providers: [{ id: 'p1', classification: 'investor_debt', subtype: 'regular' }],
+    contracts: [{ id: 'c1', providerId: 'p1', principal: 40, nama: 'Investor A', schedule: [
+      { tanggal: '2026-10-27', jumlah: 40, tipe: 'pokok', status: 'pending' },
+    ] }],
+    // inflow shifted +7d lands exactly on 2026-10-27
+    projects: [{ id: 'pr1', name: 'Pas', deploy: 40, type: 'onetime', profit: 0,
+      principalDate: '2026-10-20', inflowQuality: 'received' }],
+  });
+  const l = T.paymentLadder(st, T.cfgOf({}), TODAY, {});
+  assert.strictEqual(l.rows[0].covered, false, 'cash must be in hand BEFORE the payment date');
 });

@@ -2380,6 +2380,14 @@ function confirmMasuk(id){
   }
   const mix=_pendingDeal.mix, total=Treasury.R4(mix.reduce((s,m)=>s+m.amount,0));
   if(!(total>0)){ toast('❌ Tidak ada dana untuk dipakai'); return; }
+  // Re-validate at the moment of commit: the sheet may have sat open while cloud
+  // sync, another posting, or a date rollover changed the cash position.
+  if(p.status!=='tersedia'){ toast('❌ Project ini sudah tidak tersedia'); cm('mo-keu'); rAll(); return; }
+  const _st=engineState();
+  const lacking=mix.find(m=>Treasury.pocketBal(_st,m.code) < m.amount-0.005);
+  if(lacking){ toast('⚠️ Saldo kantong berubah — dicek ulang'); renderDecision(id); return; }
+  const fresh=Treasury.guaranteeGate(_st,engineCfg(),dealFromProject(p),mix,todayISO());
+  if(fresh.verdict!==_pendingDeal.verdict){ toast('⚠️ Kondisi kas berubah — cek ulang'); renderDecision(id); return; }
   const lines=[{account:'1100',debit:total,credit:0}].concat(mix.map(m=>({account:m.code,debit:0,credit:m.amount})));
   const e=ledgerPost(todayISO(),'Deploy ke proyek: '+(p.peminjam||''),lines,'deploy');
   const prev={status:p.status, tanggalAktif:p.tanggalAktif};
@@ -4220,18 +4228,24 @@ async function unlockAdmin(){
   rAll();
   toast('🔓 Admin unlocked!');
   go('b');
+  openPendingPeluang(); // replay a ?peluang=<id> deep link now that admin is in
 }
 
 // ── INIT ──────────────────────────────────────────────────────────────
 load();
 go('b');
-// Telegram deep link: ...?peluang=<id> opens that opportunity directly.
+// Telegram deep link: ...?peluang=<id>. Admin is not unlocked at load, so stash
+// the id and replay it once unlockAdmin() finishes.
+let _pendingPeluang=null;
 (function(){
   const m=/[?&]peluang=([^&]+)/.exec(location.search);
-  if(!m) return;
-  const id=decodeURIComponent(m[1]);
-  setTimeout(()=>{ if(!_adminUnlocked) return; proyekSeg='peluang'; go('p'); openPeluang(id); }, 400);
+  if(m) _pendingPeluang=decodeURIComponent(m[1]);
 })();
+function openPendingPeluang(){
+  if(!_pendingPeluang) return;
+  const id=_pendingPeluang; _pendingPeluang=null;
+  proyekSeg='peluang'; go('p'); openPeluang(id);
+}
 // Load from cloud for everyone (not just admin) — with retry
 (async function initCloud(){
   for(let i=0;i<5;i++){

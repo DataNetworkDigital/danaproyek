@@ -258,8 +258,11 @@
   // the principal guarantee is fiction.
   function freeCashByPocket(state, cfg, today) {
     const windowEnd = addDays(today, cfg.hardGuaranteeWindowDays);
-    const dueInWindow = investorObligations(state, today)
-      .filter((e) => e.date <= windowEnd)
+    // Papa's assumed call (or a real withdrawal notice) is a claim on idle cash too.
+    const dueInWindow = [].concat(
+      investorObligations(state, today),
+      papaCallEvents(state, cfg, 'conservative', today)
+    ).filter((e) => e.date <= windowEnd)
       .reduce((s, e) => s - e.amount, 0);           // obligations are negative amounts
     const staged = pocketBal(state, POCKET.SINKING);
     const unstagedEarmark = Math.max(0, R4(dueInWindow - staged));
@@ -311,12 +314,18 @@
     const shift = cfg.timingBufferDays;
     const qual = cfg.inflowQuality.conservative;
 
+    // Overdue obligations are money we ALREADY owe: clamp them to today rather than
+    // dropping them, or the guarantee quietly forgets an unpaid investor.
     const obligations = [].concat(
       investorObligations(state, today),
       papaCallEvents(state, cfg, 'conservative', today)
-    ).filter((e) => e.date >= today).sort((a, b) => (a.date < b.date ? -1 : 1));
+    ).map((e) => (e.date < today ? Object.assign({}, e, { date: today, overdue: true }) : e))
+     .sort((a, b) => (a.date < b.date ? -1 : 1));
 
-    const inflows = projectInflows(state, cfg, 'conservative', today).slice();
+    // A borrower who is already past due and still has not paid is NOT cash in hand.
+    // Counting a late inflow is how a defaulting project turns into a false green light.
+    const inflows = projectInflows(state, cfg, 'conservative', today)
+      .filter((i) => i.date >= today);
     if (opts.deal && opts.deal.maturityDate) {
       const d = opts.deal;
       const hc = qual[d.inflowQuality || 'contracted'];
@@ -338,7 +347,8 @@
     const rows = [];
     let minGap = Infinity, firstBreach = null;
     obligations.forEach((o) => {
-      const landed = inflows.filter((i) => i.date <= o.date).reduce((s, i) => s + i.amount, 0);
+      // Cash-in-advance: an inflow landing ON the due date is too late to pay it.
+      const landed = inflows.filter((i) => i.date < o.date).reduce((s, i) => s + i.amount, 0);
       const paidOut = obligations.filter((x) => x.date <= o.date).reduce((s, x) => s - x.amount, 0);
       const cash = R4(startCash + landed - paidOut);
       const covered = cash >= -0.005;
@@ -400,7 +410,9 @@
       if (t <= 0) return true;
       const d = Object.assign({}, deal, { ticket: t, today: today });
       const mix = pickSourcesForDeal(state, cfg, d).mix;
-      return guaranteeGate(state, cfg, d, mix, today).verdict !== 'RED';
+      // "Aman maksimal" must mean GREEN: a ticket that merely avoids RED leaves
+      // zero cushion, and we show this number as the safe ceiling.
+      return guaranteeGate(state, cfg, d, mix, today).verdict === 'GREEN';
     };
     if (test(fullTicket)) return { ticket: fullTicket, limited: false, breach: null };
     let lo = 0, hi = fullTicket;
