@@ -403,6 +403,22 @@
     return { ticket: R4(Math.floor(lo * 100) / 100), limited: true, breach: gate.firstBreach };
   }
 
+  // Tiered monthly return for a new deal: cheap months first, stepping up, cycling.
+  // Fee is netted per month (0 is a valid fee and must survive).
+  function buildTieredSchedule(deploy, startDate, tenorMonths, tcfg) {
+    const t = Object.assign({}, DEFAULT_CONFIG.tieredReturn, tcfg || {});
+    const half = Math.max(1, Math.round(t.cycleMonths / 2));
+    const out = [];
+    for (let k = 1; k <= tenorMonths; k++) {
+      const posInCycle = ((k - 1) % t.cycleMonths) + 1;
+      const ratePct = posInCycle <= half ? t.m1_3 : t.m4_6;
+      const gross = R4(R4(deploy) * ratePct / 100);
+      const fee = R4(R4(deploy) * resolveNumber(t.feePct, DEFAULT_CONFIG.tieredReturn.feePct) / 100);
+      out.push({ date: addMonths(startDate, k), monthIndex: k, ratePct, gross, fee, amount: R4(gross - fee) });
+    }
+    return out;
+  }
+
   // ── maturity ladder (per 7/30/60/90 days) ─────────────────────────────────
   function maturityLadder(state, cfg, today, scenario) {
     scenario = scenario || 'conservative';
@@ -675,7 +691,7 @@
     investorObligations, papaCallEvents, projectInflows, buildEvents, sortEvents, projectScenario,
     obligationsWithin, cushion, requiredRRPR, safeAttackBudget, maturityLadder, concentration, paymentLadder,
     // recommendations
-    returnWaterfall, fundingRecommendation, pickSourcesForDeal, guaranteeGate, maxSafeTicket,
+    returnWaterfall, fundingRecommendation, pickSourcesForDeal, guaranteeGate, maxSafeTicket, buildTieredSchedule,
     // validation + metrics + migration
     validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, migrate,
   };

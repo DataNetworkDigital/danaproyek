@@ -464,3 +464,30 @@ test('T4d. maxSafeTicket finds the largest non-breaching ticket', () => {
     T.pickSourcesForDeal(st, cfg, { ticket: best.ticket, maturityDate: '2026-12-20', today: TODAY }).mix, TODAY);
   assert.notStrictEqual(check.verdict, 'RED', 'the recommended max ticket is actually safe');
 });
+
+// ── Task 5: tiered return schedule ──────────────────────────────────────────
+test('T5a. months 1-3 use 5.5%, months 4-6 use 6.5%, net of the 0.5% fee', () => {
+  const cfg = T.cfgOf({});
+  const sch = T.buildTieredSchedule(100, '2026-08-03', 6, cfg.tieredReturn);
+  assert.strictEqual(sch.length, 6);
+  assert.strictEqual(sch[0].date, '2026-09-03');
+  assert.strictEqual(sch[0].ratePct, 5.5);
+  assert.strictEqual(sch[0].gross, 5.5);
+  assert.strictEqual(sch[0].fee, 0.5);
+  assert.strictEqual(sch[0].amount, 5, 'net = gross - fee');
+  assert.strictEqual(sch[2].ratePct, 5.5);
+  assert.strictEqual(sch[3].ratePct, 6.5, 'month 4 steps up');
+  assert.strictEqual(sch[5].ratePct, 6.5);
+});
+
+test('T5b. the tier cycle resets every 6 months', () => {
+  const sch = T.buildTieredSchedule(100, '2026-08-03', 9, T.cfgOf({}).tieredReturn);
+  assert.strictEqual(sch[6].ratePct, 5.5, 'month 7 restarts the cycle');
+  assert.strictEqual(sch[8].ratePct, 5.5);
+});
+
+test('T5c. a 0% fee stays 0% (does not fall back to the default)', () => {
+  const sch = T.buildTieredSchedule(100, '2026-08-03', 1, { m1_3: 5.5, m4_6: 6.5, cycleMonths: 6, feePct: 0 });
+  assert.strictEqual(sch[0].fee, 0);
+  assert.strictEqual(sch[0].amount, 5.5);
+});
