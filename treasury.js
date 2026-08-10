@@ -402,6 +402,32 @@
       reason: lastDate ? 'Semua kewajiban investor tertutup sampai ' + lastDate + '.' : 'Tidak ada kewajiban investor terjadwal.' };
   }
 
+  // Advisory, not gatekeeping: given a deal we WILL enter, how much extra cash must
+  // arrive and by when so no investor payment is missed. Gde always takes the deal;
+  // the engine's job is to name the requirement, not to refuse.
+  function fundingNeed(state, cfg, deal, mix, today) {
+    const funded = R4((mix || []).reduce((s, m) => s + R4(m.amount), 0));
+    const shortfallNow = R4(Math.max(0, R4(deal.ticket || 0) - funded));
+    // Model the FULL ticket leaving now, including the part we cannot fund yet,
+    // so the requirement covers the real hole rather than a partially-funded one.
+    const ladder = paymentLadder(state, cfg, today, {
+      deal: deal, mix: [{ code: POCKET.GDE, amount: R4(deal.ticket || 0) }],
+    });
+    let worst = 0, byDate = null;
+    ladder.rows.forEach((r) => {
+      const deficit = R4(-r.cumulativeCash);
+      if (deficit > worst) worst = deficit;
+      if (deficit > 0.005 && !byDate) byDate = r.date;
+    });
+    const injection = R4(Math.max(0, worst));
+    return {
+      shortfallNow, injection,
+      byDate: shortfallNow > 0.005 ? today : byDate,
+      total: R4(Math.max(shortfallNow, injection)),
+      ladder,
+    };
+  }
+
   // Largest ticket that still passes the gate. Min-gap is monotonic in ticket,
   // so a bisection converges quickly. Returns the ticket plus why the full one failed.
   function maxSafeTicket(state, cfg, deal, today) {
@@ -719,7 +745,7 @@
     investorObligations, papaCallEvents, projectInflows, buildEvents, sortEvents, projectScenario,
     obligationsWithin, cushion, requiredRRPR, safeAttackBudget, maturityLadder, concentration, paymentLadder,
     // recommendations
-    returnWaterfall, fundingRecommendation, pickSourcesForDeal, guaranteeGate, maxSafeTicket, buildTieredSchedule,
+    returnWaterfall, fundingRecommendation, pickSourcesForDeal, guaranteeGate, maxSafeTicket, buildTieredSchedule, fundingNeed,
     // validation + metrics + migration
     validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, migrate,
   };

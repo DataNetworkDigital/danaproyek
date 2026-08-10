@@ -565,3 +565,40 @@ test('C3. an inflow landing the same day as a payment cannot fund it (cash-in-ad
   const l = T.paymentLadder(st, T.cfgOf({}), TODAY, {});
   assert.strictEqual(l.rows[0].covered, false, 'cash must be in hand BEFORE the payment date');
 });
+
+// ── Advisory mode: fundingNeed ──────────────────────────────────────────────
+test('F1a. a breach becomes a dated injection requirement', () => {
+  const st = S({
+    ledger: [entry('2026-08-01', [dr('1010', 10), cr('3000', 10)])],
+    providers: [{ id: 'p1', classification: 'investor_debt', subtype: 'regular' }],
+    contracts: [{ id: 'c1', providerId: 'p1', principal: 50, nama: 'Investor A', schedule: [
+      { tanggal: '2026-09-03', jumlah: 50, tipe: 'pokok', status: 'pending' },
+    ] }],
+  });
+  const cfg = T.cfgOf({});
+  const need = T.fundingNeed(st, cfg, { ticket: 0, maturityDate: '2026-12-01' }, [], TODAY);
+  assert.ok(need.injection >= 40, 'must ask for at least the 40 shortfall, got ' + need.injection);
+  assert.strictEqual(need.byDate, '2026-09-03', 'deadline is the first date that breaks');
+  assert.strictEqual(need.shortfallNow, 0);
+});
+
+test('F1b. an unfundable deal reports the cash needed before disbursement', () => {
+  const st = S({ ledger: [entry('2026-08-01', [dr('1100', 50), cr('3000', 50)])] });
+  const cfg = T.cfgOf({});
+  const deal = { ticket: 100, maturityDate: '2026-12-01', today: TODAY };
+  const mix = T.pickSourcesForDeal(st, cfg, deal).mix;
+  const need = T.fundingNeed(st, cfg, deal, mix, TODAY);
+  assert.strictEqual(need.shortfallNow, 100, 'the whole ticket is unfunded');
+  assert.strictEqual(need.byDate, TODAY, 'needed before we can disburse');
+});
+
+test('F1c. a safe deal needs nothing', () => {
+  const st = S({ ledger: [entry('2026-08-01', [dr('1010', 500), cr('3000', 500)])] });
+  const cfg = T.cfgOf({});
+  const deal = { ticket: 10, maturityDate: '2026-12-01', today: TODAY };
+  const mix = T.pickSourcesForDeal(st, cfg, deal).mix;
+  const need = T.fundingNeed(st, cfg, deal, mix, TODAY);
+  assert.strictEqual(need.injection, 0);
+  assert.strictEqual(need.shortfallNow, 0);
+  assert.strictEqual(need.byDate, null);
+});
