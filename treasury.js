@@ -803,6 +803,74 @@
     };
   }
 
+  // ── BOT OPERATIONS (shared posting rules) ─────────────────────────────────
+  // The Telegram bot must never re-implement money maths. It calls these to BUILD
+  // a balanced journal entry, then writes it. Ids are deterministic, so tapping a
+  // button twice (or an n8n retry) can never post the same payment twice.
+  const OPS = {
+    bagiHasil: (contractId, period) => 'bh:' + contractId + ':' + period,
+    pokok: (contractId, period) => 'pk:' + contractId + ':' + period,
+    returnProyek: (projectId, period) => 'in:' + projectId + ':' + period,
+    transfer: (from, to, date) => 'tf:' + date + ':' + from + '-' + to,
+    setor: (pocket, date) => 'st:' + date + ':' + pocket,
+  };
+  function buildEntry(tanggal, memo, lines, ref, idem) {
+    const cl = (lines || []).filter((l) => (+l.debit || 0) !== 0 || (+l.credit || 0) !== 0)
+      .map((l) => ({ account: l.account, debit: R4(+l.debit || 0), credit: R4(+l.credit || 0) }));
+    const d = cl.reduce((s, l) => s + l.debit, 0), k = cl.reduce((s, l) => s + l.credit, 0);
+    if (Math.abs(d - k) > 0.005) throw new Error('Jurnal tidak balance: ' + memo + ' (D ' + R4(d) + ' vs K ' + R4(k) + ')');
+    return { id: idem, idem: idem, tanggal: tanggal, memo: memo, ref: ref, lines: cl };
+  }
+  // Pay an investor's bagi hasil out of a pocket.
+  function opBayarBagiHasil(contract, amount, pocketCode, date) {
+    const period = String(date).slice(0, 7);
+    return buildEntry(date, 'Bagi hasil: ' + (contract.nama || 'Investor'),
+      [{ account: '5000', debit: amount, credit: 0 }, { account: pocketCode, debit: 0, credit: amount }],
+      'bayar-bh', OPS.bagiHasil(contract.id, period));
+  }
+  // Return an investor's principal at maturity.
+  function opKembalikanPokok(contract, amount, pocketCode, date) {
+    const period = String(date).slice(0, 7);
+    return buildEntry(date, 'Kembalikan pokok: ' + (contract.nama || 'Investor'),
+      [{ account: '2000', debit: amount, credit: 0 }, { account: pocketCode, debit: 0, credit: amount }],
+      'inv-pokok-out', OPS.pokok(contract.id, period));
+  }
+  // Money in from a borrower project. netAmount lands in cash; the admin fee is an
+  // expense carved out of the gross, exactly as the app's Inbox does it.
+  function opReturnProyek(project, netAmount, feeAmount, pocketCode, date) {
+    const period = String(date).slice(0, 7);
+    const gross = R4(R4(netAmount) + R4(feeAmount || 0));
+    return buildEntry(date, 'Return proyek: ' + (project.name || project.peminjam || 'Proyek'),
+      [{ account: pocketCode, debit: netAmount, credit: 0 },
+       { account: '5020', debit: R4(feeAmount || 0), credit: 0 },
+       { account: '4000', debit: 0, credit: gross }],
+      'return', OPS.returnProyek(project.id || project.peminjam, period));
+  }
+  function opTransfer(fromCode, toCode, amount, date) {
+    if (fromCode === POCKET.SINKING) throw new Error('Kantong Investor Jatuh Tempo terkunci, tidak boleh jadi sumber dana.');
+    return buildEntry(date, 'Transfer antar kantong',
+      [{ account: toCode, debit: amount, credit: 0 }, { account: fromCode, debit: 0, credit: amount }],
+      'transfer', OPS.transfer(fromCode, toCode, date));
+  }
+  function opSetorModal(pocketCode, amount, date) {
+    const equity = pocketCode === POCKET.RRPR ? '3010' : '3000';
+    return buildEntry(date, 'Setor modal owner',
+      [{ account: pocketCode, debit: amount, credit: 0 }, { account: equity, debit: 0, credit: amount }],
+      'setor-modal', OPS.setor(pocketCode, date));
+  }
+  // Reverse a posted entry instead of deleting it (audit trail stays intact).
+  function opReversal(original, date) {
+    return buildEntry(date || original.tanggal, 'KOREKSI: ' + original.memo,
+      (original.lines || []).map((l) => ({ account: l.account, debit: l.credit, credit: l.debit })),
+      'koreksi', original.idem + ':rev');
+  }
+  // Apply an op to a state, refusing duplicates. Pure: returns a new state.
+  function applyOp(state, entry) {
+    if (hasPosted(state.ledger, entry.idem)) return { state: state, applied: false, reason: 'sudah pernah dicatat' };
+    const out = Object.assign({}, state, { ledger: (state.ledger || []).concat([entry]) });
+    return { state: out, applied: true, reason: null };
+  }
+
   // ── SAFE CONCURRENT WRITES (app ↔ Telegram bot) ───────────────────────────
   // The whole fund lives in ONE Firestore document, so a naive whole-state write
   // from the app would silently erase anything the bot posted while the page was
@@ -951,5 +1019,7 @@
     returnWaterfall, fundingRecommendation, pickSourcesForDeal, guaranteeGate, maxSafeTicket, buildTieredSchedule, fundingNeed,
     // validation + metrics + migration
     validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, migrate, mergeCloudOps, incomeBreakdown, deckMetrics, statements,
+    // bot operations (shared posting rules)
+    OPS, buildEntry, opBayarBagiHasil, opKembalikanPokok, opReturnProyek, opTransfer, opSetorModal, opReversal, applyOp,
   };
 });

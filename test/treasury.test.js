@@ -736,3 +736,58 @@ test('M7. bridges and the decision log are not lost either', () => {
   assert.strictEqual((m.state.bridges || []).length, 1);
   assert.strictEqual((m.state.decisionLog || []).length, 1);
 });
+
+// ── Bot operations: the bot posts through the SAME rules as the app ─────────
+test('B1. every bot op produces a balanced entry', () => {
+  const c = { id: 'c1', nama: 'Veda' }, p = { id: 'pr1', name: 'Tani' };
+  const ops = [
+    T.opBayarBagiHasil(c, 1.323, '1000', '2026-09-03'),
+    T.opKembalikanPokok(c, 66.15, '1040', '2026-12-03'),
+    T.opReturnProyek(p, 10, 1, '1000', '2026-09-20'),
+    T.opTransfer('1010', '1040', 5, '2026-09-01'),
+    T.opSetorModal('1010', 25, '2026-09-01'),
+  ];
+  ops.forEach((e) => {
+    const d = e.lines.reduce((s, l) => s + l.debit, 0), k = e.lines.reduce((s, l) => s + l.credit, 0);
+    assert.ok(Math.abs(d - k) < 0.005, e.memo + ' balances (' + d + ' vs ' + k + ')');
+  });
+});
+
+test('B2. a project return books the gross as income and the fee as expense', () => {
+  const e = T.opReturnProyek({ id: 'pr1', name: 'Tani' }, 10, 1, '1000', '2026-09-20');
+  const line = (c) => (e.lines.find((l) => l.account === c) || { debit: 0, credit: 0 });
+  assert.strictEqual(line('1000').debit, 10, 'net cash in');
+  assert.strictEqual(line('5020').debit, 1, 'Mas Hena fee as expense');
+  assert.strictEqual(line('4000').credit, 11, 'gross recognised as income');
+});
+
+test('B3. tapping the button twice cannot post the payment twice', () => {
+  const c = { id: 'c1', nama: 'Veda' };
+  const e = T.opBayarBagiHasil(c, 1.323, '1000', '2026-09-03');
+  let st = S({});
+  const first = T.applyOp(st, e);
+  assert.strictEqual(first.applied, true);
+  const second = T.applyOp(first.state, T.opBayarBagiHasil(c, 1.323, '1000', '2026-09-03'));
+  assert.strictEqual(second.applied, false, 'the deterministic id blocks the duplicate');
+  assert.strictEqual(second.state.ledger.length, 1);
+});
+
+test('B4. the locked sinking pocket can never be a transfer source', () => {
+  assert.throws(() => T.opTransfer('1040', '1010', 5, '2026-09-01'), /terkunci/i);
+});
+
+test('B5. a wrong amount is corrected by reversal, never by deletion', () => {
+  const c = { id: 'c1', nama: 'Veda' };
+  const orig = T.opBayarBagiHasil(c, 1.323, '1000', '2026-09-03');
+  const rev = T.opReversal(orig, '2026-09-04');
+  const d = rev.lines.reduce((s, l) => s + l.debit, 0), k = rev.lines.reduce((s, l) => s + l.credit, 0);
+  assert.ok(Math.abs(d - k) < 0.005, 'reversal balances');
+  assert.strictEqual(rev.lines.find((l) => l.account === '1000').debit, 1.323, 'cash comes back');
+  assert.ok(/KOREKSI/.test(rev.memo));
+  assert.notStrictEqual(rev.idem, orig.idem, 'the reversal has its own id so both survive');
+});
+
+test('B6. setor modal credits the right owner equity account', () => {
+  assert.strictEqual(T.opSetorModal('1020', 10, '2026-09-01').lines.find((l) => l.credit > 0).account, '3010');
+  assert.strictEqual(T.opSetorModal('1010', 10, '2026-09-01').lines.find((l) => l.credit > 0).account, '3000');
+});
