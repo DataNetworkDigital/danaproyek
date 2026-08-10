@@ -326,3 +326,44 @@ test('T1d. freeCash: idle investor is netted when sinking does not cover the win
   const free = T.freeCashByPocket(st, T.cfgOf({}), TODAY);
   assert.strictEqual(free['1030'], 10, '30 idle minus 20 promised inside the window');
 });
+
+// ── Task 2: pickSourcesForDeal ──────────────────────────────────────────────
+function fundedState() {
+  return S({
+    ledger: [
+      entry('2026-08-01', [dr('1030', 20), cr('2000', 20)]),
+      entry('2026-08-01', [dr('1010', 30), cr('3000', 30)]),
+      entry('2026-08-01', [dr('1020', 25), cr('3010', 25)]),
+      entry('2026-08-01', [dr('1040', 10), cr('2000', 10)]),
+    ],
+  });
+}
+
+test('T2a. draws idle investor first, then Gde, never the sinking pocket', () => {
+  const st = fundedState(), cfg = T.cfgOf({});
+  const r = T.pickSourcesForDeal(st, cfg, { ticket: 45, maturityDate: '2026-12-01' });
+  assert.strictEqual(r.mix.length, 2);
+  assert.deepStrictEqual(r.mix[0], { code: '1030', amount: 20, bridge: false, restoreBy: null });
+  assert.strictEqual(r.mix[1].code, '1010');
+  assert.strictEqual(r.mix[1].amount, 25);
+  assert.strictEqual(r.shortfall, 0);
+  assert.ok(!r.mix.some((m) => m.code === '1040'), 'sinking pocket never used');
+});
+
+test('T2b. RRPR is a flagged bridge with a restore-by date, used only last', () => {
+  const st = fundedState(), cfg = T.cfgOf({});
+  const r = T.pickSourcesForDeal(st, cfg, { ticket: 60, maturityDate: '2026-12-01' });
+  const rrpr = r.mix.find((m) => m.code === '1020');
+  assert.ok(rrpr, 'RRPR used once cheaper sources are exhausted');
+  assert.strictEqual(rrpr.bridge, true);
+  assert.strictEqual(rrpr.restoreBy, '2026-12-01', 'restore-by is the deal maturity, never an assumed raise');
+  assert.strictEqual(r.usesBridge, true);
+});
+
+test('T2c. reports shortfall when every source is exhausted', () => {
+  const st = fundedState(), cfg = T.cfgOf({});
+  const r = T.pickSourcesForDeal(st, cfg, { ticket: 500, maturityDate: '2026-12-01' });
+  const funded = T.R4(r.mix.reduce((s, m) => s + m.amount, 0));
+  assert.strictEqual(T.R4(funded + r.shortfall), 500, 'funded + shortfall = ticket');
+  assert.ok(r.shortfall > 0);
+});

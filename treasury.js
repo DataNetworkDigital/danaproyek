@@ -287,6 +287,22 @@
     return R4(Math.max(0, cash - reserved - cushion(state, cfg, today)));
   }
 
+  // Deterministic waterfall. Proposes only — guaranteeGate() decides if it is safe.
+  function pickSourcesForDeal(state, cfg, deal) {
+    const free = freeCashByPocket(state, cfg, deal.today || state.today);
+    let rem = R4(deal.ticket);
+    const mix = [];
+    (cfg.fundingOrder || []).forEach((code) => {
+      if (rem <= 0.0001 || code === POCKET.SINKING) return;
+      const take = R4(Math.min(rem, free[code] || 0));
+      if (take <= 0.0001) return;
+      const bridge = code === POCKET.RRPR;
+      mix.push({ code, amount: take, bridge, restoreBy: bridge ? (deal.maturityDate || null) : null });
+      rem = R4(rem - take);
+    });
+    return { mix, shortfall: R4(Math.max(0, rem)), usesBridge: mix.some((m) => m.bridge) };
+  }
+
   // ── maturity ladder (per 7/30/60/90 days) ─────────────────────────────────
   function maturityLadder(state, cfg, today, scenario) {
     scenario = scenario || 'conservative';
@@ -559,7 +575,7 @@
     investorObligations, papaCallEvents, projectInflows, buildEvents, sortEvents, projectScenario,
     obligationsWithin, cushion, requiredRRPR, safeAttackBudget, maturityLadder, concentration,
     // recommendations
-    returnWaterfall, fundingRecommendation,
+    returnWaterfall, fundingRecommendation, pickSourcesForDeal,
     // validation + metrics + migration
     validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, migrate,
   };
