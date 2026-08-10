@@ -416,3 +416,51 @@ test('T3d. minBuffer is derived from near-term daily obligation outflow', () => 
   assert.ok(l.minBuffer >= 0);
   assert.strictEqual(typeof l.minGap, 'number');
 });
+
+// ── Task 4: guaranteeGate + maxSafeTicket ───────────────────────────────────
+test('T4a. GREEN when every obligation date stays covered', () => {
+  const st = S({
+    ledger: [entry('2026-08-01', [dr('1010', 100), cr('3000', 100)])],
+    providers: [{ id: 'p1', classification: 'investor_debt', subtype: 'regular' }],
+    contracts: [{ id: 'c1', providerId: 'p1', principal: 10, nama: 'Investor A', schedule: [
+      { tanggal: '2026-09-03', jumlah: 0.2, tipe: 'bagihasil', status: 'pending' },
+    ] }],
+  });
+  const g = T.guaranteeGate(st, T.cfgOf({}), { ticket: 5, maturityDate: '2026-12-01' },
+    [{ code: '1010', amount: 5 }], TODAY);
+  assert.strictEqual(g.verdict, 'GREEN');
+  assert.strictEqual(g.firstBreach, null);
+});
+
+test('T4b. RED names the exact obligation and date that breaks', () => {
+  const st = ladderState();
+  const g = T.guaranteeGate(st, T.cfgOf({}), { ticket: 25, profit: 3, maturityDate: '2026-12-20' },
+    [{ code: '1010', amount: 25 }], TODAY);
+  assert.strictEqual(g.verdict, 'RED');
+  assert.strictEqual(g.firstBreach.date, '2026-11-03');
+  assert.ok(/Investor A/.test(g.firstBreach.label));
+  assert.ok(g.reason.length > 0);
+});
+
+test('T4c. YELLOW when an RRPR bridge is used even though all dates are covered', () => {
+  const st = S({
+    ledger: [entry('2026-08-01', [dr('1020', 100), cr('3010', 100)])],
+    providers: [], contracts: [],
+  });
+  const g = T.guaranteeGate(st, T.cfgOf({}), { ticket: 5, maturityDate: '2026-12-01' },
+    [{ code: '1020', amount: 5, bridge: true, restoreBy: '2026-12-01' }], TODAY);
+  assert.strictEqual(g.verdict, 'YELLOW');
+  assert.ok(/cadangan|RRPR/i.test(g.reason));
+});
+
+test('T4d. maxSafeTicket finds the largest non-breaching ticket', () => {
+  const st = ladderState(), cfg = T.cfgOf({});
+  const full = T.guaranteeGate(st, cfg, { ticket: 25, profit: 0, maturityDate: '2026-12-20' },
+    [{ code: '1010', amount: 25 }], TODAY);
+  assert.strictEqual(full.verdict, 'RED');
+  const best = T.maxSafeTicket(st, cfg, { ticket: 25, profit: 0, maturityDate: '2026-12-20' }, TODAY);
+  assert.ok(best.ticket >= 0 && best.ticket < 25, 'downsized below the breaking ticket');
+  const check = T.guaranteeGate(st, cfg, { ticket: best.ticket, profit: 0, maturityDate: '2026-12-20' },
+    T.pickSourcesForDeal(st, cfg, { ticket: best.ticket, maturityDate: '2026-12-20', today: TODAY }).mix, TODAY);
+  assert.notStrictEqual(check.verdict, 'RED', 'the recommended max ticket is actually safe');
+});

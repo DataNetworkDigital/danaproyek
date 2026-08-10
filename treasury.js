@@ -353,6 +353,56 @@
     return { rows, minBuffer, minGap: rows.length ? R4(minGap) : R4(startCash), firstBreach, startCash };
   }
 
+  // One plain verdict from the ladder. RED = a dated payment breaks; YELLOW = covered
+  // but thin, bridged, or concentrated; GREEN = safe with buffer to spare.
+  function guaranteeGate(state, cfg, deal, mix, today) {
+    const ladder = paymentLadder(state, cfg, today, { deal: deal, mix: mix });
+    const usesBridge = (mix || []).some((m) => m.bridge);
+    const liquid = totalLiquid(state);
+    const exposurePct = liquid > 0 ? R4(R4(deal.ticket) / liquid * 100) : 0;
+    const overConcentrated = exposurePct > cfg.singleBorrowerCapPct;
+
+    if (ladder.firstBreach) {
+      return {
+        verdict: 'RED', ladder, exposurePct, usesBridge,
+        firstBreach: ladder.firstBreach,
+        reason: 'Kewajiban ' + ladder.firstBreach.label + ' pada ' + ladder.firstBreach.date + ' tidak tertutup.',
+      };
+    }
+    const reasons = [];
+    if (ladder.minGap < ladder.minBuffer) reasons.push('sisa kas menipis di salah satu tanggal');
+    if (usesBridge) reasons.push('memakai cadangan RRPR (harus dikembalikan)');
+    if (overConcentrated) reasons.push('proyek ini ' + exposurePct + '% dari kas likuid');
+    if (reasons.length) {
+      return { verdict: 'YELLOW', ladder, exposurePct, usesBridge, firstBreach: null,
+        reason: reasons.join('; ') + '.' };
+    }
+    const lastDate = ladder.rows.length ? ladder.rows[ladder.rows.length - 1].date : null;
+    return { verdict: 'GREEN', ladder, exposurePct, usesBridge, firstBreach: null,
+      reason: lastDate ? 'Semua kewajiban investor tertutup sampai ' + lastDate + '.' : 'Tidak ada kewajiban investor terjadwal.' };
+  }
+
+  // Largest ticket that still passes the gate. Min-gap is monotonic in ticket,
+  // so a bisection converges quickly. Returns the ticket plus why the full one failed.
+  function maxSafeTicket(state, cfg, deal, today) {
+    const fullTicket = R4(deal.ticket || totalLiquid(state));
+    const test = (t) => {
+      if (t <= 0) return true;
+      const d = Object.assign({}, deal, { ticket: t, today: today });
+      const mix = pickSourcesForDeal(state, cfg, d).mix;
+      return guaranteeGate(state, cfg, d, mix, today).verdict !== 'RED';
+    };
+    if (test(fullTicket)) return { ticket: fullTicket, limited: false, breach: null };
+    let lo = 0, hi = fullTicket;
+    for (let i = 0; i < 24; i++) {
+      const mid = (lo + hi) / 2;
+      if (test(mid)) lo = mid; else hi = mid;
+    }
+    const gate = guaranteeGate(state, cfg, Object.assign({}, deal, { ticket: fullTicket, today: today }),
+      pickSourcesForDeal(state, cfg, Object.assign({}, deal, { ticket: fullTicket, today: today })).mix, today);
+    return { ticket: R4(Math.floor(lo * 100) / 100), limited: true, breach: gate.firstBreach };
+  }
+
   // ── maturity ladder (per 7/30/60/90 days) ─────────────────────────────────
   function maturityLadder(state, cfg, today, scenario) {
     scenario = scenario || 'conservative';
@@ -625,7 +675,7 @@
     investorObligations, papaCallEvents, projectInflows, buildEvents, sortEvents, projectScenario,
     obligationsWithin, cushion, requiredRRPR, safeAttackBudget, maturityLadder, concentration, paymentLadder,
     // recommendations
-    returnWaterfall, fundingRecommendation, pickSourcesForDeal,
+    returnWaterfall, fundingRecommendation, pickSourcesForDeal, guaranteeGate, maxSafeTicket,
     // validation + metrics + migration
     validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, migrate,
   };
