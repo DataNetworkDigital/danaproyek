@@ -274,3 +274,55 @@ test('bonus. opening metrics: leverage>0, ROE denom = owner equity, AUM = 386.46
   assert.strictEqual(m.ownerEquity, 208.815);
   assert.strictEqual(m.leverage, T.R4(177.65 / 208.815));
 });
+
+// ── Task 1: config + addMonths + freeCashByPocket ───────────────────────────
+test('T1a. addMonths handles month-end clamping', () => {
+  assert.strictEqual(T.addMonths('2026-01-31', 1), '2026-02-28');
+  assert.strictEqual(T.addMonths('2026-08-03', 5), '2027-01-03');
+  assert.strictEqual(T.addMonths('2026-12-15', 1), '2027-01-15');
+});
+
+test('T1b. config exposes funding order, window, tiered return defaults', () => {
+  const cfg = T.cfgOf({});
+  assert.deepStrictEqual(cfg.fundingOrder, ['1030', '1010', '1020']);
+  assert.strictEqual(cfg.hardGuaranteeWindowDays, 60);
+  assert.strictEqual(cfg.timingBufferDays, 7);
+  assert.strictEqual(cfg.tieredReturn.m1_3, 5.5);
+  assert.strictEqual(cfg.tieredReturn.m4_6, 6.5);
+  assert.strictEqual(cfg.tieredReturn.cycleMonths, 6);
+  assert.strictEqual(cfg.tieredReturn.feePct, 0.5);
+  assert.strictEqual(cfg.ownerCashTrap, true);
+});
+
+test('T1c. freeCash: sinking locked at 0, idle netted of window earmarks, RRPR floored', () => {
+  const st = S({
+    ledger: [
+      entry('2026-08-01', [dr('1010', 40), cr('3000', 40)]),
+      entry('2026-08-01', [dr('1030', 30), cr('2000', 30)]),
+      entry('2026-08-01', [dr('1020', 20), cr('3010', 20)]),
+      entry('2026-08-01', [dr('1040', 15), cr('2000', 15)]),
+    ],
+    providers: [{ id: 'p1', classification: 'investor_debt', subtype: 'regular' }],
+    contracts: [{ id: 'c1', providerId: 'p1', principal: 30, schedule: [
+      { tanggal: '2026-09-01', jumlah: 12, tipe: 'pokok', status: 'pending' },
+    ] }],
+  });
+  const cfg = T.cfgOf({});
+  const free = T.freeCashByPocket(st, cfg, TODAY);
+  assert.strictEqual(free['1040'], 0, 'sinking pocket is never spendable');
+  assert.strictEqual(free['1010'], 40, 'Gde capital fully available');
+  assert.strictEqual(free['1030'], 30, 'earmark already covered by sinking');
+  assert.strictEqual(free['1020'], T.R4(Math.max(0, 20 - T.requiredRRPR(st, cfg, TODAY))), 'RRPR only above its floor');
+});
+
+test('T1d. freeCash: idle investor is netted when sinking does not cover the window', () => {
+  const st = S({
+    ledger: [entry('2026-08-01', [dr('1030', 30), cr('2000', 30)])],
+    providers: [{ id: 'p1', classification: 'investor_debt', subtype: 'regular' }],
+    contracts: [{ id: 'c1', providerId: 'p1', principal: 30, schedule: [
+      { tanggal: '2026-09-01', jumlah: 20, tipe: 'pokok', status: 'pending' },
+    ] }],
+  });
+  const free = T.freeCashByPocket(st, T.cfgOf({}), TODAY);
+  assert.strictEqual(free['1030'], 10, '30 idle minus 20 promised inside the window');
+});

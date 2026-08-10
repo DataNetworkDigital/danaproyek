@@ -23,6 +23,12 @@
   function parseISO(s) { const [y, m, d] = String(s).split('-').map(Number); return Date.UTC(y, m - 1, d); }
   function isoOf(ms) { const d = new Date(ms), p = (n) => String(n).padStart(2, '0'); return d.getUTCFullYear() + '-' + p(d.getUTCMonth() + 1) + '-' + p(d.getUTCDate()); }
   function addDays(s, n) { return isoOf(parseISO(s) + n * DAY); }
+  function addMonths(s, n) {
+    const [y, m, d] = String(s).split('-').map(Number);
+    const target = new Date(Date.UTC(y, m - 1 + n, 1));
+    const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+    return isoOf(Date.UTC(target.getUTCFullYear(), target.getUTCMonth(), Math.min(d, lastDay)));
+  }
   function daysBetween(a, b) { return Math.round((parseISO(b) - parseISO(a)) / DAY); }
 
   // ── configurable defaults (stored in orgConfig.treasury, editable) ────────
@@ -40,6 +46,13 @@
     rrprMultiplier: 1.25,                                     // safety margin on stress gap
     sinkHorizonDays: 60,                                      // pre-fund principal maturities within this window
     investorRatePct: 2,                                       // fixed monthly rate paid to investors
+    fundingOrder: ['1030', '1010', '1020'],   // idle investor -> Gde -> RRPR (bridge only)
+    operatingFloor: 0,                        // cash kept in Utama as transit float
+    hardGuaranteeWindowDays: 60,              // window we pre-fund and net earmarks against
+    timingBufferDays: 7,                      // inflows assumed this late; also sizes minBuffer
+    singleBorrowerCapPct: 40,                 // warn when one deal exceeds this % of liquid cash
+    ownerCashTrap: true,                      // suppress owner draw while forward buffer is thin
+    tieredReturn: { m1_3: 5.5, m4_6: 6.5, cycleMonths: 6, feePct: 0.5 },
   };
   function cfgOf(orgConfig) {
     const t = (orgConfig && orgConfig.treasury) || {};
@@ -57,6 +70,13 @@
       rrprMultiplier: t.rrprMultiplier != null ? t.rrprMultiplier : DEFAULT_CONFIG.rrprMultiplier,
       sinkHorizonDays: t.sinkHorizonDays != null ? t.sinkHorizonDays : DEFAULT_CONFIG.sinkHorizonDays,
       investorRatePct: t.investorRatePct != null ? t.investorRatePct : (orgConfig && orgConfig.investorRateDefault) || DEFAULT_CONFIG.investorRatePct,
+      fundingOrder: t.fundingOrder || DEFAULT_CONFIG.fundingOrder,
+      operatingFloor: t.operatingFloor != null ? t.operatingFloor : DEFAULT_CONFIG.operatingFloor,
+      hardGuaranteeWindowDays: t.hardGuaranteeWindowDays != null ? t.hardGuaranteeWindowDays : DEFAULT_CONFIG.hardGuaranteeWindowDays,
+      timingBufferDays: t.timingBufferDays != null ? t.timingBufferDays : DEFAULT_CONFIG.timingBufferDays,
+      singleBorrowerCapPct: t.singleBorrowerCapPct != null ? t.singleBorrowerCapPct : DEFAULT_CONFIG.singleBorrowerCapPct,
+      ownerCashTrap: t.ownerCashTrap != null ? t.ownerCashTrap : DEFAULT_CONFIG.ownerCashTrap,
+      tieredReturn: Object.assign({}, DEFAULT_CONFIG.tieredReturn, t.tieredReturn),
     };
   }
 
@@ -231,6 +251,25 @@
     const stress = projectScenario(state, cfg, 'stress', today);
     const gap = Math.max(0, -stress.minCash);
     return R4(gap * cfg.rrprMultiplier + cushion(state, cfg, today));
+  }
+
+  // Spendable cash per pocket, after floors and earmarks.
+  // 1040 (sinking) is structurally un-spendable: the moment it can fund a deal,
+  // the principal guarantee is fiction.
+  function freeCashByPocket(state, cfg, today) {
+    const windowEnd = addDays(today, cfg.hardGuaranteeWindowDays);
+    const dueInWindow = investorObligations(state, today)
+      .filter((e) => e.date <= windowEnd)
+      .reduce((s, e) => s - e.amount, 0);           // obligations are negative amounts
+    const staged = pocketBal(state, POCKET.SINKING);
+    const unstagedEarmark = Math.max(0, R4(dueInWindow - staged));
+    return {
+      '1000': R4(Math.max(0, pocketBal(state, POCKET.HUB) - cfg.operatingFloor)),
+      '1010': R4(Math.max(0, pocketBal(state, POCKET.GDE))),
+      '1020': R4(Math.max(0, pocketBal(state, POCKET.RRPR) - requiredRRPR(state, cfg, today))),
+      '1030': R4(Math.max(0, pocketBal(state, POCKET.IDLE_INV) - unstagedEarmark)),
+      '1040': 0,
+    };
   }
 
   // ── safe attack budget: deployable TODAY without endangering obligations ──
@@ -513,9 +552,9 @@
 
   return {
     // utils
-    R4, addDays, daysBetween, resolveNumber, cfgOf, DEFAULT_CONFIG, SCHEMA_VERSION, POCKET,
+    R4, addDays, addMonths, daysBetween, resolveNumber, cfgOf, DEFAULT_CONFIG, SCHEMA_VERSION, POCKET,
     // ledger
-    balanceOf, retainedProfit, totalLiquid, attackCash, pocketBal,
+    balanceOf, retainedProfit, totalLiquid, attackCash, pocketBal, freeCashByPocket,
     // events + scenarios
     investorObligations, papaCallEvents, projectInflows, buildEvents, sortEvents, projectScenario,
     obligationsWithin, cushion, requiredRRPR, safeAttackBudget, maturityLadder, concentration,
