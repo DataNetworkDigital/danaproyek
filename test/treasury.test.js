@@ -638,3 +638,46 @@ test('M4. merging with no cloud changes is a no-op', () => {
   assert.strictEqual(m.recovered.entries, 0);
   assert.strictEqual(m.recovered.schedules, 0);
 });
+
+// ── Income breakdown: investor / Mas Hena / Gde / RRPR ──────────────────────
+function incomeState() {
+  return S({ ledger: [
+    entry('2026-07-01', [dr('1010', 100), cr('3000', 100)]),   // Gde capital 100
+    entry('2026-07-01', [dr('1020', 100), cr('3010', 100)]),   // RRPR capital 100 -> 50/50 split
+    entry('2026-07-10', [dr('1000', 10), dr('5020', 1), cr('4000', 11)]), // gross 11, fee 1
+    entry('2026-07-15', [dr('5000', 3), cr('1000', 3)]),       // investor bagi hasil 3
+    entry('2026-08-20', [dr('1000', 50), cr('4000', 50)]),     // NEXT month, must be excluded
+  ] });
+}
+
+test('I1. splits a period income into gross, Mas Hena, investor, and owner shares', () => {
+  const b = T.incomeBreakdown(incomeState(), T.cfgOf({}), '2026-07-01', '2026-07-31');
+  assert.strictEqual(b.gross, 11);
+  assert.strictEqual(b.masHena, 1);
+  assert.strictEqual(b.investor, 3);
+  assert.strictEqual(b.ownerProfit, 7, '11 - 1 - 3');
+  assert.strictEqual(b.gde, 3.5, 'pro-rata on equal capital');
+  assert.strictEqual(b.rrpr, 3.5);
+  assert.strictEqual(T.R4(b.gde + b.rrpr), b.ownerProfit, 'the split conserves the profit');
+});
+
+test('I2. the period window excludes other months', () => {
+  const b = T.incomeBreakdown(incomeState(), T.cfgOf({}), '2026-07-01', '2026-07-31');
+  assert.strictEqual(b.gross, 11, 'the August 50 is not counted');
+});
+
+test('I3. the owner split follows paid-in capital, not a fixed 50/50', () => {
+  const st = incomeState();
+  st.ledger = st.ledger.concat([entry('2026-07-02', [dr('1010', 300), cr('3000', 300)])]); // Gde 400 vs RRPR 100
+  const b = T.incomeBreakdown(st, T.cfgOf({}), '2026-07-01', '2026-07-31');
+  assert.strictEqual(b.splitPct.gde, 80);
+  assert.strictEqual(b.gde, 5.6);
+  assert.strictEqual(b.rrpr, 1.4);
+});
+
+test('I4. deckMetrics carries the income split plus ROE for the period', () => {
+  const d = T.deckMetrics(incomeState(), T.cfgOf({}), '2026-07-01', '2026-07-31', '2026-07-31');
+  assert.strictEqual(d.income.ownerProfit, 7);
+  assert.ok(d.roeBulan > 0, 'ROE computed against owner equity');
+  assert.ok(d.aum > 0);
+});

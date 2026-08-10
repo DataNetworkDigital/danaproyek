@@ -649,6 +649,65 @@
     };
   }
 
+  // ── INCOME BREAKDOWN: who gets what out of a period's earnings ────────────
+  // Realized, from the ledger, for [from..to]:
+  //   4000 pendapatan  = gross return booked from projects
+  //   5020 beban fee   = Mas Hena's admin fee
+  //   5000 beban bagi hasil = investors' 2%/bln (incl. Papa's accrual)
+  //   sisanya = owner profit, split pro-rata by paid-in owner capital (Gde vs RRPR).
+  function incomeBreakdown(state, cfg, from, to) {
+    const bal = (code) => balanceOf(state.ledger, state.accounts, code, { from, to });
+    const gross = R4(bal('4000'));
+    const masHena = R4(bal('5020'));
+    const investor = R4(bal('5000'));
+    const lain = R4(bal('5010') + bal('5030'));
+    const ownerProfit = R4(gross - masHena - investor - lain);
+    // owner capital as of the period end decides the split
+    const modalGde = balanceOf(state.ledger, state.accounts, '3000', { to });
+    const modalRRPR = balanceOf(state.ledger, state.accounts, '3010', { to });
+    const totalModal = R4(modalGde + modalRRPR);
+    const shareGde = totalModal > 0 ? modalGde / totalModal : 1;
+    const gde = R4(ownerProfit * shareGde);
+    const rrpr = R4(ownerProfit - gde);
+    return {
+      from: from || null, to: to || null,
+      gross, masHena, investor, lain, ownerProfit,
+      gde, rrpr,
+      splitPct: { gde: R4(shareGde * 100), rrpr: R4((1 - shareGde) * 100) },
+      modalGde: R4(modalGde), modalRRPR: R4(modalRRPR),
+      marginPct: gross > 0 ? R4(ownerProfit / gross * 100) : 0,
+    };
+  }
+
+  // Everything a monthly one-pager needs, derived (never re-typed).
+  function deckMetrics(state, cfg, from, to, today) {
+    const inc = incomeBreakdown(state, cfg, from, to);
+    const m = metrics(state, cfg, today || to);
+    const roeBulan = m.ownerEquity > 0 ? R4(inc.ownerProfit / m.ownerEquity * 100) : 0;
+    const conc = concentration(state, cfg, today || to);
+    const paid = [], late = [];
+    (state.contracts || []).forEach((c) => {
+      (c.schedule || []).forEach((s) => {
+        if (s.status !== 'paid' || !s.paidDate) return;
+        if (from && s.paidDate < from) return;
+        if (to && s.paidDate > to) return;
+        paid.push(s);
+        if (s.paidDate > s.tanggal) late.push(s);
+      });
+    });
+    return {
+      period: { from, to },
+      income: inc,
+      aum: m.AUM, ownerEquity: m.ownerEquity, deployed: m.deployed, liquid: m.liquid,
+      investorLiab: m.investorLiab, regularLiab: m.regularLiab, flexLiab: m.flexLiab,
+      leverage: m.leverage, roeBulan, roiAset: m.roiAset, spread: m.spread,
+      freeAttack: m.freeAttack, rrprActual: m.rrprActual, rrprRequired: m.rrprRequired,
+      konsentrasi: conc.exposure,
+      pembayaran: { total: paid.length, tepatWaktu: paid.length - late.length,
+        onTimePct: paid.length ? R4((paid.length - late.length) / paid.length * 100) : null },
+    };
+  }
+
   // ── opening-position validator ────────────────────────────────────────────
   function openingChecks(state) {
     const eq = (code) => balanceOf(state.ledger, state.accounts, code);
@@ -793,6 +852,6 @@
     // recommendations
     returnWaterfall, fundingRecommendation, pickSourcesForDeal, guaranteeGate, maxSafeTicket, buildTieredSchedule, fundingNeed,
     // validation + metrics + migration
-    validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, migrate, mergeCloudOps,
+    validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, migrate, mergeCloudOps, incomeBreakdown, deckMetrics,
   };
 });
