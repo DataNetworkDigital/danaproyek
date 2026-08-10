@@ -1,0 +1,304 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Laporan · Roxanne Capital</title>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=Nunito:wght@400;600;700;900&family=Geist+Mono:wght@400;600&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/11.1.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore-compat.js"></script>
+<script src="treasury.js"></script>
+<style>
+:root{
+  --ink:#16141F; --ink-2:#4A4658; --ink-3:#8B8798; --line:#E4E1EC;
+  --p:#6D4AE0; --p-soft:#F2EFFD; --grn:#0B8F46; --grn-soft:#E8F7EF;
+  --amb:#B45309; --amb-soft:#FEF3C7; --red:#DC2626; --red-soft:#FEE9E9;
+  --paper:#fff;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#EFEDF5;font-family:'Nunito',system-ui,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+.page{
+  width:210mm;min-height:297mm;background:var(--paper);margin:16px auto;padding:16mm 15mm 14mm;
+  position:relative;box-shadow:0 6px 28px rgba(22,20,31,.10);display:flex;flex-direction:column
+}
+.num{font-family:'Geist Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+
+/* masthead */
+.mast{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:10px;border-bottom:2px solid var(--ink)}
+.mast .brand{font-family:'Fraunces',serif;font-size:19px;font-weight:600;letter-spacing:-.2px}
+.mast .kind{font-size:9.5px;font-weight:900;letter-spacing:1.6px;text-transform:uppercase;color:var(--p);margin-top:2px}
+.mast .per{text-align:right;font-size:10px;font-weight:700;color:var(--ink-3);line-height:1.5}
+
+/* hero */
+.hero{margin-top:22px;display:grid;grid-template-columns:1.15fr .85fr;gap:20px;align-items:end}
+.hero .lbl{font-size:9.5px;font-weight:900;letter-spacing:1.4px;text-transform:uppercase;color:var(--ink-3)}
+.hero .big{font-family:'Fraunces',serif;font-size:70px;line-height:.92;font-weight:600;letter-spacing:-2.5px;margin-top:6px}
+.hero .big small{font-size:26px;letter-spacing:-1px;margin-left:2px}
+.hero .cap{font-size:11.5px;color:var(--ink-2);font-weight:600;margin-top:8px;line-height:1.5}
+.hero-side{border-left:1px solid var(--line);padding-left:18px}
+.hero-side .row{display:flex;justify-content:space-between;align-items:baseline;padding:5px 0}
+.hero-side .row+.row{border-top:1px solid var(--line)}
+.hero-side .k{font-size:10.5px;color:var(--ink-2);font-weight:700}
+.hero-side .v{font-size:13px;font-weight:900}
+
+/* section */
+.sec{margin-top:26px}
+.sec-h{font-size:9.5px;font-weight:900;letter-spacing:1.5px;text-transform:uppercase;color:var(--ink);padding-bottom:6px;border-bottom:1px solid var(--ink);display:flex;justify-content:space-between;align-items:baseline}
+.sec-h span{font-size:9px;color:var(--ink-3);letter-spacing:.4px;text-transform:none;font-weight:700}
+
+/* waterfall split */
+.wf{margin-top:12px}
+.wf-bar{display:flex;height:30px;border-radius:6px;overflow:hidden;border:1px solid var(--line)}
+.wf-bar i{display:block;height:100%}
+.wf-key{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px}
+.wf-key .it{border-top:3px solid;padding-top:7px}
+.wf-key .n{font-size:9.5px;font-weight:900;letter-spacing:.4px;text-transform:uppercase;color:var(--ink-2)}
+.wf-key .a{font-size:16px;font-weight:900;margin-top:2px}
+.wf-key .p{font-size:9.5px;color:var(--ink-3);font-weight:700}
+
+/* stat grid */
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:12px}
+.stat{border:1px solid var(--line);border-radius:9px;padding:11px 12px}
+.stat .k{font-size:9px;font-weight:900;letter-spacing:.7px;text-transform:uppercase;color:var(--ink-3)}
+.stat .v{font-size:19px;font-weight:900;margin-top:3px;letter-spacing:-.4px}
+.stat .s{font-size:9.5px;color:var(--ink-3);font-weight:700;margin-top:1px}
+
+/* health pills */
+.pills{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.pill{border-radius:8px;padding:9px 13px;font-size:11px;font-weight:800;flex:1;min-width:150px}
+.pill b{display:block;font-size:15px;margin-top:2px}
+
+/* facts */
+.facts{margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:9px 18px}
+.fact{display:flex;gap:9px;font-size:11px;line-height:1.5;color:var(--ink-2);font-weight:600}
+.fact i{font-style:normal;color:var(--p);font-weight:900;flex-shrink:0}
+
+/* statement tables */
+.tbl{width:100%;border-collapse:collapse;margin-top:10px;font-size:11px}
+.tbl th{text-align:left;font-size:9px;font-weight:900;letter-spacing:.8px;text-transform:uppercase;color:var(--ink-3);padding:0 0 6px;border-bottom:1px solid var(--ink)}
+.tbl th.r,.tbl td.r{text-align:right}
+.tbl td{padding:5px 0;border-bottom:1px solid var(--line);font-weight:600}
+.tbl tr.tot td{font-weight:900;border-top:1.5px solid var(--ink);border-bottom:none;padding-top:7px;font-size:12px}
+.tbl tr.sub td{color:var(--ink-3);font-size:9.5px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;border-bottom:none;padding-top:12px}
+.ok{color:var(--grn);font-weight:900}.bad{color:var(--red);font-weight:900}
+
+.foot{margin-top:auto;padding-top:12px;border-top:1px solid var(--line);display:flex;justify-content:space-between;font-size:8.5px;color:var(--ink-3);font-weight:700}
+.loading{text-align:center;padding:60px;font-weight:700;color:var(--ink-3)}
+
+@media print{
+  body{background:#fff}
+  .page{margin:0;box-shadow:none;page-break-after:always;width:auto;min-height:auto}
+  .page:last-child{page-break-after:auto}
+  @page{size:A4;margin:0}
+}
+</style>
+<div id="out" class="loading">Menyusun laporan…</div>
+<script>
+firebase.initializeApp({apiKey:"AIzaSyDTB7lgEkWOsQGjdlb9RxIABxvR6VRrBCI",authDomain:"roxannecapital.firebaseapp.com",projectId:"roxannecapital",storageBucket:"roxannecapital.firebasestorage.app",messagingSenderId:"535953706506",appId:"1:535953706506:web:bd70e9908d1df34fced9f3"});
+const db=firebase.firestore();
+const Q=new URLSearchParams(location.search);
+const T=window.Treasury;
+
+// ── format ──
+const R4=T.R4;
+function fj(v){ if(v==null||isNaN(v)) return '—'; const n=+v;
+  if(Math.abs(n)>=1000) return (n/1000).toFixed(2).replace(/\.?0+$/,'')+' M';
+  return n.toFixed(Math.abs(n)<10?2:1).replace(/\.?0+$/,'')+' jt'; }
+function rp(v){ return 'Rp '+fj(v); }
+function pct(v){ return v==null?'—':(Math.round(v*10)/10)+'%'; }
+const BLN=['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+function fd(s){ if(!s) return '—'; const [y,m,d]=s.split('-').map(Number); return d+' '+BLN[m-1].slice(0,3)+' '+y; }
+function lastDay(y,m){ return new Date(Date.UTC(y,m,0)).getUTCDate(); }
+function monthRange(y,m){ return {from:`${y}-${String(m).padStart(2,'0')}-01`, to:`${y}-${String(m).padStart(2,'0')}-${lastDay(y,m)}`, label:BLN[m-1]+' '+y}; }
+function quarterRange(y,q){ const s=(q-1)*3+1,e=s+2; return {from:`${y}-${String(s).padStart(2,'0')}-01`, to:`${y}-${String(e).padStart(2,'0')}-${lastDay(y,e)}`, label:'Kuartal '+q+' '+y, months:[s,s+1,s+2]}; }
+function yearRange(y){ return {from:`${y}-01-01`, to:`${y}-12-31`, label:'Tahun '+y}; }
+
+// ── engine adapters (same shapes the app builds) ──
+function engineState(S){
+  const COA=[{code:'1100',name:'Dana di Proyek',type:'aset',normal:'D'},{code:'2000',name:'Dana Investor (Pokok)',type:'liabilitas',normal:'K'},
+    {code:'2010',name:'Bagi Hasil Belum Dibayar',type:'liabilitas',normal:'K'},{code:'2100',name:'Kewajiban Pembiayaan',type:'liabilitas',normal:'K'},
+    {code:'3000',name:'Modal Gde',type:'ekuitas',normal:'K'},{code:'3010',name:'Modal RRPR',type:'ekuitas',normal:'K'},
+    {code:'3900',name:'Laba Ditahan',type:'ekuitas',normal:'K'},{code:'3990',name:'Penyesuaian Rekonsiliasi',type:'ekuitas',normal:'K'},
+    {code:'4000',name:'Pendapatan Imbal Hasil Proyek',type:'pendapatan',normal:'K'},{code:'5000',name:'Beban Bagi Hasil Investor',type:'beban',normal:'D'},
+    {code:'5010',name:'Beban Bunga Pinjaman',type:'beban',normal:'D'},{code:'5020',name:'Beban Fee Admin',type:'beban',normal:'D'},
+    {code:'5030',name:'Beban Operasional',type:'beban',normal:'D'}];
+  const pockets=S.pockets||[];
+  const accounts=COA.concat(pockets.map(p=>({code:p.code,name:p.nama,type:'aset',normal:'D'})));
+  const names=(S.orgConfig&&S.orgConfig.activeProjectNames)||[];
+  const projects=(S.projects||[]).filter(p=>names.includes(p.peminjam)).map(p=>({
+    id:p.id||p.peminjam,name:p.peminjam,deploy:parseFloat(p.jumlah||0),
+    type:(p.returnType||'sekali')==='bulanan'?'monthly':'onetime',
+    profit:Math.max(0,parseFloat(p.kontrak||0)-parseFloat(p.jumlah||0)),
+    principalDate:p.tanggalJT,principalPaid:!!p.pokokRecorded,inflowQuality:p.inflowQuality||'contracted',status:p.status}));
+  return {accounts,pockets,ledger:S.ledger||[],contracts:S.capitalContracts||[],providers:S.capitalProviders||[],
+    allocations:S.capitalAllocations||[],projects,orgConfig:S.orgConfig||{},today:(S.orgConfig&&S.orgConfig.reportToday)||new Date().toISOString().slice(0,10)};
+}
+
+// ── page builders ──
+function mast(kind,per,sub){
+  return `<div class="mast"><div><div class="brand">Roxanne Capital</div><div class="kind">${kind}</div></div>
+    <div class="per">${per}${sub?`<br>${sub}`:''}</div></div>`;
+}
+function foot(n){ return `<div class="foot"><span>Roxanne Capital · dihasilkan otomatis dari buku besar</span><span>${n}</span></div>`; }
+
+function deckPage(st,cfg,range,kindLabel){
+  const d=T.deckMetrics(st,cfg,range.from,range.to,range.to);
+  const i=d.income;
+  const tot=Math.max(i.gross,0.0001);
+  const seg=(v,c)=>`<i style="width:${Math.max(0,v/tot*100)}%;background:${c}"></i>`;
+  const health = d.rrprActual>=d.rrprRequired
+    ? {c:'var(--grn)',bg:'var(--grn-soft)',t:'Cadangan aman'}
+    : {c:'var(--amb)',bg:'var(--amb-soft)',t:'Cadangan di bawah target'};
+  const facts=[];
+  if(i.gross>0) facts.push(`Dari tiap Rp 100 yang masuk, <b>${Math.round(i.ownerProfit/i.gross*100)}</b> jadi laba pemilik.`);
+  if(d.leverage>0) facts.push(`Tiap Rp 1 modal sendiri menggerakkan <b>Rp ${d.leverage.toFixed(2)}</b> dana investor.`);
+  if(d.pembayaran.total) facts.push(`<b>${d.pembayaran.tepatWaktu}</b> dari ${d.pembayaran.total} pembayaran tepat waktu.`);
+  if(d.konsentrasi&&d.konsentrasi.label!=='—') facts.push(`Proyek terbesar, <b>${d.konsentrasi.label}</b>, memegang ${pct(d.konsentrasi.pct)} dana.`);
+  if(d.spread) facts.push(`Selisih hasil proyek dengan biaya investor: <b>${pct(d.spread)}</b> per bulan.`);
+  if(i.masHena>0) facts.push(`Fee Mas Hena periode ini <b>${rp(i.masHena)}</b>.`);
+  facts.push(`Dana kelolaan menutup <b>${rp(d.aum)}</b> di ${d.deployed>0?'proyek dan kas':'kas'}.`);
+  if(d.freeAttack<=0.005) facts.push(`Modal serang bebas <b>Rp 0</b> — semua uang sedang bekerja.`);
+
+  return `<div class="page">
+    ${mast(kindLabel||'Laporan Kinerja','Periode',range.label)}
+    <div class="hero">
+      <div>
+        <div class="lbl">Imbal hasil modal sendiri</div>
+        <div class="big">${(Math.round(d.roeBulan*10)/10).toString().replace('.',',')}<small>%</small></div>
+        <div class="cap">Laba pemilik ${rp(i.ownerProfit)} atas modal ${rp(d.ownerEquity)}<br>selama ${range.label}.</div>
+      </div>
+      <div class="hero-side">
+        <div class="row"><span class="k">Dana kelolaan</span><span class="v num">${rp(d.aum)}</span></div>
+        <div class="row"><span class="k">Modal sendiri</span><span class="v num">${rp(d.ownerEquity)}</span></div>
+        <div class="row"><span class="k">Dana investor</span><span class="v num">${rp(d.investorLiab)}</span></div>
+        <div class="row"><span class="k">Leverage</span><span class="v num">${d.leverage.toFixed(2)}×</span></div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-h">Ke mana uang masuk pergi <span>total ${rp(i.gross)}</span></div>
+      <div class="wf">
+        ${d.adaPendapatan
+          ? `<div class="wf-bar">${seg(i.investor,'#6D4AE0')}${seg(i.masHena,'#B45309')}${seg(i.gde,'#0B8F46')}${seg(i.rrpr,'#0891b2')}</div>`
+          : `<div style="border:1px dashed var(--line);border-radius:6px;padding:13px;text-align:center;font-size:11px;font-weight:700;color:var(--ink-3)">${
+              (i.investor+i.masHena+i.lain)>0.005
+                ? 'Periode ini baru ada biaya, pendapatan proyek belum mendarat. Rincian biayanya di bawah.'
+                : 'Belum ada aktivitas tercatat di periode ini. Modal sudah bekerja di proyek, hasilnya masuk di periode berikutnya.'}</div>`}
+        <div class="wf-key">
+          <div class="it" style="border-color:#6D4AE0"><div class="n">Investor</div><div class="a num">${rp(i.investor)}</div><div class="p">bagi hasil 2%/bln</div></div>
+          <div class="it" style="border-color:#B45309"><div class="n">Mas Hena</div><div class="a num">${rp(i.masHena)}</div><div class="p">fee admin</div></div>
+          <div class="it" style="border-color:#0B8F46"><div class="n">Bersih Gde</div><div class="a num">${rp(i.gde)}</div><div class="p">${d.adaPendapatan?pct(i.splitPct.gde)+' dari laba':'porsi '+pct(i.splitPct.gde)}</div></div>
+          <div class="it" style="border-color:#0891b2"><div class="n">RRPR</div><div class="a num">${rp(i.rrpr)}</div><div class="p">${d.adaPendapatan?pct(i.splitPct.rrpr)+' dari laba':'porsi '+pct(i.splitPct.rrpr)}</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-h">Ukuran &amp; hasil</div>
+      <div class="grid">
+        <div class="stat"><div class="k">Dana di proyek</div><div class="v num">${rp(d.deployed)}</div><div class="s">sedang bekerja</div></div>
+        <div class="stat"><div class="k">Kas likuid</div><div class="v num">${rp(d.liquid)}</div><div class="s">siap dipakai</div></div>
+        <div class="stat"><div class="k">Hasil aset</div><div class="v num">${pct(d.roiAset)}</div><div class="s">laba \u00f7 dana di proyek</div></div>
+        <div class="stat"><div class="k">Selisih hasil</div><div class="v num">${pct(d.spread)}</div><div class="s">imbal ${pct(d.yieldRealisasi)} \u2212 biaya 2%</div></div>
+      </div>
+      <div class="pills">
+        <div class="pill" style="background:${health.bg};color:${health.c}">Cadangan RRPR<b>${rp(d.rrprActual)} / target ${rp(d.rrprRequired)}</b></div>
+        <div class="pill" style="background:var(--p-soft);color:var(--p)">Investor reguler vs fleksibel<b>${rp(d.regularLiab)} · ${rp(d.flexLiab)}</b></div>
+        <div class="pill" style="background:#F4F3F8;color:var(--ink-2)">Ketepatan bayar<b>${d.pembayaran.onTimePct==null?'belum ada data':pct(d.pembayaran.onTimePct)}</b></div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-h">Yang menarik periode ini</div>
+      <div class="facts">${facts.slice(0,8).map(f=>`<div class="fact"><i>◆</i><span>${f}</span></div>`).join('')}</div>
+    </div>
+    ${foot(range.label)}
+  </div>`;
+}
+
+function rows(list,cls){ return list.map(r=>`<tr class="${cls||''}"><td>${r.name}</td><td class="r num">${rp(r.amount)}</td></tr>`).join(''); }
+
+function statementPages(st,cfg,range){
+  const s=T.statements(st,cfg,range.from,range.to);
+  const lr=s.labaRugi, nr=s.neraca, ak=s.arusKas, ns=s.neracaSaldo;
+  let h='';
+  // Laba rugi
+  h+=`<div class="page">${mast('Laporan Laba Rugi','Periode',range.label)}
+    <table class="tbl"><tr class="sub"><td colspan="2">Pendapatan</td></tr>${rows(lr.pendapatan)}
+      <tr class="tot"><td>Total pendapatan</td><td class="r num">${rp(lr.totalPendapatan)}</td></tr>
+      <tr class="sub"><td colspan="2">Beban</td></tr>${rows(lr.beban)}
+      <tr class="tot"><td>Total beban</td><td class="r num">${rp(lr.totalBeban)}</td></tr></table>
+    <div class="sec"><div class="sec-h">Laba bersih</div>
+      <div class="hero" style="margin-top:10px"><div><div class="big" style="font-size:48px">${rp(lr.labaBersih)}</div></div><div></div></div></div>
+    ${foot('Laba Rugi · '+range.label)}</div>`;
+  // Neraca
+  h+=`<div class="page">${mast('Neraca','Per',fd(range.to))}
+    <table class="tbl"><tr class="sub"><td colspan="2">Aset</td></tr>${rows(nr.aset)}
+      <tr class="tot"><td>Total aset</td><td class="r num">${rp(nr.totalAset)}</td></tr>
+      <tr class="sub"><td colspan="2">Liabilitas</td></tr>${rows(nr.liabilitas)}
+      <tr class="tot"><td>Total liabilitas</td><td class="r num">${rp(nr.totalLiab)}</td></tr>
+      <tr class="sub"><td colspan="2">Ekuitas</td></tr>${rows(nr.ekuitas)}
+      <tr><td>Laba berjalan</td><td class="r num">${rp(nr.labaBerjalan)}</td></tr>
+      <tr class="tot"><td>Total ekuitas</td><td class="r num">${rp(nr.totalEkuitas)}</td></tr>
+      <tr class="tot"><td>Liabilitas + ekuitas</td><td class="r num">${rp(nr.totalLiab+nr.totalEkuitas)}</td></tr></table>
+    <div class="sec"><div class="sec-h">Pemeriksaan</div>
+      <div style="margin-top:8px;font-size:12px;font-weight:800" class="${nr.balanced?'ok':'bad'}">
+        ${nr.balanced?'✓ Seimbang — aset sama dengan liabilitas ditambah ekuitas.':'✗ Tidak seimbang — selisih '+rp(nr.totalAset-(nr.totalLiab+nr.totalEkuitas))}</div></div>
+    ${foot('Neraca · '+fd(range.to))}</div>`;
+  // Arus kas
+  const akRow=(t,list,total)=>`<tr class="sub"><td colspan="2">${t}</td></tr>
+    ${list.slice(0,14).map(r=>`<tr><td>${fd(r.date)} · ${r.memo||''}</td><td class="r num">${rp(r.amount)}</td></tr>`).join('')||'<tr><td colspan="2" style="color:var(--ink-3)">Tidak ada</td></tr>'}
+    <tr class="tot"><td>Total ${t.toLowerCase()}</td><td class="r num">${rp(total)}</td></tr>`;
+  h+=`<div class="page">${mast('Laporan Arus Kas','Periode',range.label)}
+    <table class="tbl">${akRow('Operasi',ak.detail.operasi,ak.total.operasi)}
+      ${akRow('Investasi',ak.detail.investasi,ak.total.investasi)}
+      ${akRow('Pendanaan',ak.detail.pendanaan,ak.total.pendanaan)}
+      <tr class="tot"><td>Kenaikan kas bersih</td><td class="r num">${rp(ak.total.bersih)}</td></tr></table>
+    ${foot('Arus Kas · '+range.label)}</div>`;
+  // Neraca saldo
+  h+=`<div class="page">${mast('Neraca Saldo','Per',fd(range.to))}
+    <table class="tbl"><tr><th>Akun</th><th class="r">Debit</th><th class="r">Kredit</th></tr>
+      ${ns.rows.map(r=>`<tr><td>${r.code} · ${r.name}</td><td class="r num">${r.debit>0.005?rp(r.debit):''}</td><td class="r num">${r.kredit>0.005?rp(r.kredit):''}</td></tr>`).join('')}
+      <tr class="tot"><td>Total</td><td class="r num">${rp(ns.total.debit)}</td><td class="r num">${rp(ns.total.kredit)}</td></tr></table>
+    <div class="sec"><div class="sec-h">Pemeriksaan</div>
+      <div style="margin-top:8px;font-size:12px;font-weight:800" class="${ns.balanced?'ok':'bad'}">
+        ${ns.balanced?'✓ Seimbang — total debit sama dengan total kredit.':'✗ Tidak seimbang'}</div></div>
+    ${foot('Neraca Saldo · '+fd(range.to))}</div>`;
+  // fix 3-col header on the 2-col tables
+  return h;
+}
+
+function build(S){
+  const st=engineState(S), cfg=T.cfgOf(S.orgConfig||{});
+  const p=(Q.get('p')||'').trim();
+  let html='';
+  const mQ=/^(\d{4})-(\d{2})$/.exec(p), qQ=/^(\d{4})-Q([1-4])$/i.exec(p), yQ=/^(\d{4})$/.exec(p);
+  if(qQ){
+    const y=+qQ[1], q=+qQ[2], r=quarterRange(y,q);
+    html+=deckPage(st,cfg,r,'Rekap Kuartal');                                  // page 1
+    r.months.forEach(m=>{ html+=deckPage(st,cfg,monthRange(y,m),'Rincian Bulanan'); }); // pages 2-4
+  } else if(yQ){
+    const y=+yQ[1];
+    html+=deckPage(st,cfg,yearRange(y),'Rekap Tahunan');                        // page 1
+    [1,2,3,4].forEach(q=>{ html+=deckPage(st,cfg,quarterRange(y,q),'Rekap Kuartal'); }); // pages 2-5
+  } else {
+    const now=new Date();
+    const y=mQ?+mQ[1]:now.getUTCFullYear(), m=mQ?+mQ[2]:now.getUTCMonth()+1;
+    const r=monthRange(y,m);
+    html+=deckPage(st,cfg,r,'Laporan Kinerja Bulanan');   // page 1: the one-pager
+    html+=statementPages(st,cfg,r);                        // pages 2-5: the four statements
+  }
+  document.getElementById('out').outerHTML=html;
+  document.title='Laporan '+(p||'bulan ini')+' · Roxanne Capital';
+  if(Q.get('print')==='1') setTimeout(()=>window.print(),700);
+  window.__laporanReady=true;
+}
+
+(async()=>{
+  try{
+    const snap=await db.collection('danatrack').doc('main_data').get();
+    if(!snap.exists){ document.getElementById('out').textContent='Data belum ada.'; return; }
+    build(snap.data().state||{});
+  }catch(e){
+    document.getElementById('out').textContent='Gagal memuat data: '+e.message;
+    window.__laporanError=e.message;
+  }
+})();
+</script>

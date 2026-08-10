@@ -681,3 +681,58 @@ test('I4. deckMetrics carries the income split plus ROE for the period', () => {
   assert.ok(d.roeBulan > 0, 'ROE computed against owner equity');
   assert.ok(d.aum > 0);
 });
+
+// ── Statements as data (shared by the app and the scheduled PDF) ────────────
+test('R1. laba rugi is a true period and nets to profit', () => {
+  const st = T.statements(incomeState(), T.cfgOf({}), '2026-07-01', '2026-07-31');
+  assert.strictEqual(st.labaRugi.totalPendapatan, 11);
+  assert.strictEqual(st.labaRugi.totalBeban, 4, 'fee 1 + bagi hasil 3');
+  assert.strictEqual(st.labaRugi.labaBersih, 7);
+});
+
+test('R2. neraca balances: aset = liabilitas + ekuitas', () => {
+  const st = T.statements(openingState(), T.cfgOf({}), null, '2026-08-31');
+  assert.strictEqual(st.neraca.balanced, true,
+    'aset ' + st.neraca.totalAset + ' vs ' + (st.neraca.totalLiab + st.neraca.totalEkuitas));
+});
+
+test('R3. neraca saldo balances debit against kredit', () => {
+  const st = T.statements(openingState(), T.cfgOf({}), null, '2026-08-31');
+  assert.strictEqual(st.neracaSaldo.balanced, true,
+    'D ' + st.neracaSaldo.total.debit + ' vs K ' + st.neracaSaldo.total.kredit);
+});
+
+test('R4. arus kas classifies deploy as investasi and capital as pendanaan', () => {
+  const st = T.statements(openingState(), T.cfgOf({}), '2026-01-01', '2026-12-31');
+  assert.ok(st.arusKas.total.investasi < 0, 'deploying cash out is negative investasi');
+  assert.ok(st.arusKas.total.pendanaan > 0, 'investor + owner capital in is positive pendanaan');
+});
+
+// ── CRITICAL: the PGM robot writes projects straight to Firestore ───────────
+test('M5. a project added by the PGM robot is never erased by the app save', () => {
+  const local = S({ projects: [{ id: 'p1', peminjam: 'Lama', status: 'tersedia' }] });
+  const cloud = S({ projects: [
+    { id: 'p1', peminjam: 'Lama', status: 'tersedia' },
+    { id: 'p2', peminjam: 'Baru dari PGM', status: 'tersedia' },
+  ] });
+  const m = T.mergeCloudOps(local, cloud);
+  assert.strictEqual(m.state.projects.length, 2, 'the robot project survives');
+  assert.ok(m.state.projects.some((p) => p.id === 'p2'));
+  assert.strictEqual(m.recovered.projects, 1);
+});
+
+test('M6. an entered project is never downgraded back to tersedia by a stale cloud copy', () => {
+  const local = S({ projects: [{ id: 'p1', peminjam: 'X', status: 'aktif', tanggalAktif: '2026-08-10' }] });
+  const cloud = S({ projects: [{ id: 'p1', peminjam: 'X', status: 'tersedia' }] });
+  const m = T.mergeCloudOps(local, cloud);
+  assert.strictEqual(m.state.projects[0].status, 'aktif', 'local entry wins over a stale tersedia');
+});
+
+test('M7. bridges and the decision log are not lost either', () => {
+  const local = S({ bridges: [], decisionLog: [] });
+  const cloud = S({ bridges: [{ amount: 5, restoreBy: '2026-12-01', dealId: 'x' }],
+                    decisionLog: [{ ts: '2026-08-01T00:00:00Z', dealId: 'x', verdict: 'GREEN' }] });
+  const m = T.mergeCloudOps(local, cloud);
+  assert.strictEqual((m.state.bridges || []).length, 1);
+  assert.strictEqual((m.state.decisionLog || []).length, 1);
+});

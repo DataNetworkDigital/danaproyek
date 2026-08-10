@@ -684,6 +684,12 @@
     const inc = incomeBreakdown(state, cfg, from, to);
     const m = metrics(state, cfg, today || to);
     const roeBulan = m.ownerEquity > 0 ? R4(inc.ownerProfit / m.ownerEquity * 100) : 0;
+    // A period report must describe the period that HAPPENED, not a forward
+    // projection: derive yield/spread/ROI from the realized ledger for [from..to].
+    const deployedAsOf = balanceOf(state.ledger, state.accounts, '1100', { to });
+    const yieldRealisasi = deployedAsOf > 0 ? R4(inc.gross / deployedAsOf * 100) : 0;
+    const roiRealisasi = deployedAsOf > 0 ? R4(inc.ownerProfit / deployedAsOf * 100) : 0;
+    const spreadRealisasi = R4(yieldRealisasi - cfg.investorRatePct);
     const conc = concentration(state, cfg, today || to);
     const paid = [], late = [];
     (state.contracts || []).forEach((c) => {
@@ -700,11 +706,80 @@
       income: inc,
       aum: m.AUM, ownerEquity: m.ownerEquity, deployed: m.deployed, liquid: m.liquid,
       investorLiab: m.investorLiab, regularLiab: m.regularLiab, flexLiab: m.flexLiab,
-      leverage: m.leverage, roeBulan, roiAset: m.roiAset, spread: m.spread,
+      leverage: m.leverage, roeBulan,
+      roiAset: roiRealisasi, spread: spreadRealisasi, yieldRealisasi,
+      adaPendapatan: inc.gross > 0.005,
       freeAttack: m.freeAttack, rrprActual: m.rrprActual, rrprRequired: m.rrprRequired,
       konsentrasi: conc.exposure,
       pembayaran: { total: paid.length, tepatWaktu: paid.length - late.length,
         onTimePct: paid.length ? R4((paid.length - late.length) / paid.length * 100) : null },
+    };
+  }
+
+  // ── FINANCIAL STATEMENTS AS DATA ──────────────────────────────────────────
+  // Pure numbers only, no HTML. The app and the scheduled PDF renderer both draw
+  // from this, so a printed report can never disagree with the screen.
+  function statements(state, cfg, from, to) {
+    const A = (state.accounts || []);
+    const per = (code) => balanceOf(state.ledger, state.accounts, code, { from, to });
+    const asOf = (code) => balanceOf(state.ledger, state.accounts, code, { to });
+    const byType = (t) => A.filter((a) => a.type === t);
+
+    // Laba rugi: a true period
+    const pendapatan = byType('pendapatan').map((a) => ({ code: a.code, name: a.name, amount: per(a.code) })).filter((r) => Math.abs(r.amount) > 0.005);
+    const beban = byType('beban').map((a) => ({ code: a.code, name: a.name, amount: per(a.code) })).filter((r) => Math.abs(r.amount) > 0.005);
+    const totalPendapatan = R4(pendapatan.reduce((s, r) => s + r.amount, 0));
+    const totalBeban = R4(beban.reduce((s, r) => s + r.amount, 0));
+    const labaBersih = R4(totalPendapatan - totalBeban);
+
+    // Neraca: a point in time
+    const aset = byType('aset').concat((state.pockets || []).map((p) => ({ code: p.code, name: p.nama, type: 'aset' })))
+      .filter((a, i, arr) => arr.findIndex((x) => x.code === a.code) === i)
+      .map((a) => ({ code: a.code, name: a.name, amount: asOf(a.code) })).filter((r) => Math.abs(r.amount) > 0.005)
+      .sort((a, b) => (a.code < b.code ? -1 : 1));
+    const liabilitas = byType('liabilitas').map((a) => ({ code: a.code, name: a.name, amount: asOf(a.code) })).filter((r) => Math.abs(r.amount) > 0.005);
+    const ekuitasAkun = byType('ekuitas').map((a) => ({ code: a.code, name: a.name, amount: asOf(a.code) })).filter((r) => Math.abs(r.amount) > 0.005);
+    const labaBerjalan = retainedProfit(state.ledger, state.accounts, to);
+    const totalAset = R4(aset.reduce((s, r) => s + r.amount, 0));
+    const totalLiab = R4(liabilitas.reduce((s, r) => s + r.amount, 0));
+    const totalEkuitas = R4(ekuitasAkun.reduce((s, r) => s + r.amount, 0) + labaBerjalan);
+
+    // Arus kas: cash movement per pocket within the period
+    const pocketCodes = (state.pockets || []).map((p) => p.code);
+    const arus = { operasi: [], investasi: [], pendanaan: [] };
+    (state.ledger || []).forEach((e) => {
+      if (from && e.tanggal < from) return;
+      if (to && e.tanggal > to) return;
+      const cashDelta = (e.lines || []).reduce((s, l) => s + (pocketCodes.indexOf(l.account) >= 0 ? (+l.debit || 0) - (+l.credit || 0) : 0), 0);
+      if (Math.abs(cashDelta) < 0.005) return;
+      const codes = (e.lines || []).map((l) => l.account);
+      let bucket = 'operasi';
+      if (codes.indexOf('1100') >= 0) bucket = 'investasi';
+      else if (codes.some((c) => c === '2000' || c === '3000' || c === '3010')) bucket = 'pendanaan';
+      arus[bucket].push({ date: e.tanggal, memo: e.memo, amount: R4(cashDelta) });
+    });
+    const arusTotal = { operasi: R4(arus.operasi.reduce((s, r) => s + r.amount, 0)),
+      investasi: R4(arus.investasi.reduce((s, r) => s + r.amount, 0)),
+      pendanaan: R4(arus.pendanaan.reduce((s, r) => s + r.amount, 0)) };
+    arusTotal.bersih = R4(arusTotal.operasi + arusTotal.investasi + arusTotal.pendanaan);
+
+    // Neraca saldo as of the period end
+    const trial = A.concat((state.pockets || []).map((p) => ({ code: p.code, name: p.nama, type: 'aset', normal: 'D' })))
+      .filter((a, i, arr) => arr.findIndex((x) => x.code === a.code) === i)
+      .map((a) => { const bal = asOf(a.code); const normal = a.normal || 'D';
+        return { code: a.code, name: a.name, debit: normal === 'D' ? Math.max(bal, 0) : Math.max(-bal, 0),
+                 kredit: normal === 'K' ? Math.max(bal, 0) : Math.max(-bal, 0) }; })
+      .filter((r) => r.debit > 0.005 || r.kredit > 0.005)
+      .sort((a, b) => (a.code < b.code ? -1 : 1));
+    const trialTotal = { debit: R4(trial.reduce((s, r) => s + r.debit, 0)), kredit: R4(trial.reduce((s, r) => s + r.kredit, 0)) };
+
+    return {
+      period: { from, to },
+      labaRugi: { pendapatan, beban, totalPendapatan, totalBeban, labaBersih },
+      neraca: { aset, liabilitas, ekuitas: ekuitasAkun, labaBerjalan, totalAset, totalLiab, totalEkuitas,
+        balanced: Math.abs(totalAset - (totalLiab + totalEkuitas)) < 0.01 },
+      arusKas: { detail: arus, total: arusTotal },
+      neracaSaldo: { rows: trial, total: trialTotal, balanced: Math.abs(trialTotal.debit - trialTotal.kredit) < 0.01 },
     };
   }
 
@@ -771,7 +846,30 @@
     const newC = (cloud.investorContracts || []).filter((c) => c && c.id && !localIds[c.id]);
     if (newC.length) out.investorContracts = out.investorContracts.concat(newC);
 
-    return { state: out, recovered: { entries, schedules: schedules, contracts: newC.length } };
+    // 4) PROJECTS. The PGM robot writes new opportunities straight to Firestore,
+    //    so a whole-state save from an open tab would delete them. Adopt anything
+    //    the cloud has that we lack — but never let a stale cloud copy downgrade a
+    //    project we have already entered (aktif/selesai outrank tersedia).
+    const rank = (s) => (s === 'selesai' ? 3 : (s === 'aktif' || s === 'terlambat') ? 2 : 1);
+    const localP = {};
+    (local.projects || []).forEach((p) => { if (p && p.id) localP[p.id] = true; });
+    const newP = (cloud.projects || []).filter((p) => p && p.id && !localP[p.id]);
+    if (newP.length) out.projects = (local.projects || []).concat(newP);
+
+    // 5) additive side-records the bot/app may each hold
+    const unionById = (a, b) => {
+      const seenId = {}; const res = [];
+      (a || []).concat(b || []).forEach((x) => {
+        const k = x && (x.id || x.ts || JSON.stringify(x));
+        if (k && seenId[k]) return; if (k) seenId[k] = true; res.push(x);
+      });
+      return res;
+    };
+    if ((cloud.bridges || []).length) out.bridges = unionById(local.bridges, cloud.bridges);
+    if ((cloud.decisionLog || []).length) out.decisionLog = unionById(local.decisionLog, cloud.decisionLog);
+    if ((cloud.investors || []).length) out.investors = unionById(local.investors, cloud.investors);
+
+    return { state: out, recovered: { entries, schedules: schedules, contracts: newC.length, projects: newP.length } };
   }
 
   // ── idempotent migration to the unified capital model ─────────────────────
@@ -852,6 +950,6 @@
     // recommendations
     returnWaterfall, fundingRecommendation, pickSourcesForDeal, guaranteeGate, maxSafeTicket, buildTieredSchedule, fundingNeed,
     // validation + metrics + migration
-    validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, migrate, mergeCloudOps, incomeBreakdown, deckMetrics,
+    validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, migrate, mergeCloudOps, incomeBreakdown, deckMetrics, statements,
   };
 });
