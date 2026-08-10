@@ -482,6 +482,18 @@ function migrateSchema(){
     c.schedule=c.schedule.filter(s=>!(s.tipe==='bagihasil' && s.tanggal<=c.tanggalMulai && s.status!=='paid'));
     if(c.schedule.length!==before) console.log('[fix] bagi hasil di tanggal dana masuk dihapus:',c.nama);
   });
+  // 3c. Identitas investor: satu ORANG, banyak kontrak. Nama lama seperti
+  //     "Veda (sawah fima)" / "Veda (hong kong)" / "Veda" semuanya milik orang
+  //     yang sama; bagian dalam kurung disimpan jadi label periode. Idempoten.
+  if(!Array.isArray(S.investors)) S.investors=[];
+  (S.investorContracts||[]).forEach(c=>{
+    if(c.investorId && investorById(c.investorId)) return;
+    const raw=String(c.nama||'').trim();
+    const base=raw.split('(')[0].trim()||raw||'Investor';
+    const lbl=(raw.match(/\(([^)]*)\)/)||[])[1]||'';
+    const person=findOrCreateInvestor(base);
+    if(person){ c.investorId=person.id; if(lbl && !c.label) c.label=lbl.trim(); }
+  });
   // 4. Unified capital model (CapitalProvider/Contract/Allocation) — additive + idempotent.
   //    Backup once before the first v4 migration; migrate() itself never touches the ledger.
   if(window.Treasury){
@@ -930,6 +942,34 @@ const INV_STRUKTUR={
   cicil:  {label:'Pokok + bagi hasil dicicil bulanan', hint:'Pokok dicicil rata tiap bulan; bagi hasil dihitung dari sisa pokok.'},
 };
 function invContracts(){ if(!Array.isArray(S.investorContracts)) S.investorContracts=[]; return S.investorContracts; }
+// ── IDENTITAS INVESTOR ────────────────────────────────────────────────
+// Satu ORANG bisa masuk berkali-kali dengan periode berbeda (Veda sudah 3x).
+// S.investors = daftar orangnya; tiap kontrak menunjuk ke sana lewat investorId,
+// jadi "Veda" cukup satu nama dan tiap masuknya jadi periode di bawah nama itu.
+function investors(){ if(!Array.isArray(S.investors)) S.investors=[]; return S.investors; }
+function investorById(id){ return investors().find(x=>x.id===id)||null; }
+function investorNameOf(c){
+  const p=investorById(c.investorId); return p?p.nama:(String(c.nama||'').split('(')[0].trim()||c.nama||'Investor');
+}
+function findOrCreateInvestor(nama){
+  const clean=String(nama||'').trim(); if(!clean) return null;
+  const hit=investors().find(x=>x.nama.toLowerCase()===clean.toLowerCase());
+  if(hit) return hit;
+  const rec={id:'inv:'+uid(), nama:clean, createdAt:todayISO()};
+  investors().push(rec); return rec;
+}
+// Kontrak milik satu orang, terbaru dulu
+function contractsOfInvestor(id){
+  return invContracts().filter(c=>c.investorId===id)
+    .sort((a,b)=>String(b.tanggalMulai||'').localeCompare(String(a.tanggalMulai||'')));
+}
+function investorTotals(id){
+  const cs=contractsOfInvestor(id), aktif=cs.filter(c=>c.status!=='selesai');
+  return { nKontrak:cs.length, nAktif:aktif.length,
+    pokokAktif:Math.round(aktif.reduce((s,c)=>s+parseFloat(c.pokok||0),0)*1e4)/1e4,
+    pokokTotal:Math.round(cs.reduce((s,c)=>s+parseFloat(c.pokok||0),0)*1e4)/1e4,
+    bhBulan:Math.round(aktif.reduce((s,c)=>s+parseFloat(c.pokok||0)*parseFloat(c.ratePct||2)/100,0)*1e4)/1e4 };
+}
 function contractSchedule(c){
   const pokok=parseFloat(c.pokok||0), rate=parseFloat(c.ratePct||2)/100, tenor=parseInt(c.tenorBulan||0);
   const bh=pokok*rate, r4=x=>Math.round(x*1e4)/1e4, sched=[];
@@ -949,6 +989,8 @@ function contractSchedule(c){
   }
   return sched;
 }
+let _invOpen={};
+function invToggle(id){ _invOpen[id]=!_invOpen[id]; rKeu(); }
 function invNextDue(c){ return (c.schedule||[]).filter(s=>s.status==='pending').sort((a,b)=>a.tanggal<b.tanggal?-1:1)[0]||null; }
 function invTotalPokok(){ return invContracts().filter(c=>c.status!=='selesai').reduce((s,c)=>s+parseFloat(c.pokok||0),0); }
 function rKeuInvestor(){
@@ -963,19 +1005,50 @@ function rKeuInvestor(){
   </div>
   <button class="btn pr fw" onclick="invModal('add')" style="margin-bottom:12px">➕ Tambah Kontrak Investor</button>`;
   if(!cs.length){ h+=`<div class="es"><div class="ei">🤝</div><div class="et">Belum ada kontrak</div><div class="esb">Tambah kontrak investor, atau "Isi Data Contoh" di tab Kantong.</div></div>`; return h; }
-  cs.slice().sort((a,b)=>(a.status==='selesai'?1:0)-(b.status==='selesai'?1:0)).forEach(c=>{
-    const nd=invNextDue(c), st=INV_STRUKTUR[c.struktur]||INV_STRUKTUR.bulanan, done=c.status==='selesai';
-    h+=`<div class="card-s" style="margin-bottom:10px;${done?'opacity:.6':''}">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
-        <div style="min-width:0"><div style="font-size:14px;font-weight:900">${c.nama}</div>
-          <div style="font-size:10px;color:var(--sub);font-weight:700">${fj(c.pokok)} · ${c.ratePct||2}%/bln · ${c.tenorBulan} bln</div></div>
-        <div style="font-size:9px;font-weight:900;color:var(--p-deep);text-transform:uppercase;text-align:right;flex-shrink:0">${done?'✅ Selesai':(c.struktur==='akhir'?'Di akhir':c.struktur==='cicil'?'Dicicil':'Bulanan')}</div>
-      </div>
-      ${nd?`<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--bdr);font-size:11px;font-weight:700;display:flex;justify-content:space-between;align-items:center;gap:8px">
-        <span>Berikutnya: ${nd.tipe==='pokok'?'💰 Pokok':'📈 Bagi hasil'} <b>${fj(nd.jumlah)}</b><br><span style="font-size:10px;color:${gc(du(nd.tanggal))}">${fd(nd.tanggal)} · ${gl(du(nd.tanggal))}</span></span>
-        <button class="btn pr" onclick="invBayar('${c.id}')" style="font-size:11px;padding:7px 14px;flex-shrink:0">Bayar</button></div>`:''}
-      <div style="margin-top:8px;font-size:11px"><button class="sl" onclick="invModal('edit','${c.id}')">✏️ Edit</button> &nbsp;·&nbsp; <button class="sl" onclick="invDetail('${c.id}')" style="color:var(--sub)">📅 Jadwal lengkap</button></div>
-    </div>`;
+  // Dikelompokkan per ORANG: satu nama, periode-periodenya di bawahnya.
+  const people = investors().slice()
+    .map(p=>({p, t:investorTotals(p.id)}))
+    .filter(x=>x.t.nKontrak>0)
+    .sort((a,b)=>(b.t.nAktif-a.t.nAktif) || (b.t.pokokAktif-a.t.pokokAktif));
+  const orphan = cs.filter(c=>!c.investorId);
+  people.forEach(({p,t})=>{
+    const open = _invOpen[p.id];
+    h+=`<div class="card-s" style="margin-bottom:10px">
+      <div onclick="invToggle('${p.id}')" style="display:flex;justify-content:space-between;align-items:center;gap:8px;cursor:pointer">
+        <div style="min-width:0">
+          <div style="font-size:14.5px;font-weight:900">${esc(p.nama)}</div>
+          <div style="font-size:10px;color:var(--sub);font-weight:700">
+            ${t.nAktif} kontrak aktif${t.nKontrak>t.nAktif?` · ${t.nKontrak-t.nAktif} selesai`:''} · bagi hasil ${fj(t.bhBulan)}/bln</div>
+        </div>
+        <div style="text-align:right;flex-shrink:0">
+          <div class="t-num" style="font-size:15px;font-weight:900;color:var(--p-deep)">${fj(t.pokokAktif)}</div>
+          <div style="font-size:9px;color:var(--sub);font-weight:800">${open?'▲ tutup':'▼ periode'}</div>
+        </div>
+      </div>`;
+    if(open){
+      contractsOfInvestor(p.id).forEach(c=>{
+        const nd=invNextDue(c), done=c.status==='selesai';
+        h+=`<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--bdr);${done?'opacity:.6':''}">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
+            <div style="font-size:12px;font-weight:900">${esc(c.label||'Periode')} <span style="font-size:9.5px;font-weight:800;color:var(--sub)">${c.tanggalMulai?fd(c.tanggalMulai):''}</span></div>
+            <div class="t-num" style="font-size:12.5px;font-weight:900">${fj(c.pokok)}</div>
+          </div>
+          <div style="font-size:10px;color:var(--sub);font-weight:700">${c.ratePct||2}%/bln · ${c.tenorBulan} bln · ${done?'✅ selesai':(c.struktur==='akhir'?'di akhir':c.struktur==='cicil'?'dicicil':'bulanan')}</div>
+          ${nd?`<div style="margin-top:6px;font-size:11px;font-weight:700;display:flex;justify-content:space-between;align-items:center;gap:8px">
+            <span>Berikutnya: ${nd.tipe==='pokok'?'💰 Pokok':'📈 Bagi hasil'} <b>${fj(nd.jumlah)}</b><br>
+              <span style="font-size:10px;color:${gc(du(nd.tanggal))}">${fd(nd.tanggal)} · ${gl(du(nd.tanggal))}</span></span>
+            <button class="btn pr" onclick="invBayar('${c.id}')" style="font-size:11px;padding:7px 14px;flex-shrink:0">Bayar</button></div>`:''}
+          <div style="margin-top:6px;font-size:11px"><button class="sl" onclick="invModal('edit','${c.id}')">✏️ Edit</button> &nbsp;·&nbsp; <button class="sl" onclick="invDetail('${c.id}')" style="color:var(--sub)">📅 Jadwal</button></div>
+        </div>`;
+      });
+      h+=`<button class="btn ou fw" onclick="invModal('add','','${p.id}')" style="margin-top:10px;font-size:11.5px">➕ Masuk lagi sebagai ${esc(p.nama)}</button>`;
+    }
+    h+=`</div>`;
+  });
+  orphan.forEach(c=>{
+    h+=`<div class="card-s" style="margin-bottom:10px"><div style="font-size:14px;font-weight:900">${esc(c.nama)}</div>
+      <div style="font-size:10px;color:var(--sub);font-weight:700">${fj(c.pokok)} · belum terhubung ke nama investor</div>
+      <div style="margin-top:6px;font-size:11px"><button class="sl" onclick="invModal('edit','${c.id}')">✏️ Hubungkan</button></div></div>`;
   });
   const alok=(S.orgConfig&&S.orgConfig.alokasi)||[];
   if(alok.length){
@@ -993,13 +1066,29 @@ function rKeuInvestor(){
   return h;
 }
 function invHint(){ const v=document.getElementById('ic-struktur').value, el=document.getElementById('ic-hint'); if(el) el.textContent=(INV_STRUKTUR[v]||INV_STRUKTUR.bulanan).hint; }
-function invModal(mode, id){
+function invModal(mode, id, personId){
   const c=mode==='edit'?invContracts().find(x=>x.id===id):null;
+  const pre=personId||(c?c.investorId:null);
   document.getElementById('mo-keu-t').textContent=(mode==='edit'?'✏️ Edit':'➕ Tambah')+' Kontrak Investor';
   const ds=new Date().toISOString().split('T')[0], stru=(c&&c.struktur)||'bulanan';
   const opt=(v)=>`<option value="${v}" ${stru===v?'selected':''}>${INV_STRUKTUR[v].label}</option>`;
   document.getElementById('mo-keu-b').innerHTML=`
-    <div class="fg"><label class="fl">Nama Investor</label><input class="fi" id="ic-nama" value="${c?c.nama:''}" placeholder="Nama investor"></div>
+    <div class="fg"><label class="fl">Investor</label>
+      <select class="fi" id="ic-person" onchange="invPersonChange()">
+        ${investors().slice().sort((a,b)=>a.nama.localeCompare(b.nama))
+          .map(p=>`<option value="${p.id}" ${pre===p.id?'selected':''}>${esc(p.nama)}</option>`).join('')}
+        <option value="__new" ${!pre?'selected':''}>➕ Investor baru…</option>
+      </select>
+      <div class="fh">Orang yang sama masuk lagi? Pilih namanya, jangan bikin baru.</div>
+    </div>
+    <div class="fg" id="ic-newwrap" style="display:${(!investors().length||!pre)?'block':'none'}">
+      <label class="fl">Nama Investor Baru</label>
+      <input class="fi" id="ic-nama" value="${c&&!c.investorId?esc(c.nama):''}" placeholder="Nama lengkap">
+    </div>
+    <div class="fg"><label class="fl">Label Periode (opsional)</label>
+      <input class="fi" id="ic-label" value="${c?esc(c.label||''):''}" placeholder="mis. tahap 2, sawah fima">
+      <div class="fh">Buat bedain kalau orangnya masuk beberapa kali.</div>
+    </div>
     <div class="fr">
       <div class="fg"><label class="fl">Pokok (jt)</label><input class="fi" id="ic-pokok" type="number" step="0.0001" value="${c?c.pokok:''}" placeholder="0"></div>
       <div class="fg"><label class="fl">Bagi Hasil (%/bln)</label><input class="fi" id="ic-rate" type="number" step="0.01" value="${c?(c.ratePct??2):2}"></div>
@@ -1016,24 +1105,38 @@ function invModal(mode, id){
     ${mode==='edit'?`<button class="btn ou fw" onclick="invDelete('${id}')" style="margin-top:8px;color:var(--r)">🗑️ Hapus Kontrak</button>`:''}`;
   om('mo-keu');
 }
+function invPersonChange(){
+  const sel=document.getElementById('ic-person'), wrap=document.getElementById('ic-newwrap');
+  if(sel&&wrap) wrap.style.display = sel.value==='__new' ? 'block' : 'none';
+}
 function invSave(mode, id){
-  const nama=document.getElementById('ic-nama').value.trim();
+  const sel=document.getElementById('ic-person');
+  const label=(document.getElementById('ic-label')||{}).value||'';
+  let person=null;
+  if(sel && sel.value && sel.value!=='__new') person=investorById(sel.value);
+  if(!person){
+    const typed=(document.getElementById('ic-nama')||{}).value||'';
+    if(!typed.trim()){ toast('❌ Pilih investor atau isi nama baru'); return; }
+    person=findOrCreateInvestor(typed);
+  }
+  // Nama kontrak tetap dipakai di label jurnal & jadwal, jadi tetap disusun dari orangnya.
+  const nama=person.nama+(label.trim()?' ('+label.trim()+')':'');
   const pokok=parseFloat(document.getElementById('ic-pokok').value||0);
   const rate=parseFloat(document.getElementById('ic-rate').value||2);
   const mulai=document.getElementById('ic-mulai').value;
   const tenor=parseInt(document.getElementById('ic-tenor').value||0);
   const struktur=document.getElementById('ic-struktur').value;
-  if(!nama){ toast('❌ Nama wajib'); return; }
+  if(!person){ toast('❌ Investor wajib'); return; }
   if(!(pokok>0)){ toast('❌ Pokok harus > 0'); return; }
   if(!(tenor>0)){ toast('❌ Tenor harus > 0'); return; }
   if(mode==='edit'){
     const c=invContracts().find(x=>x.id===id); if(!c) return;
     const anyPaid=(c.schedule||[]).some(s=>s.status==='paid');
-    Object.assign(c,{nama,pokok,ratePct:rate,tanggalMulai:mulai,tenorBulan:tenor,struktur});
+    Object.assign(c,{nama,investorId:person.id,label:label.trim()||null,pokok,ratePct:rate,tanggalMulai:mulai,tenorBulan:tenor,struktur});
     if(!anyPaid) c.schedule=contractSchedule(c);
     save(); cm('mo-keu'); rKeu(); toast(anyPaid?'✅ Diperbarui (jadwal terkunci karena sudah ada pembayaran)':'✅ Kontrak diperbarui');
   } else {
-    const c={id:uid(),nama,pokok,ratePct:rate,tanggalMulai:mulai,tenorBulan:tenor,struktur,status:'aktif'};
+    const c={id:uid(),nama,investorId:person.id,label:label.trim()||null,pokok,ratePct:rate,tanggalMulai:mulai,tenorBulan:tenor,struktur,status:'aktif'};
     c.schedule=contractSchedule(c);
     invContracts().push(c);
     ledgerPost2(mulai,'Terima dana investor: '+nama,'1030','2000',pokok,'inv-masuk'); // cash into amunisi, liability up
