@@ -614,6 +614,8 @@ function importJ(){const i=document.createElement('input');i.type='file';i.accep
 
 // ── UTILS ─────────────────────────────────────────────────────────────
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2);
+// Project names arrive from the PGM robot, so they are untrusted input now.
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function fj(v){ if(v==null) return '—'; const n=parseFloat(v); if(isNaN(n)) return '—'; if(Math.abs(n)>=1000) return `Rp ${(n/1000).toFixed(3).replace(/0+$/,'').replace(/\.$/,'')} M`; const s=n.toFixed(3).replace(/0+$/,'').replace(/\.$/,''); return `Rp ${s} jt`; }
 function fjPlain(v){ if(v==null) return '—'; const n=parseFloat(v); if(isNaN(n)) return '—'; if(Math.abs(n)>=1000) return `${(n/1000).toFixed(2).replace(/0+$/,'').replace(/\.$/,'')}M`; if(Math.abs(n)>=1) return `${n.toFixed(2).replace(/0+$/,'').replace(/\.$/,'')}jt`; return `${(n*1000).toFixed(0)}rb`; }
 function fd(s){ if(!s) return '—'; return new Date(s+'T00:00:00').toLocaleDateString('id-ID',{day:'numeric',month:'short',year:'numeric'}); }
@@ -1489,7 +1491,7 @@ function rTreasuryHub(){
       <div class="rep-r" style="font-weight:900"><span class="rl">Selisih</span><span class="rv">${fj(_mm.gap)}</span></div>`;
     if(_mm.suggestion.length){
       h+=`<div style="font-size:11px;font-weight:700;color:var(--txt);margin-top:6px">Kemungkinan proyek yang sudah didanai:</div>`;
-      _mm.suggestion.forEach(s=>{ h+=`<div class="rep-r"><span class="rl">${s.nama}</span><span class="rv">${fj(s.jumlah)}</span></div>`; });
+      _mm.suggestion.forEach(s=>{ h+=`<div class="rep-r"><span class="rl">${esc(s.nama)}</span><span class="rv">${fj(s.jumlah)}</span></div>`; });
       h+=`<button class="btn pr fw" onclick="applyDeployFix()" style="margin-top:8px;font-size:12px">Tandai proyek ini aktif</button>`;
     } else {
       h+=`<div class="fc-note" style="margin-top:6px">Belum ketemu kombinasi proyek yang jumlahnya pas. Cek manual di tab Proyek.</div>`;
@@ -1497,11 +1499,12 @@ function rTreasuryHub(){
     h+=`</div>`;
   }
   // 6b) outstanding RRPR bridges (must be repaid)
+  settleBridges();
   const _bridges=(S.bridges||[]);
   if(_bridges.length){
     h+=`<div class="rep-sec" style="color:#B45309">🌉 Pinjaman Cadangan (harus dikembalikan)</div><div class="card-s" style="margin-bottom:12px">`;
     _bridges.forEach(b=>{ const pr=(S.projects||[]).find(x=>x.id===b.dealId);
-      h+=`<div class="rep-r"><span class="rl">${pr?pr.peminjam:'Proyek'}<div style="font-size:9.5px;color:var(--sub)">kembalikan sebelum ${fd(b.restoreBy)}</div></span><span class="rv">${fj(b.amount)}</span></div>`; });
+      h+=`<div class="rep-r"><span class="rl">${pr?esc(pr.peminjam):'Proyek'}<div style="font-size:9.5px;color:var(--sub)">kembalikan sebelum ${fd(b.restoreBy)}</div></span><span class="rv">${fj(b.amount)}</span></div>`; });
     h+=`</div>`;
   }
   // 7) recommendation tools
@@ -1877,6 +1880,12 @@ function activeDur(p){
 function profP(p){
   if(p.status === 'selesai' && !wasTaken(p)) return 0;
   const rt=p.returnType||'sekali';
+  if(rt==='bulanan' && p.tiered){
+    // Tiered months differ, so the profit is the sum of the actual schedule.
+    generateSchedule(p);
+    return parseFloat((p.schedule||[]).filter(s=>s.status!=='skipped')
+      .reduce((s,x)=>s+parseFloat(x.amount||0),0).toFixed(2));
+  }
   if(rt==='bulanan'){
     const dur=activeDur(p);
     let rb;
@@ -1904,6 +1913,10 @@ function adminFeeTotal(p){
 }
 function retLabel(p){
   const rt=p.returnType||'sekali';
+  if(rt==='bulanan' && p.tiered){
+    const t=Object.assign({}, engineCfg().tieredReturn, p.tieredCfg||{});
+    return `bertingkat ${t.m1_3}% / ${t.m4_6}% × ${activeDur(p)} bln`;
+  }
   if(rt==='bulanan'){
     const rb=retBulananRp(p);
     const dur=activeDur(p);
@@ -1988,9 +2001,16 @@ function generateSchedule(project){
   if(dur<=0) return;
   const rt=project.returnType||'sekali';
   if(rt!=='bulanan') return;
+  // Tiered return (5,5% bln 1-3 · 6,5% bln 4-6, ulang tiap 6 bln): per-month amounts
+  // instead of one flat figure. Gross per month; the Mas Hena fee is carved out
+  // downstream by the inflow adapter, so this stays comparable to a flat schedule.
+  const tierAmts = project.tiered
+    ? Treasury.buildTieredSchedule(kontrakP(project), project.tanggalMulai, dur,
+        Object.assign({}, engineCfg().tieredReturn, project.tieredCfg||{}, {feePct:0})).map(r=>r.gross)
+    : null;
   // Check if schedule exists and matches duration + amount
   const existing=project.schedule||[];
-  const monthlyAmt0=retBulananRp(project);
+  const monthlyAmt0=tierAmts?tierAmts[0]:retBulananRp(project);
   const amtMatch=existing.length>0&&Math.abs(parseFloat(existing[0].amount||0)-monthlyAmt0)<0.001;
   // Also regenerate if any unpaid dueDate doesn't match expected (tanggalMulai changed)
   const dateMatch=existing.every((s,idx)=>s.status==='paid'||s.dueDate===am(project.tanggalMulai,idx+1));
@@ -2015,7 +2035,7 @@ function generateSchedule(project){
       dueDate: dueDate,
       status: st,
       paidDate: st==='paid'?(old?.paidDate||null):null,
-      amount: monthlyAmt,
+      amount: tierAmts?tierAmts[i]:monthlyAmt,
       isFinal: i===dur-1
     });
   }
@@ -2304,7 +2324,7 @@ function peluangCard(p,i){
       <div style="min-width:0">
         <div style="font-size:14.5px;font-weight:900;display:flex;align-items:center;gap:6px">
           ${p.seen?'':'<span style="width:7px;height:7px;border-radius:50%;background:var(--p);flex-shrink:0"></span>'}
-          ${p.peminjam||'Tanpa nama'}
+          ${esc(p.peminjam)||'Tanpa nama'}
         </div>
         <div style="font-size:10.5px;color:var(--sub);font-weight:700;margin-top:3px">
           ${p.durasiReturn?p.durasiReturn+' bln · ':''}${p.returnPersen?p.returnPersen+'%/bln':''} ${chip}
@@ -2340,6 +2360,18 @@ function deployMismatch(){
     if(Math.abs(sum-gap)<0.01 && (!best||pick.length<best.length)) best=pick;
   }
   return {deployed, activeSum, gap, suggestion:(best||[]).map(p=>({id:p.id,nama:p.peminjam,jumlah:parseFloat(p.jumlah||0),mulai:p.tanggalMulai}))};
+}
+// A bridge is economically repaid once RRPR is back at or above its required floor.
+// Clear it then, so the reminder disappears by itself instead of nagging forever.
+function settleBridges(){
+  if(!Array.isArray(S.bridges) || !S.bridges.length || !window.Treasury) return;
+  const st=engineState(), cfg=engineCfg();
+  const bal=Treasury.pocketBal(st,Treasury.POCKET.RRPR), req=Treasury.requiredRRPR(st,cfg,todayISO());
+  if(bal+0.005 < req) return;            // still short: keep the reminder
+  const n=S.bridges.length;
+  S.bridges=[];
+  console.log('[bridge] '+n+' pinjaman cadangan lunas: RRPR '+bal+' >= target '+req);
+  save();
 }
 function applyDeployFix(){
   const m=deployMismatch();
@@ -2378,8 +2410,21 @@ function openPeluang(id){
     <button class="btn ou fw" onclick="cm('mo-keu')" style="margin-top:8px">Belum, nanti dulu</button>`;
   om('mo-keu');
 }
-let _pendingDeal=null;
+let _pendingDeal=null, _mixEdit=false;
+function toggleMixEdit(id){ _mixEdit=!_mixEdit; renderDecision(id, _pendingDeal?_pendingDeal.mix:null); }
+function applyMixEdit(id){
+  const mix=[];
+  document.querySelectorAll('.mix-in').forEach(inp=>{
+    const amt=Math.round((parseFloat(inp.value||0))*1e4)/1e4;
+    if(amt>0.0001) mix.push({code:inp.dataset.code, amount:amt,
+      bridge:inp.dataset.code===Treasury.POCKET.RRPR,
+      restoreBy:inp.dataset.code===Treasury.POCKET.RRPR?((S.projects||[]).find(p=>p.id===id)||{}).tanggalJT||null:null});
+  });
+  _mixEdit=false;
+  renderDecision(id, mix); // verdict + payability proof recompute against the manual mix
+}
 function startMasukProject(id){
+  _mixEdit=false;
   const p=(S.projects||[]).find(x=>x.id===id); if(!p) return;
   document.getElementById('mo-keu-b').innerHTML=`<div class="fc-note" style="text-align:center;padding:20px">Mengecek kas &amp; jadwal balik…</div>`;
   setTimeout(()=>renderDecision(id), 380); // honest beat: a pause before committing money
@@ -2396,13 +2441,28 @@ function renderDecision(id, overrideMix){
   let b=`<div class="card-s" style="background:${V.bg};margin-bottom:12px;text-align:center;padding:14px">
     <div style="font-size:20px;font-weight:900;color:${V.c}">${V.t}</div>
     <div style="font-size:11px;font-weight:700;color:var(--txt);margin-top:2px">${g.reason}</div></div>`;
-  b+=`<div class="rep-sec">Uang dari kantong</div><div class="card-s" style="margin-bottom:12px">`;
-  picked.forEach(m=>{
-    const before=Treasury.pocketBal(st,m.code), after=Treasury.R4(before-m.amount);
-    b+=`<div class="rep-r"><span class="rl">${acct(m.code).name}${m.bridge?' <b style="color:#B45309">(pinjam cadangan)</b>':''}
-      <div style="font-size:9.5px;color:var(--sub)">${fj(before)} → ${fj(after)}</div></span>
-      <span class="rv">${fj(m.amount)}</span></div>`;
-  });
+  b+=`<div class="rep-sec">Uang dari kantong <button class="btn ou" onclick="toggleMixEdit('${id}')" style="float:right;font-size:10px;padding:3px 9px;text-transform:none;letter-spacing:0">${_mixEdit?'Batal':'Ubah'}</button></div>
+    <div class="card-s" style="margin-bottom:12px">`;
+  if(_mixEdit){
+    // Manual override: every allowed pocket becomes an input, verdict recomputes on Terapkan.
+    const free=Treasury.freeCashByPocket(st,cfg,today);
+    cfg.fundingOrder.forEach(code=>{
+      const cur=(picked.find(m=>m.code===code)||{}).amount||0;
+      b+=`<div class="fr" style="align-items:flex-end"><div class="fg" style="flex:1.2">
+        <label class="fl">${acct(code).name}</label>
+        <div style="font-size:9.5px;color:var(--sub);font-weight:700">tersedia ${fj(free[code]||0)}</div></div>
+        <div class="fg"><input class="fi mix-in" data-code="${code}" type="number" step="0.01" value="${cur||''}" placeholder="0"></div></div>`;
+    });
+    b+=`<button class="btn pr fw" onclick="applyMixEdit('${id}')" style="margin-top:6px;font-size:12px">Terapkan &amp; hitung ulang</button>`;
+  } else {
+    picked.forEach(m=>{
+      const before=Treasury.pocketBal(st,m.code), after=Treasury.R4(before-m.amount);
+      b+=`<div class="rep-r"><span class="rl">${acct(m.code).name}${m.bridge?' <b style="color:#B45309">(pinjam cadangan)</b>':''}
+        <div style="font-size:9.5px;color:var(--sub)">${fj(before)} → ${fj(after)}</div></span>
+        <span class="rv">${fj(m.amount)}</span></div>`;
+    });
+    if(!picked.length) b+=`<div class="fc-note">Belum ada kantong yang bisa dipakai.</div>`;
+  }
   if(shortfall>0.005) b+=`<div class="rep-r" style="color:var(--r)"><span class="rl">Kurang</span><span class="rv">${fj(shortfall)}</span></div>`;
   b+=`<div class="rep-r" style="border-top:1.5px solid var(--bdr);margin-top:2px;padding-top:5px"><span class="rl">Porsi kas likuid</span><span class="rv">${g.exposurePct}%</span></div></div>`;
   b+=`<div class="rep-sec">Cek pembayaran investor</div><div class="card-s" style="margin-bottom:12px">`;
@@ -3089,6 +3149,11 @@ function oPM(id){
             <input class="fi" id="fp-pct" type="number" step="0.1" value="${p?p.returnPersen||'':'5'}" placeholder="5">
             <div class="fh">% dari nilai kontrak per bulan</div>
           </div>
+          <label style="display:flex;align-items:center;gap:7px;margin-top:10px;font-size:11.5px;font-weight:800;color:#B56B00;cursor:pointer">
+            <input type="checkbox" id="fp-tiered" ${p?.tiered?'checked':''} style="width:16px;height:16px">
+            Return bertingkat (${engineCfg().tieredReturn.m1_3}% bln 1-3 · ${engineCfg().tieredReturn.m4_6}% bln 4-6)
+          </label>
+          <div class="fh">Kalau dicentang, angka % di atas diabaikan dan dipakai tingkat ini, mengulang tiap ${engineCfg().tieredReturn.cycleMonths} bulan.</div>
         </div>
       </div>
     </div>
@@ -3299,7 +3364,10 @@ function savePrj(){
     } else {
       rb=parseFloat(document.getElementById('fp-rb')?.value||0);
     }
-    if(!rb||!dur){toast('❌ Isi return & durasi');return;}
+    const tieredEl=document.getElementById('fp-tiered');
+    data.tiered=!!(tieredEl&&tieredEl.checked);
+    if(!data.tiered && (!rb||!dur)){toast('❌ Isi return & durasi');return;}
+    if(data.tiered && !dur){toast('❌ Isi durasi');return;}
     data.returnMode=mode;
     data.returnBulanan=rb;
     data.returnPersen=pct;
