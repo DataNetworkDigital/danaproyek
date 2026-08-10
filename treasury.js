@@ -669,6 +669,52 @@
     };
   }
 
+  // ── SAFE CONCURRENT WRITES (app ↔ Telegram bot) ───────────────────────────
+  // The whole fund lives in ONE Firestore document, so a naive whole-state write
+  // from the app would silently erase anything the bot posted while the page was
+  // open (and vice versa). Bot operations are deliberately narrow and additive:
+  // append a balanced ledger entry, and/or flip a schedule row to paid. So a
+  // merge is well-defined: union the ledgers by id, and let "paid" win.
+  // Returns the merged state plus what it recovered, so the UI can say so.
+  function mergeCloudOps(local, cloud) {
+    if (!cloud) return { state: local, recovered: { entries: 0, schedules: 0 } };
+    const out = Object.assign({}, local);
+    let entries = 0, schedules = 0;
+
+    // 1) ledger: keep every entry either side has (id-keyed, order by date)
+    const seen = {};
+    (local.ledger || []).forEach((e) => { seen[e.id] = true; });
+    const extra = (cloud.ledger || []).filter((e) => e && e.id && !seen[e.id]);
+    if (extra.length) {
+      entries = extra.length;
+      out.ledger = (local.ledger || []).concat(extra)
+        .sort((a, b) => (a.tanggal < b.tanggal ? -1 : (a.tanggal > b.tanggal ? 1 : 0)));
+    }
+
+    // 2) investor schedules: a payment recorded anywhere is a payment. Never un-pay.
+    const cloudC = {};
+    (cloud.investorContracts || []).forEach((c) => { cloudC[c.id] = c; });
+    out.investorContracts = (local.investorContracts || []).map((c) => {
+      const cc = cloudC[c.id];
+      if (!cc || !Array.isArray(cc.schedule) || !Array.isArray(c.schedule)) return c;
+      let touched = false;
+      const sched = c.schedule.map((s, i) => {
+        const cs = cc.schedule[i];
+        if (cs && cs.status === 'paid' && s.status !== 'paid') { touched = true; schedules++; return Object.assign({}, s, cs); }
+        return s;
+      });
+      return touched ? Object.assign({}, c, { schedule: sched }) : c;
+    });
+
+    // 3) contracts the bot created that we have never seen
+    const localIds = {};
+    (local.investorContracts || []).forEach((c) => { localIds[c.id] = true; });
+    const newC = (cloud.investorContracts || []).filter((c) => c && c.id && !localIds[c.id]);
+    if (newC.length) out.investorContracts = out.investorContracts.concat(newC);
+
+    return { state: out, recovered: { entries, schedules: schedules, contracts: newC.length } };
+  }
+
   // ── idempotent migration to the unified capital model ─────────────────────
   // Additive + versioned. Never destroys S.investorContracts / S.external /
   // S.orgConfig.alokasi. Stable IDs => running twice changes nothing.
@@ -747,6 +793,6 @@
     // recommendations
     returnWaterfall, fundingRecommendation, pickSourcesForDeal, guaranteeGate, maxSafeTicket, buildTieredSchedule, fundingNeed,
     // validation + metrics + migration
-    validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, migrate,
+    validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, migrate, mergeCloudOps,
   };
 });

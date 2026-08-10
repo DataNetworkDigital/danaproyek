@@ -615,7 +615,23 @@ async function saveToFirestore(){
   setSync('syncing');
   try{
     const ts=new Date().toISOString();
-    await db.collection('danatrack').doc(DOC_ID).set({state:JSON.parse(JSON.stringify(S)),updatedAt:ts},{merge:true});
+    // Safe write: the Telegram bot may have appended entries (or marked a payment
+    // paid) while this page was open. Writing the whole local state blindly would
+    // erase that. Re-read inside a transaction and merge those additive ops first.
+    const ref=db.collection('danatrack').doc(DOC_ID);
+    await db.runTransaction(async(tx)=>{
+      const snap=await tx.get(ref);
+      if(snap.exists && window.Treasury){
+        const cloud=(snap.data()||{}).state;
+        const m=Treasury.mergeCloudOps(S, cloud);
+        if(m.recovered.entries||m.recovered.schedules||m.recovered.contracts){
+          S=m.state;
+          console.log('[sync] menerima dari bot:',m.recovered);
+          toast(`↻ ${m.recovered.entries} catatan dari Telegram digabung`);
+        }
+      }
+      tx.set(ref,{state:JSON.parse(JSON.stringify(S)),updatedAt:ts},{merge:true});
+    });
     if(USE_FIREBASE_AUTH) publishPublicSummary(); // dormant until auth is enabled
     setSync('synced',ts);
   }catch(e){console.warn('Firestore save:',e);setSync('error');}

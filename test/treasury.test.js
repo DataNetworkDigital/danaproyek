@@ -602,3 +602,39 @@ test('F1c. a safe deal needs nothing', () => {
   assert.strictEqual(need.shortfallNow, 0);
   assert.strictEqual(need.byDate, null);
 });
+
+// ── Safe concurrent writes: app must never erase what the bot posted ────────
+test('M1. a bot ledger entry made while the app was open survives the app save', () => {
+  const local = S({ ledger: [entry('2026-08-01', [dr('1010', 5), cr('3000', 5)], { id: 'a' })] });
+  const cloud = S({ ledger: [
+    entry('2026-08-01', [dr('1010', 5), cr('3000', 5)], { id: 'a' }),
+    entry('2026-08-05', [dr('5000', 1), cr('1000', 1)], { id: 'bot1' }),
+  ] });
+  const m = T.mergeCloudOps(local, cloud);
+  assert.strictEqual(m.state.ledger.length, 2, 'the bot entry is kept');
+  assert.ok(m.state.ledger.some((e) => e.id === 'bot1'));
+  assert.strictEqual(m.recovered.entries, 1);
+});
+
+test('M2. a payment marked paid by the bot is never flipped back to pending', () => {
+  const mk = (status) => ({ id: 'c1', nama: 'Investor A', schedule: [{ tanggal: '2026-09-03', jumlah: 1, tipe: 'bagihasil', status }] });
+  const m = T.mergeCloudOps(S({ investorContracts: [mk('pending')] }), S({ investorContracts: [mk('paid')] }));
+  assert.strictEqual(m.state.investorContracts[0].schedule[0].status, 'paid');
+  assert.strictEqual(m.recovered.schedules, 1);
+});
+
+test('M3. a contract created from Telegram is picked up by the app', () => {
+  const local = S({ investorContracts: [] });
+  const cloud = S({ investorContracts: [{ id: 'new1', nama: 'Investor Baru', pokok: 20, schedule: [] }] });
+  const m = T.mergeCloudOps(local, cloud);
+  assert.strictEqual(m.state.investorContracts.length, 1);
+  assert.strictEqual(m.recovered.contracts, 1);
+});
+
+test('M4. merging with no cloud changes is a no-op', () => {
+  const st = S({ ledger: [entry('2026-08-01', [dr('1010', 5), cr('3000', 5)], { id: 'a' })] });
+  const m = T.mergeCloudOps(st, JSON.parse(JSON.stringify(st)));
+  assert.strictEqual(m.state.ledger.length, 1);
+  assert.strictEqual(m.recovered.entries, 0);
+  assert.strictEqual(m.recovered.schedules, 0);
+});
