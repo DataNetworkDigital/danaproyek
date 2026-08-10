@@ -367,3 +367,52 @@ test('T2c. reports shortfall when every source is exhausted', () => {
   assert.strictEqual(T.R4(funded + r.shortfall), 500, 'funded + shortfall = ticket');
   assert.ok(r.shortfall > 0);
 });
+
+// ── Task 3: paymentLadder ───────────────────────────────────────────────────
+function ladderState() {
+  return S({
+    ledger: [entry('2026-08-01', [dr('1010', 30), cr('3000', 30)])],
+    providers: [{ id: 'p1', classification: 'investor_debt', subtype: 'regular' }],
+    contracts: [{ id: 'c1', providerId: 'p1', principal: 50, nama: 'Investor A', schedule: [
+      { tanggal: '2026-09-03', jumlah: 1, tipe: 'bagihasil', status: 'pending' },
+      { tanggal: '2026-10-03', jumlah: 1, tipe: 'bagihasil', status: 'pending' },
+      { tanggal: '2026-11-03', jumlah: 50, tipe: 'pokok', status: 'pending' },
+    ] }],
+    projects: [{ id: 'pr1', name: 'Proyek Lama', deploy: 40, type: 'onetime', profit: 6,
+      principalDate: '2026-10-20', inflowQuality: 'contracted' }],
+  });
+}
+
+test('T3a. ladder has one row per investor obligation, in date order', () => {
+  const l = T.paymentLadder(ladderState(), T.cfgOf({}), TODAY, {});
+  const dates = l.rows.map((r) => r.date);
+  assert.deepStrictEqual(dates, ['2026-09-03', '2026-10-03', '2026-11-03']);
+  assert.strictEqual(l.rows[2].kind, 'inv_principal');
+  assert.strictEqual(l.rows[2].obligation, 50);
+});
+
+test('T3b. cumulative cash counts stressed inflows only after their delayed date', () => {
+  const l = T.paymentLadder(ladderState(), T.cfgOf({}), TODAY, {});
+  assert.strictEqual(l.rows[0].cumulativeCash, 29);
+  assert.strictEqual(l.rows[1].cumulativeCash, 28);
+  assert.strictEqual(l.rows[2].cumulativeCash, T.R4(28 + 32.2 - 50));
+});
+
+test('T3c. applying a deal removes cash now and adds its inflow later', () => {
+  const st = ladderState(), cfg = T.cfgOf({});
+  const base = T.paymentLadder(st, cfg, TODAY, {});
+  const withDeal = T.paymentLadder(st, cfg, TODAY, {
+    deal: { ticket: 20, profit: 3, maturityDate: '2026-12-15', inflowQuality: 'contracted' },
+    mix: [{ code: '1010', amount: 20 }],
+  });
+  assert.strictEqual(withDeal.rows[0].cumulativeCash, T.R4(base.rows[0].cumulativeCash - 20),
+    'deal cash leaves immediately');
+  assert.ok(withDeal.rows[2].cumulativeCash < base.rows[2].cumulativeCash,
+    'deal inflow lands after the Nov obligation, so it does not help that date');
+});
+
+test('T3d. minBuffer is derived from near-term daily obligation outflow', () => {
+  const l = T.paymentLadder(ladderState(), T.cfgOf({}), TODAY, {});
+  assert.ok(l.minBuffer >= 0);
+  assert.strictEqual(typeof l.minGap, 'number');
+});

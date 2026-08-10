@@ -303,6 +303,56 @@
     return { mix, shortfall: R4(Math.max(0, rem)), usesBridge: mix.some((m) => m.bridge) };
   }
 
+  // The guarantee proof. For each dated investor obligation, project cash-on-hand
+  // at that date under stress (inflows late + haircut). All pockets count as payable
+  // here: RRPR and the sinking fund exist precisely to pay investors.
+  function paymentLadder(state, cfg, today, opts) {
+    opts = opts || {};
+    const shift = cfg.timingBufferDays;
+    const qual = cfg.inflowQuality.conservative;
+
+    const obligations = [].concat(
+      investorObligations(state, today),
+      papaCallEvents(state, cfg, 'conservative', today)
+    ).filter((e) => e.date >= today).sort((a, b) => (a.date < b.date ? -1 : 1));
+
+    const inflows = projectInflows(state, cfg, 'conservative', today).slice();
+    if (opts.deal && opts.deal.maturityDate) {
+      const d = opts.deal;
+      const hc = qual[d.inflowQuality || 'contracted'];
+      inflows.push({
+        date: addDays(d.maturityDate, shift),
+        amount: R4((R4(d.ticket) + R4(d.profit || 0)) * (hc == null ? 1 : hc)),
+        kind: 'inflow', label: (d.name || 'Proyek baru') + ' · pokok + laba',
+      });
+    }
+
+    const drawn = (opts.mix || []).reduce((s, m) => s + R4(m.amount), 0);
+    const startCash = R4(totalLiquid(state) - drawn);
+
+    // minBuffer = timing cushion sized on the near-term outflow rate
+    const near = obligations.filter((e) => daysBetween(today, e.date) <= 30)
+      .reduce((s, e) => s - e.amount, 0);
+    const minBuffer = R4(near / 30 * cfg.timingBufferDays);
+
+    const rows = [];
+    let minGap = Infinity, firstBreach = null;
+    obligations.forEach((o) => {
+      const landed = inflows.filter((i) => i.date <= o.date).reduce((s, i) => s + i.amount, 0);
+      const paidOut = obligations.filter((x) => x.date <= o.date).reduce((s, x) => s - x.amount, 0);
+      const cash = R4(startCash + landed - paidOut);
+      const covered = cash >= -0.005;
+      const tight = covered && cash < minBuffer;
+      if (cash < minGap) minGap = cash;
+      if (!covered && !firstBreach) firstBreach = { date: o.date, label: o.label };
+      rows.push({
+        date: o.date, label: o.label, kind: o.kind,
+        obligation: R4(-o.amount), cumulativeCash: cash, covered, tight,
+      });
+    });
+    return { rows, minBuffer, minGap: rows.length ? R4(minGap) : R4(startCash), firstBreach, startCash };
+  }
+
   // ── maturity ladder (per 7/30/60/90 days) ─────────────────────────────────
   function maturityLadder(state, cfg, today, scenario) {
     scenario = scenario || 'conservative';
@@ -573,7 +623,7 @@
     balanceOf, retainedProfit, totalLiquid, attackCash, pocketBal, freeCashByPocket,
     // events + scenarios
     investorObligations, papaCallEvents, projectInflows, buildEvents, sortEvents, projectScenario,
-    obligationsWithin, cushion, requiredRRPR, safeAttackBudget, maturityLadder, concentration,
+    obligationsWithin, cushion, requiredRRPR, safeAttackBudget, maturityLadder, concentration, paymentLadder,
     // recommendations
     returnWaterfall, fundingRecommendation, pickSourcesForDeal,
     // validation + metrics + migration
