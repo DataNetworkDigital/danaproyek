@@ -361,10 +361,20 @@
     const liquid = totalLiquid(state);
     const exposurePct = liquid > 0 ? R4(R4(deal.ticket) / liquid * 100) : 0;
     const overConcentrated = exposurePct > cfg.singleBorrowerCapPct;
+    const funded = R4((mix || []).reduce((s, m) => s + R4(m.amount), 0));
+    const shortfall = R4(Math.max(0, R4(deal.ticket) - funded));
 
+    // A deal we cannot fully fund is never "just cautious" — there is no money for it.
+    if (shortfall > 0.005) {
+      return {
+        verdict: 'RED', ladder, exposurePct, usesBridge, shortfall,
+        firstBreach: ladder.firstBreach,
+        reason: 'Dana tidak cukup: kurang ' + shortfall + ' jt dari kantong yang boleh dipakai.',
+      };
+    }
     if (ladder.firstBreach) {
       return {
-        verdict: 'RED', ladder, exposurePct, usesBridge,
+        verdict: 'RED', ladder, exposurePct, usesBridge, shortfall,
         firstBreach: ladder.firstBreach,
         reason: 'Kewajiban ' + ladder.firstBreach.label + ' pada ' + ladder.firstBreach.date + ' tidak tertutup.',
       };
@@ -374,11 +384,11 @@
     if (usesBridge) reasons.push('memakai cadangan RRPR (harus dikembalikan)');
     if (overConcentrated) reasons.push('proyek ini ' + exposurePct + '% dari kas likuid');
     if (reasons.length) {
-      return { verdict: 'YELLOW', ladder, exposurePct, usesBridge, firstBreach: null,
+      return { verdict: 'YELLOW', ladder, exposurePct, usesBridge, shortfall, firstBreach: null,
         reason: reasons.join('; ') + '.' };
     }
     const lastDate = ladder.rows.length ? ladder.rows[ladder.rows.length - 1].date : null;
-    return { verdict: 'GREEN', ladder, exposurePct, usesBridge, firstBreach: null,
+    return { verdict: 'GREEN', ladder, exposurePct, usesBridge, shortfall, firstBreach: null,
       reason: lastDate ? 'Semua kewajiban investor tertutup sampai ' + lastDate + '.' : 'Tidak ada kewajiban investor terjadwal.' };
   }
 
@@ -472,15 +482,21 @@
     // accrued bagi-hasil terutang currently due (2010 balance capped by amount left)
     const accrued = balanceOf(state.ledger, state.accounts, '2010');
     const toDue = R4(Math.min(rem, Math.max(0, accrued))); rem = R4(rem - toDue);
+    // Owner spread is the residual claim: hold it back while any near obligation
+    // is still unfunded. Over-releasing here is how a guarantee quietly breaks.
+    const ladderAfter = paymentLadder(state, cfg, today, {});
+    const trapped = !!cfg.ownerCashTrap && (ladderAfter.firstBreach !== null || sinkNeed > 0.005 || rrprNeed > 0.005);
+    const freeAttack = trapped ? 0 : R4(Math.max(0, rem));
     return {
       total: amount,
+      ownerTrapped: trapped,
       steps: [
         { to: 'Investor Jatuh Tempo (sinking)', code: POCKET.SINKING, amount: toSinking, why: 'Pra-danai pokok investor yang jatuh tempo ≤ ' + cfg.sinkHorizonDays + ' hari.' },
         { to: 'RRPR (cadangan)', code: POCKET.RRPR, amount: toRRPR, why: 'Pulihkan cadangan sampai target ' + R4(rrprReq) + '.' },
         { to: 'Bagi hasil terutang', code: '2010', amount: toDue, why: 'Sisihkan untuk bagi hasil yang sudah jatuh tempo.' },
-        { to: 'Modal Serang (Gde)', code: POCKET.GDE, amount: R4(Math.max(0, rem)), why: 'Sisanya bebas untuk proyek baru.' },
+        { to: trapped ? 'Ditahan (kewajiban belum aman)' : 'Modal Serang (Gde)', code: POCKET.GDE, amount: freeAttack, why: trapped ? 'Untung ditahan dulu sampai semua kewajiban investor aman.' : 'Sisanya bebas untuk proyek baru.' },
       ].filter((s) => s.amount > 0.0001 || s.code === POCKET.GDE),
-      freeAttack: R4(Math.max(0, rem)),
+      freeAttack: freeAttack,
     };
   }
 

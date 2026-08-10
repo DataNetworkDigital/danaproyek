@@ -491,3 +491,30 @@ test('T5c. a 0% fee stays 0% (does not fall back to the default)', () => {
   assert.strictEqual(sch[0].fee, 0);
   assert.strictEqual(sch[0].amount, 5.5);
 });
+
+// ── Task 9: owner cash trap ─────────────────────────────────────────────────
+test('T9a. owner draw is suppressed while a near obligation is unfunded', () => {
+  const st = S({
+    ledger: [entry('2026-08-01', [dr('1010', 5), cr('3000', 5)])],
+    providers: [{ id: 'p1', classification: 'investor_debt', subtype: 'regular' }],
+    contracts: [{ id: 'c1', providerId: 'p1', principal: 40, nama: 'Investor A', schedule: [
+      { tanggal: '2026-08-20', jumlah: 40, tipe: 'pokok', status: 'pending' },
+    ] }],
+  });
+  const w = T.returnWaterfall(st, T.cfgOf({}), 10, TODAY);
+  assert.strictEqual(w.ownerTrapped, true, 'flagged because obligations are not yet covered');
+  assert.strictEqual(w.freeAttack, 0, 'nothing released to the owner while trapped');
+});
+
+// ── Regression: a deal that cannot be funded must not read as merely cautious ─
+test('T4e. shortfall (cannot fund) is RED, never GREEN/YELLOW', () => {
+  const st = S({ ledger: [entry('2026-08-01', [dr('1100', 50), cr('3000', 50)])] }); // all deployed, no liquid cash
+  const cfg = T.cfgOf({});
+  const deal = { ticket: 100, maturityDate: '2026-12-01', today: TODAY };
+  const picked = T.pickSourcesForDeal(st, cfg, deal);
+  assert.strictEqual(picked.mix.length, 0, 'nothing available to draw');
+  const g = T.guaranteeGate(st, cfg, deal, picked.mix, TODAY);
+  assert.strictEqual(g.verdict, 'RED', 'unfundable deal must be RED');
+  assert.ok(/cukup|kurang/i.test(g.reason), 'reason names the funding gap: ' + g.reason);
+  assert.strictEqual(g.shortfall, 100);
+});

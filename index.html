@@ -458,8 +458,19 @@ function migrateSchema(){
         conservative:{received:1,approved:0.9,invoiced:0.8,contracted:0.7,pipeline:0},
         stress:{received:1,approved:0.75,invoiced:0.6,contracted:0.4,pipeline:0}},
       papaCall:{base:0,conservative:0.25,stress:1}, papaNoticeDays:30,
-      cushionPct:(S.orgConfig.cushionPct!=null?S.orgConfig.cushionPct:15), rrprMultiplier:1.25, sinkHorizonDays:60, investorRatePct:2
+      cushionPct:(S.orgConfig.cushionPct!=null?S.orgConfig.cushionPct:15), rrprMultiplier:1.25, sinkHorizonDays:60, investorRatePct:2,
+      fundingOrder:['1030','1010','1020'], operatingFloor:0, hardGuaranteeWindowDays:60,
+      timingBufferDays:7, singleBorrowerCapPct:40, ownerCashTrap:true,
+      tieredReturn:{m1_3:5.5,m4_6:6.5,cycleMonths:6,feePct:0.5}
     };
+  }
+  // Additive top-up for states migrated before the smart-intake keys existed.
+  if(S.orgConfig.treasury && !S.orgConfig.treasury.fundingOrder){
+    Object.assign(S.orgConfig.treasury,{
+      fundingOrder:['1030','1010','1020'], operatingFloor:0, hardGuaranteeWindowDays:60,
+      timingBufferDays:7, singleBorrowerCapPct:40, ownerCashTrap:true,
+      tieredReturn:{m1_3:5.5,m4_6:6.5,cycleMonths:6,feePct:0.5}
+    });
   }
   // 4. Unified capital model (CapitalProvider/Contract/Allocation) — additive + idempotent.
   //    Backup once before the first v4 migration; migrate() itself never touches the ledger.
@@ -496,6 +507,28 @@ function engineState(){
   };
 }
 function engineCfg(){ return Treasury.cfgOf(S.orgConfig||{}); }
+// Opportunities = projects still on offer (status 'tersedia'). Ranked by urgency:
+// soonest deadline first, then biggest, so the top card is the one to act on.
+function opportunities(q){
+  const term=(q||'').trim().toLowerCase();
+  return (S.projects||[])
+    .filter(p=>p.status==='tersedia')
+    .filter(p=>!term || (p.peminjam||'').toLowerCase().includes(term))
+    .sort((a,b)=>{
+      const da=a.deadline||'9999-12-31', db=b.deadline||'9999-12-31';
+      if(da!==db) return da<db?-1:1;
+      return parseFloat(b.jumlah||0)-parseFloat(a.jumlah||0);
+    });
+}
+function unseenOpportunityCount(){ return opportunities().filter(p=>!p.seen).length; }
+// Deal shape the engine expects, derived from an opportunity project.
+function dealFromProject(p){
+  const deploy=parseFloat(p.jumlah||0), kontrak=parseFloat(p.kontrak||0);
+  const fee=resolveNum(p.adminFeePersen, engineCfg().tieredReturn.feePct);
+  const profit=Math.max(0, kontrak-deploy-kontrak*fee/100);
+  return { id:p.id, name:p.peminjam, ticket:deploy, profit, maturityDate:p.tanggalJT,
+           inflowQuality:p.inflowQuality||'contracted', today:todayISO() };
+}
 function setSync(state, ts){
   const el=document.getElementById('sync-ind');if(!el)return;
   el.style.display='block';
@@ -527,6 +560,7 @@ async function loadFromFirestore(){
       // Always snapshot the pre-merge local data before overwriting (recovery safety)
       try{localStorage.setItem('dt_v3_prev',localStorage.getItem('dt_v3')||'');}catch(e){}
       S={...S,...d.state};
+      migrateSchema(); // cloud state replaces orgConfig wholesale — re-apply migrations
       localStorage.setItem('dt_v3',JSON.stringify(S));
       setSync('synced',d.updatedAt);
     } else setSync('synced');
@@ -1435,6 +1469,14 @@ function rTreasuryHub(){
   h+=`</table></div>`;
   // 6) capital allocation matrix
   h+=tMatrix(st);
+  // 6b) outstanding RRPR bridges (must be repaid)
+  const _bridges=(S.bridges||[]);
+  if(_bridges.length){
+    h+=`<div class="rep-sec" style="color:#B45309">🌉 Pinjaman Cadangan (harus dikembalikan)</div><div class="card-s" style="margin-bottom:12px">`;
+    _bridges.forEach(b=>{ const pr=(S.projects||[]).find(x=>x.id===b.dealId);
+      h+=`<div class="rep-r"><span class="rl">${pr?pr.peminjam:'Proyek'}<div style="font-size:9.5px;color:var(--sub)">kembalikan sebelum ${fd(b.restoreBy)}</div></span><span class="rv">${fj(b.amount)}</span></div>`; });
+    h+=`</div>`;
+  }
   // 7) recommendation tools
   h+=`<div class="rep-sec" style="color:var(--p-deep)">🎯 Alat Rekomendasi</div>
     <div class="card-s" style="margin-bottom:8px">
@@ -2186,15 +2228,184 @@ function returnSplit(list){
   return {proj,realized,scheduled:Math.max(0,parseFloat((proj-realized).toFixed(2)))};
 }
 
+let proyekSeg='peluang', peluangQuery='';
+function swProyek(s){ proyekSeg=s; rProyek(); }
+function peluangSearch(v){ peluangQuery=v; renderPeluangList(); }
 function rProyek(){
   const el=document.getElementById('p-p'); if(!el) return;
   const list=(S.projects||[]);
-  let h=`<div class="rep-sec" style="color:var(--p-deep)">🏗️ Semua Proyek</div>`;
-  if(!list.length){ el.innerHTML=h+`<div class="es"><div class="ei">🌱</div><div class="et">Belum ada proyek</div>${_adminUnlocked?`<button class="btn vio" style="margin-top:14px" onclick="oPM()">＋ Tambah Proyek</button>`:''}</div>`; return; }
-  const aktif=list.filter(p=>p.status!=='selesai'), selesai=list.filter(p=>p.status==='selesai');
-  if(aktif.length){ h+=`<div style="font-size:11px;font-weight:800;color:var(--sub);margin:4px 0 6px">Aktif (${aktif.length})</div>`; aktif.forEach(p=>h+=pCard(p,_adminUnlocked)); }
-  if(selesai.length){ h+=`<div style="font-size:11px;font-weight:800;color:var(--sub);margin:12px 0 6px">Selesai (${selesai.length})</div>`; selesai.forEach(p=>h+=pCard(p,_adminUnlocked)); }
+  const nPel=list.filter(p=>p.status==='tersedia').length;
+  const aktif=list.filter(p=>p.status==='aktif'||p.status==='terlambat');
+  const selesai=list.filter(p=>p.status==='selesai');
+  let h=`<div class="seg" style="margin-bottom:14px">
+    <button class="${proyekSeg==='peluang'?'on':''}" onclick="swProyek('peluang')">Peluang${nPel?' ('+nPel+')':''}</button>
+    <button class="${proyekSeg==='aktif'?'on':''}" onclick="swProyek('aktif')">Aktif${aktif.length?' ('+aktif.length+')':''}</button>
+    <button class="${proyekSeg==='selesai'?'on':''}" onclick="swProyek('selesai')">Selesai</button>
+  </div>`;
+  if(proyekSeg==='peluang'){
+    h+=`<input class="fi" id="pel-q" type="search" placeholder="Cari project atau peminjam"
+         value="${peluangQuery.replace(/"/g,'&quot;')}" oninput="peluangSearch(this.value)" style="margin-bottom:10px">
+      <div id="pel-list"></div>`;
+    el.innerHTML=h; renderPeluangList(); return;
+  }
+  const rows=proyekSeg==='aktif'?aktif:selesai;
+  if(!rows.length){
+    h+=`<div class="es"><div class="ei">${proyekSeg==='aktif'?'🌱':'🎉'}</div>
+      <div class="et">Belum ada proyek ${proyekSeg}</div></div>`;
+  } else rows.forEach(p=>h+=pCard(p,_adminUnlocked));
   el.innerHTML=h;
+}
+function renderPeluangList(){
+  const box=document.getElementById('pel-list'); if(!box) return;
+  const list=opportunities(peluangQuery);
+  if(!list.length){
+    box.innerHTML=peluangQuery
+      ? `<div class="es"><div class="ei">🔍</div><div class="et">Tidak ketemu</div><div class="esb">Coba kata lain.</div></div>`
+      : `<div class="es"><div class="ei">✅</div><div class="et">Belum ada peluang baru</div><div class="esb">Kami kabari lewat Telegram kalau PGM posting proyek.</div></div>`;
+    return;
+  }
+  box.innerHTML=list.map((p,i)=>peluangCard(p,i)).join('');
+}
+function peluangCard(p,i){
+  const dl=p.deadline, dd=dl?du(dl):null;
+  const chip = dl ? `<span class="bdg ${dd!==null&&dd<0?'terlambat':(dd!==null&&dd<=2?'tersedia':'')}"
+      style="font-size:9px">${dd!==null&&dd<0?'lewat':gl(dd)}</span>` : '';
+  const urgent = i<3 && dd!==null && dd<=7;
+  return `<div class="pc tersedia" onclick="openPeluang('${p.id}')"
+      style="margin-bottom:10px;cursor:pointer;animation:cardIn .3s ease both;animation-delay:${Math.min(i,6)*40}ms">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+      <div style="min-width:0">
+        <div style="font-size:14.5px;font-weight:900;display:flex;align-items:center;gap:6px">
+          ${p.seen?'':'<span style="width:7px;height:7px;border-radius:50%;background:var(--p);flex-shrink:0"></span>'}
+          ${p.peminjam||'Tanpa nama'}
+        </div>
+        <div style="font-size:10.5px;color:var(--sub);font-weight:700;margin-top:3px">
+          ${p.durasiReturn?p.durasiReturn+' bln · ':''}${p.returnPersen?p.returnPersen+'%/bln':''} ${chip}
+        </div>
+        ${urgent?'<div style="font-size:9.5px;font-weight:800;color:#B45309;margin-top:3px">perlu perhatian</div>':''}
+      </div>
+      <div class="t-num" style="font-size:15px;font-weight:900;white-space:nowrap">${fj(parseFloat(p.jumlah||0))}</div>
+    </div>
+  </div>`;
+}
+// ── MASUK PROJECT: detail sheet → dry run → decision → confirm → undo ──
+function openPeluang(id){
+  const p=(S.projects||[]).find(x=>x.id===id);
+  if(!p){ toast('Peluang tidak ditemukan'); return; }
+  if(!p.seen){ p.seen=true; save(); renderPeluangList(); }
+  if(p.status!=='tersedia'){
+    document.getElementById('mo-keu-t').textContent='Peluang sudah tidak tersedia';
+    document.getElementById('mo-keu-b').innerHTML=`<div class="fc-note">Project ini sudah tidak berstatus tersedia.</div>
+      <button class="btn ou fw" onclick="cm('mo-keu');go('p')" style="margin-top:10px">Lihat peluang lain</button>`;
+    om('mo-keu'); return;
+  }
+  const deploy=parseFloat(p.jumlah||0);
+  document.getElementById('mo-keu-t').textContent=p.peminjam||'Peluang';
+  document.getElementById('mo-keu-b').innerHTML=`
+    <div class="card-s" style="margin-bottom:12px">
+      <div class="rep-r"><span class="rl">Jumlah dana</span><span class="rv">${fj(deploy)}</span></div>
+      <div class="rep-r"><span class="rl">Durasi</span><span class="rv">${p.durasiReturn||'—'} bln</span></div>
+      <div class="rep-r"><span class="rl">Return</span><span class="rv">${p.returnPersen?p.returnPersen+'%/bln':'—'}</span></div>
+      <div class="rep-r"><span class="rl">Jatuh tempo</span><span class="rv">${p.tanggalJT?fd(p.tanggalJT):'—'}</span></div>
+    </div>
+    <button class="btn pr fw" onclick="startMasukProject('${p.id}')">Masuk project</button>
+    <button class="btn ou fw" onclick="cm('mo-keu')" style="margin-top:8px">Belum, nanti dulu</button>`;
+  om('mo-keu');
+}
+let _pendingDeal=null;
+function startMasukProject(id){
+  const p=(S.projects||[]).find(x=>x.id===id); if(!p) return;
+  document.getElementById('mo-keu-b').innerHTML=`<div class="fc-note" style="text-align:center;padding:20px">Mengecek kas &amp; jadwal balik…</div>`;
+  setTimeout(()=>renderDecision(id), 380); // honest beat: a pause before committing money
+}
+function renderDecision(id, overrideMix){
+  const p=(S.projects||[]).find(x=>x.id===id); if(!p) return;
+  const st=engineState(), cfg=engineCfg(), today=todayISO();
+  const deal=dealFromProject(p);
+  const picked=overrideMix||Treasury.pickSourcesForDeal(st,cfg,deal).mix;
+  const shortfall=Treasury.R4(deal.ticket-picked.reduce((s,m)=>s+m.amount,0));
+  const g=Treasury.guaranteeGate(st,cfg,deal,picked,today);
+  _pendingDeal={id, mix:picked, verdict:g.verdict};
+  const V={GREEN:{c:'#0B8F46',bg:'#D1FAE5',t:'AMAN'},YELLOW:{c:'#B45309',bg:'#FEF3C7',t:'HATI-HATI'},RED:{c:'#DC2626',bg:'#FEE2E2',t:'TIDAK AMAN'}}[g.verdict];
+  let b=`<div class="card-s" style="background:${V.bg};margin-bottom:12px;text-align:center;padding:14px">
+    <div style="font-size:20px;font-weight:900;color:${V.c}">${V.t}</div>
+    <div style="font-size:11px;font-weight:700;color:var(--txt);margin-top:2px">${g.reason}</div></div>`;
+  b+=`<div class="rep-sec">Uang dari kantong</div><div class="card-s" style="margin-bottom:12px">`;
+  picked.forEach(m=>{
+    const before=Treasury.pocketBal(st,m.code), after=Treasury.R4(before-m.amount);
+    b+=`<div class="rep-r"><span class="rl">${acct(m.code).name}${m.bridge?' <b style="color:#B45309">(pinjam cadangan)</b>':''}
+      <div style="font-size:9.5px;color:var(--sub)">${fj(before)} → ${fj(after)}</div></span>
+      <span class="rv">${fj(m.amount)}</span></div>`;
+  });
+  if(shortfall>0.005) b+=`<div class="rep-r" style="color:var(--r)"><span class="rl">Kurang</span><span class="rv">${fj(shortfall)}</span></div>`;
+  b+=`<div class="rep-r" style="border-top:1.5px solid var(--bdr);margin-top:2px;padding-top:5px"><span class="rl">Porsi kas likuid</span><span class="rv">${g.exposurePct}%</span></div></div>`;
+  b+=`<div class="rep-sec">Cek pembayaran investor</div><div class="card-s" style="margin-bottom:12px">`;
+  const rows=g.ladder.rows.slice(0,6);
+  if(!rows.length) b+=`<div class="fc-note">Tidak ada kewajiban investor terjadwal.</div>`;
+  rows.forEach(r=>{
+    const mark=!r.covered?'❌':(r.tight?'⚠️':'✅');
+    const col=!r.covered?'var(--r)':(r.tight?'#B45309':'#0B8F46');
+    b+=`<div class="rep-r"><span class="rl" style="font-size:11px">${mark} ${r.label}
+      <div style="font-size:9.5px;color:var(--sub)">${fd(r.date)} · sisa kas ${fj(r.cumulativeCash)}</div></span>
+      <span class="rv" style="color:${col}">${fj(r.obligation)}</span></div>`;
+  });
+  b+=`</div>`;
+  const cantFund = shortfall>0.005;
+  if(g.verdict==='RED'){
+    const best=Treasury.maxSafeTicket(st,cfg,deal,today);
+    const why = g.firstBreach
+      ? `Di atas itu, ${g.firstBreach.label} pada ${fd(g.firstBreach.date)} tidak tertutup.`
+      : `Kantong yang boleh dipakai tidak cukup untuk jumlah ini.`;
+    b+=`<div class="fc-note" style="color:var(--r);margin-bottom:10px">Aman maksimal ${fj(best.ticket)}. ${why}</div>`;
+    if(!cantFund) b+=`<div class="fg"><label class="fl">Alasan tetap lanjut (wajib)</label><input class="fi" id="dec-reason" placeholder="mis. yakin investor masuk sebelum tanggal itu"></div>`;
+  }
+  // Never offer a confirm we cannot actually execute: no money means no deal.
+  if(cantFund){
+    b+=`<div class="fc-note" style="margin-bottom:10px">Belum bisa masuk project ini sekarang. Tunggu return proyek masuk, atau cari investor baru dulu.</div>
+      <button class="btn ou fw" onclick="cm('mo-keu')">Tutup</button>`;
+  } else {
+    b+=`<button class="btn pr fw" onclick="confirmMasuk('${id}')">Masuk project — danai ${fj(deal.ticket)}</button>
+      <button class="btn ou fw" onclick="cm('mo-keu')" style="margin-top:8px">Belum, simpan dulu</button>`;
+  }
+  document.getElementById('mo-keu-t').textContent='Cek sebelum masuk';
+  document.getElementById('mo-keu-b').innerHTML=b;
+}
+let _lastEnter=null;
+function confirmMasuk(id){
+  const p=(S.projects||[]).find(x=>x.id===id); if(!p||!_pendingDeal) return;
+  let reason='';
+  if(_pendingDeal.verdict==='RED'){
+    const el=document.getElementById('dec-reason'); reason=el?el.value.trim():'';
+    if(!reason){ toast('❌ Isi alasan dulu'); return; }
+  }
+  const mix=_pendingDeal.mix, total=Treasury.R4(mix.reduce((s,m)=>s+m.amount,0));
+  if(!(total>0)){ toast('❌ Tidak ada dana untuk dipakai'); return; }
+  const lines=[{account:'1100',debit:total,credit:0}].concat(mix.map(m=>({account:m.code,debit:0,credit:m.amount})));
+  const e=ledgerPost(todayISO(),'Deploy ke proyek: '+(p.peminjam||''),lines,'deploy');
+  const prev={status:p.status, tanggalAktif:p.tanggalAktif};
+  p.status='aktif'; p.tanggalAktif=todayISO();
+  const names=(S.orgConfig.activeProjectNames||[]);
+  let addedName=null;
+  if(p.peminjam && !names.includes(p.peminjam)){ names.push(p.peminjam); S.orgConfig.activeProjectNames=names; addedName=p.peminjam; }
+  const bridge=mix.find(m=>m.bridge);
+  if(bridge){ S.bridges=S.bridges||[]; S.bridges.push({amount:bridge.amount, restoreBy:bridge.restoreBy, dealId:p.id}); }
+  S.decisionLog=S.decisionLog||[];
+  const logTs=new Date().toISOString();
+  S.decisionLog.push({ts:logTs, dealId:p.id, verdict:_pendingDeal.verdict,
+    chosen:mix.map(m=>({code:m.code,amount:m.amount})), reason:reason||null});
+  _lastEnter={entryId:e.id, projectId:p.id, prev, hadBridge:!!bridge, addedName, logTs};
+  save(); cm('mo-keu'); rAll();
+  toast('✅ Project aktif', {duration:7000, undo:undoEnterDeal});
+}
+function undoEnterDeal(){
+  if(!_lastEnter) return;
+  S.ledger=(S.ledger||[]).filter(x=>x.id!==_lastEnter.entryId);
+  const p=(S.projects||[]).find(x=>x.id===_lastEnter.projectId);
+  if(p){ p.status=_lastEnter.prev.status; p.tanggalAktif=_lastEnter.prev.tanggalAktif; }
+  if(_lastEnter.hadBridge) S.bridges=(S.bridges||[]).filter(b=>b.dealId!==_lastEnter.projectId);
+  S.decisionLog=(S.decisionLog||[]).filter(d=>d.ts!==_lastEnter.logTs);
+  if(_lastEnter.addedName) S.orgConfig.activeProjectNames=(S.orgConfig.activeProjectNames||[]).filter(n=>n!==_lastEnter.addedName);
+  _lastEnter=null; save(); rAll(); toast('↩ Dibatalkan');
 }
 function rB(){
   const tersediaC=S.projects.filter(p=>p.status==='tersedia').length;
@@ -2232,6 +2443,17 @@ function rB(){
       <span><span class="hero-dot hero-dot--scheduled"></span><b>Rp ${fjPlain(rs.scheduled)}</b> terjadwal</span>
     </div>`:''}
     <div class="aum-pills">${AUM_PERIODS.map(([k,lbl])=>`<button type="button" class="aum-pill${_aumPeriod===k?' on':''}" onclick="setAumPeriod('${k}')">${lbl}</button>`).join('')}</div>
+  </div>`;
+  // === Peluang baru: calm in-app notification surface (admin only) ===
+  const _nPel=unseenOpportunityCount();
+  if(_nPel && _adminUnlocked) h+=`<div class="card-s" onclick="proyekSeg='peluang';go('p')"
+    style="margin:12px 0;cursor:pointer;background:linear-gradient(140deg,#fff,#F3F0FF);display:flex;align-items:center;gap:12px">
+    <div style="font-size:22px">✨</div>
+    <div style="flex:1;min-width:0">
+      <div style="font-size:13.5px;font-weight:900">Peluang baru (${_nPel})</div>
+      <div style="font-size:10.5px;color:var(--sub);font-weight:700">Ketuk untuk lihat dan pilih project</div>
+    </div>
+    <div style="font-size:18px;color:var(--sub)">›</div>
   </div>`;
   // === Asymmetric Achievement Strip (admin only) ===
   if(_adminUnlocked){
@@ -4003,6 +4225,13 @@ async function unlockAdmin(){
 // ── INIT ──────────────────────────────────────────────────────────────
 load();
 go('b');
+// Telegram deep link: ...?peluang=<id> opens that opportunity directly.
+(function(){
+  const m=/[?&]peluang=([^&]+)/.exec(location.search);
+  if(!m) return;
+  const id=decodeURIComponent(m[1]);
+  setTimeout(()=>{ if(!_adminUnlocked) return; proyekSeg='peluang'; go('p'); openPeluang(id); }, 400);
+})();
 // Load from cloud for everyone (not just admin) — with retry
 (async function initCloud(){
   for(let i=0;i<5;i++){
@@ -4012,6 +4241,7 @@ go('b');
       if(snap.exists){
         const d=snap.data();
         S={...S,...d.state};
+        migrateSchema(); // cloud state replaces orgConfig wholesale — re-apply migrations
         localStorage.setItem('dt_v3',JSON.stringify(S));
         rAll();
         console.log('✅ Cloud data loaded:',S.projects.length,'projects');
