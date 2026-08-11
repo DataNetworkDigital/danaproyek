@@ -1162,11 +1162,28 @@ function invSave(mode, id){
 function invBayar(id){
   const c=invContracts().find(x=>x.id===id); if(!c) return;
   const nd=invNextDue(c); if(!nd){ toast('Semua sudah dibayar'); return; }
-  document.getElementById('mo-keu-t').textContent='💸 Bayar '+(nd.tipe==='pokok'?'Pokok':'Bagi Hasil');
+  const isPokok=nd.tipe==='pokok';
+  // The app picks the pocket that actually holds the money and pre-selects it.
+  const pick=Treasury.pickPaymentPocket(engineState(), engineCfg(), nd.tipe, nd.jumlah);
+  // Dropdown in priority order, each showing its balance; sinking fund never
+  // appears for bagi hasil (it is only for pokok).
+  const opts=pick.order.map(code=>{
+    const bal=pocketBalance(code), enough=bal+0.005>=nd.jumlah;
+    return `<option value="${code}" ${code===pick.code?'selected':''}>${acct(code).name} · ${fj(bal)}${enough?' ✓':' (kurang)'}</option>`;
+  }).join('');
+  const rec = pick.enough
+    ? `<div class="card-s" style="background:#D1FAE5;border-left:4px solid #0B8F46;margin-bottom:12px">
+        <div style="font-size:12.5px;font-weight:900;color:#0B8F46">💡 Saran: ambil dari ${acct(pick.code).name}</div>
+        <div style="font-size:10.5px;color:var(--txt);font-weight:700;margin-top:2px">Saldo ${fj(pocketBalance(pick.code))}, cukup buat ${fj(nd.jumlah)}.${isPokok?'':' Kantong Jatuh Tempo khusus pokok, jadi tidak dipakai untuk bagi hasil.'}</div></div>`
+    : `<div class="card-s" style="background:#FEE2E2;border-left:4px solid #DC2626;margin-bottom:12px">
+        <div style="font-size:12.5px;font-weight:900;color:#DC2626">⚠️ Belum ada kantong yang cukup</div>
+        <div style="font-size:10.5px;color:var(--txt);font-weight:700;margin-top:2px">Kurang ${fj(pick.short)} buat bayar ${fj(nd.jumlah)}. Tunggu return proyek masuk atau setor dulu.</div></div>`;
+  document.getElementById('mo-keu-t').textContent='💸 Bayar '+(isPokok?'Pokok':'Bagi Hasil');
   document.getElementById('mo-keu-b').innerHTML=`
-    <div class="fc-note" style="margin-bottom:12px">${c.nama} · ${nd.tipe==='pokok'?'Pengembalian pokok':'Bagi hasil'} <b>${fj(nd.jumlah)}</b> · jatuh tempo ${fd(nd.tanggal)}</div>
-    <div class="fg"><label class="fl">Bayar dari kantong</label><select class="fi" id="k-src">${pocketOptions('1040')}</select></div>
-    <div class="fg"><label class="fl">Tanggal bayar</label><input class="fi" id="k-date" type="date" value="${new Date().toISOString().split('T')[0]}"></div>
+    <div class="fc-note" style="margin-bottom:12px">${esc(c.nama)} · ${isPokok?'Pengembalian pokok':'Bagi hasil'} <b>${fj(nd.jumlah)}</b> · jatuh tempo ${fd(nd.tanggal)}</div>
+    ${rec}
+    <div class="fg"><label class="fl">Bayar dari kantong</label><select class="fi" id="k-src">${opts}</select></div>
+    <div class="fg"><label class="fl">Tanggal bayar</label><input class="fi" id="k-date" type="date" value="${todayISO()}"></div>
     <button class="btn pr fw" onclick="invConfirmBayar('${id}')" style="margin-top:8px">Konfirmasi Bayar ${fj(nd.jumlah)}</button>`;
   om('mo-keu');
 }
@@ -1174,6 +1191,10 @@ function invConfirmBayar(id){
   const c=invContracts().find(x=>x.id===id); if(!c) return;
   const nd=invNextDue(c); if(!nd) return;
   const src=document.getElementById('k-src').value, date=document.getElementById('k-date').value;
+  // Guard the exact bug this replaced: never let a payment push a pocket negative.
+  if(pocketBalance(src)+0.005 < nd.jumlah){
+    toast('⚠️ Saldo '+acct(src).name+' tidak cukup. Pilih kantong lain atau isi dulu.'); return;
+  }
   if(nd.tipe==='pokok') txKembalikanPokokInvestor(date, nd.jumlah, src, 'Kembalikan pokok: '+c.nama);
   else ledgerPost(date,'Bagi hasil: '+c.nama,[{account:'5000',debit:nd.jumlah,credit:0},{account:src,debit:0,credit:nd.jumlah}],'bayar-bh');
   nd.status='paid'; nd.paidDate=date; nd.paidFrom=src;
