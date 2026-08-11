@@ -27,6 +27,9 @@ jobs:
           cp index.html _site/index.html
           cp treasury.js _site/treasury.js
           cp laporan.html _site/laporan.html
+          # Pin the engine URL to this commit so a cached treasury.js can never
+          # mismatch a fresh index.html (would break the Treasury hub).
+          sed -i "s|treasury.js\"|treasury.js?v=${GITHUB_SHA}\"|g" _site/index.html _site/laporan.html
       - uses: actions/configure-pages@v4
       - uses: actions/upload-pages-artifact@v3
         with:

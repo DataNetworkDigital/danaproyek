@@ -1588,7 +1588,7 @@ function rTreasuryHub(){
       <div style="font-size:10.5px;color:var(--sub);font-weight:700;margin-top:1px">${c.detail}</div>
       <div style="font-size:11px;font-weight:700;color:var(--txt);margin-top:3px">${c.fix}</div>`;
       // one-tap repair for a negative pocket, when the app can re-source it safely
-      if(c.key==='kantong' && Treasury.proposePocketFix(st,cfg).length){
+      if(c.key==='kantong' && Treasury.proposePocketFix && Treasury.proposePocketFix(st,cfg).length){
         h+=`<button class="btn pr" onclick="applyPocketFix()" style="margin-top:6px;font-size:11px;padding:7px 14px">Perbaiki otomatis</button>`;
       }
       h+=`</div>`; });
