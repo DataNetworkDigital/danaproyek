@@ -949,6 +949,28 @@
     return { code: best, enough: false, short: R4(amt - bestBal), order: order };
   }
 
+  // A pocket went negative because an old payment was sourced from a pocket that
+  // had no money (the pre-fix sinking-fund default). Propose re-pointing each such
+  // entry to a pocket that actually holds the cash. Pure: proposes, never mutates.
+  function proposePocketFix(state, cfg) {
+    const fixes = [];
+    (state.pockets || []).forEach((p) => {
+      if (pocketBal(state, p.code) >= -0.005) return;
+      (state.ledger || []).forEach((e) => {
+        if (e.ref !== 'bayar-bh' && e.ref !== 'inv-pokok-out') return;
+        const line = (e.lines || []).find((l) => l.account === p.code && (+l.credit || 0) > 0);
+        if (!line) return;
+        const amt = R4(line.credit);
+        const tipe = e.ref === 'inv-pokok-out' ? 'pokok' : 'bagihasil';
+        const pick = pickPaymentPocket(state, cfg, tipe, amt);
+        if (pick.enough && pick.code !== p.code) {
+          fixes.push({ entryId: e.id, memo: e.memo, from: p.code, to: pick.code, amount: amt });
+        }
+      });
+    });
+    return fixes;
+  }
+
   // ── SAFE CONCURRENT WRITES (app ↔ Telegram bot) ───────────────────────────
   // The whole fund lives in ONE Firestore document, so a naive whole-state write
   // from the app would silently erase anything the bot posted while the page was
@@ -1096,7 +1118,7 @@
     // recommendations
     returnWaterfall, fundingRecommendation, pickSourcesForDeal, guaranteeGate, maxSafeTicket, buildTieredSchedule, fundingNeed,
     // validation + metrics + migration
-    validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, healthChecks, migrate, mergeCloudOps, pickPaymentPocket, incomeBreakdown, deckMetrics, statements,
+    validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, healthChecks, migrate, mergeCloudOps, pickPaymentPocket, proposePocketFix, incomeBreakdown, deckMetrics, statements,
     // bot operations (shared posting rules)
     OPS, buildEntry, opBayarBagiHasil, opKembalikanPokok, opReturnProyek, opTransfer, opSetorModal, opReversal, applyOp,
   };

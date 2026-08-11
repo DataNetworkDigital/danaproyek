@@ -1053,7 +1053,9 @@ function rKeuInvestor(){
           ${nd?`<div style="margin-top:6px;font-size:11px;font-weight:700;display:flex;justify-content:space-between;align-items:center;gap:8px">
             <span>Berikutnya: ${nd.tipe==='pokok'?'💰 Pokok':'📈 Bagi hasil'} <b>${fj(nd.jumlah)}</b><br>
               <span style="font-size:10px;color:${gc(du(nd.tanggal))}">${fd(nd.tanggal)} · ${gl(du(nd.tanggal))}</span></span>
-            <button class="btn pr" onclick="invBayar('${c.id}')" style="font-size:11px;padding:7px 14px;flex-shrink:0">Bayar</button></div>`:''}
+            ${du(nd.tanggal)<=5
+              ? `<button class="btn pr" onclick="swKeu('inbox')" style="font-size:11px;padding:7px 12px;flex-shrink:0">Bayar di Inbox →</button>`
+              : `<span style="font-size:9.5px;color:var(--sub);font-weight:800;flex-shrink:0;text-align:right">muncul di Inbox<br>saat mendekati</span>`}</div>`:''}
           <div style="margin-top:6px;font-size:11px"><button class="sl" onclick="invModal('edit','${c.id}')">✏️ Edit</button> &nbsp;·&nbsp; <button class="sl" onclick="invDetail('${c.id}')" style="color:var(--sub)">📅 Jadwal</button></div>
         </div>`;
       });
@@ -1584,7 +1586,12 @@ function rTreasuryHub(){
     bad.forEach(c=>{ h+=`<div style="padding:7px 0;border-top:1px solid var(--bdr)">
       <div style="font-size:12px;font-weight:900">⚠️ ${c.label}</div>
       <div style="font-size:10.5px;color:var(--sub);font-weight:700;margin-top:1px">${c.detail}</div>
-      <div style="font-size:11px;font-weight:700;color:var(--txt);margin-top:3px">${c.fix}</div></div>`; });
+      <div style="font-size:11px;font-weight:700;color:var(--txt);margin-top:3px">${c.fix}</div>`;
+      // one-tap repair for a negative pocket, when the app can re-source it safely
+      if(c.key==='kantong' && Treasury.proposePocketFix(st,cfg).length){
+        h+=`<button class="btn pr" onclick="applyPocketFix()" style="margin-top:6px;font-size:11px;padding:7px 14px">Perbaiki otomatis</button>`;
+      }
+      h+=`</div>`; });
     const okn=hc.checks.length-bad.length;
     if(okn) h+=`<div style="font-size:10px;color:var(--sub);font-weight:700;margin-top:7px;padding-top:6px;border-top:1px solid var(--bdr)">${okn} pemeriksaan lain aman.</div>`;
   }
@@ -2003,16 +2010,28 @@ function inboxConfirm(id){
 }
 function rKeuInbox(){
   const ev=pendingEvents();
-  let h=`<div class="fc-note" style="margin-bottom:12px">Transaksi terdeteksi otomatis dari jadwal. <b>Accept</b> = catat default · <b>Custom</b> = ubah jumlah/kantong/tanggal · <b>Skip</b> = sembunyikan sementara.</div>`;
-  if(!ev.length) return h+`<div class="es"><div class="ei">✅</div><div class="et">Inbox bersih</div><div class="esb">Tidak ada transaksi jatuh tempo dalam 5 hari ke depan.</div></div>`;
+  let h=`<div class="fc-note" style="margin-bottom:12px">Satu tempat untuk semua yang jatuh tempo: <b>bayar investor</b> dan <b>terima return proyek</b>. Web sudah menyarankan uangnya dari kantong mana. <b>Accept</b> = catat sesuai saran · <b>Custom</b> = ubah dulu · <b>Skip</b> = sembunyikan.</div>`;
+  if(!ev.length) return h+`<div class="es"><div class="ei">✅</div><div class="et">Inbox bersih</div><div class="esb">Tidak ada yang jatuh tempo dalam 5 hari ke depan.</div></div>`;
+  const st=engineState(), cfg=engineCfg();
   ev.forEach(e=>{
     const col=e.dd<0?'#DC2626':(e.dd<=2?'#B45309':'var(--sub)');
+    // recommendation line: where the money comes from (out) or lands (in)
+    let recLine='';
+    if(e.arah==='keluar'){
+      const pk=Treasury.pickPaymentPocket(st,cfg,e.tipe,e.jumlah);
+      recLine=pk.enough
+        ? `<div style="font-size:10.5px;font-weight:800;margin-top:6px;color:#0B8F46">💡 Saran: bayar dari ${acct(pk.code).name} (saldo ${fj(pocketBalance(pk.code))})</div>`
+        : `<div style="font-size:10.5px;font-weight:800;margin-top:6px;color:#DC2626">⚠️ Belum ada kantong cukup (kurang ${fj(pk.short)}) — tunggu pemasukan atau setor dulu</div>`;
+    } else if(e.arah==='masuk'){
+      recLine=`<div style="font-size:10.5px;font-weight:800;margin-top:6px;color:#0B8F46">📥 Masuk ke kantong Utama</div>`;
+    }
     h+=`<div class="card-s" style="margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
         <div style="min-width:0"><div style="font-size:13px;font-weight:900">${e.judul}</div>
           <div style="font-size:10px;font-weight:800;color:${col}">${fd(e.tanggal)} · ${gl(e.dd)}</div></div>
         <div class="t-num" style="font-size:15px;font-weight:900;color:${e.arah==='masuk'?'#0B8F46':(e.arah==='akrual'?'var(--sub)':'var(--r)')};white-space:nowrap">${e.arah==='masuk'?'+':(e.arah==='akrual'?'~':'−')}${fj(e.jumlah)}</div>
       </div>
+      ${recLine}
       <div style="display:flex;gap:6px;margin-top:8px">
         <button class="btn pr" onclick="inboxAccept('${e.id}')" style="flex:1;font-size:11px;padding:8px 4px">✅ Accept</button>
         <button class="btn ou" onclick="inboxCustom('${e.id}')" style="flex:1;font-size:11px;padding:8px 4px">✏️ Custom</button>
@@ -2535,6 +2554,27 @@ function settleBridges(){
   S.bridges=[];
   console.log('[bridge] '+n+' pinjaman cadangan lunas: RRPR '+bal+' >= target '+req);
   save();
+}
+// Re-point a bug-created payment to the pocket that actually held the cash, so a
+// negative pocket goes back to zero. Proposes via the engine, applies with undo.
+function applyPocketFix(){
+  const fixes=Treasury.proposePocketFix(engineState(), engineCfg());
+  if(!fixes.length){ toast('Tidak ada yang bisa diperbaiki otomatis'); return; }
+  const undo=[];
+  fixes.forEach(f=>{
+    const e=(S.ledger||[]).find(x=>x.id===f.entryId); if(!e) return;
+    e.lines.forEach(l=>{ if(l.account===f.from){ l.account=f.to; } });
+    if(!/koreksi kantong/.test(e.memo)) e.memo=e.memo+' (koreksi kantong)';
+    undo.push({id:f.entryId, from:f.from, to:f.to});
+  });
+  save(); rAll();
+  const f0=fixes[0];
+  toast(`✅ Sumber dipindah ke ${acct(f0.to).name}`, {duration:7000, undo:()=>{
+    undo.forEach(u=>{ const e=(S.ledger||[]).find(x=>x.id===u.id); if(!e) return;
+      e.lines.forEach(l=>{ if(l.account===u.to) l.account=u.from; });
+      e.memo=e.memo.replace(' (koreksi kantong)',''); });
+    save(); rAll(); toast('↩ Dibatalkan');
+  }});
 }
 function applyDeployFix(){
   const m=deployMismatch();

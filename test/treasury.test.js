@@ -872,3 +872,37 @@ test('P4. the old behaviour would have gone negative — regression guard', () =
   assert.strictEqual(T.pocketBal(st, '1040'), 0, 'sinking is empty');
   assert.strictEqual(pick.code, '1000', 'so we must not pay from it');
 });
+
+// ── Negative-pocket repair proposal ─────────────────────────────────────────
+test('X1. proposes re-pointing a bagi hasil that was wrongly paid from the sinking fund', () => {
+  const st = S({ ledger: [
+    entry('2026-08-10', [dr('1030', 20), cr('2000', 20)], { id: 'dep' }),           // idle investor has 20
+    entry('2026-08-10', [dr('5000', 0.2), cr('1040', 0.2)], { id: 'bad', ref: 'bayar-bh' }), // bagi hasil FROM empty 1040
+  ] });
+  assert.strictEqual(T.pocketBal(st, '1040'), -0.2);
+  const fixes = T.proposePocketFix(st, T.cfgOf({}));
+  assert.strictEqual(fixes.length, 1);
+  assert.strictEqual(fixes[0].entryId, 'bad');
+  assert.strictEqual(fixes[0].from, '1040');
+  assert.strictEqual(fixes[0].to, '1030', 're-source from the pocket that has cash');
+  assert.strictEqual(fixes[0].amount, 0.2);
+});
+
+test('X2. applying the proposed fix zeroes the negative pocket and keeps the book balanced', () => {
+  const st = S({ ledger: [
+    entry('2026-08-10', [dr('1030', 20), cr('2000', 20)], { id: 'dep' }),
+    entry('2026-08-10', [dr('5000', 0.2), cr('1040', 0.2)], { id: 'bad', ref: 'bayar-bh' }),
+  ] });
+  const fix = T.proposePocketFix(st, T.cfgOf({}))[0];
+  // simulate what the app's apply does: re-point the credit
+  const e = st.ledger.find((x) => x.id === fix.entryId);
+  e.lines.forEach((l) => { if (l.account === fix.from) l.account = fix.to; });
+  assert.strictEqual(T.pocketBal(st, '1040'), 0);
+  assert.strictEqual(T.pocketBal(st, '1030'), 19.8);
+  const d = e.lines.reduce((s, l) => s + l.debit, 0), k = e.lines.reduce((s, l) => s + l.credit, 0);
+  assert.ok(Math.abs(d - k) < 0.005, 'entry still balances');
+});
+
+test('X3. nothing to fix when no pocket is negative', () => {
+  assert.strictEqual(T.proposePocketFix(openingState(), T.cfgOf({})).length, 0);
+});
