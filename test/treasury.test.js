@@ -952,6 +952,36 @@ test('X7. still matches when the memo gained a suffix (e.g. after a pocket korek
   assert.strictEqual(fixes[0].to, '2026-08-05');
 });
 
+// ── sinkingShortfall: how much the sinking pocket is short for upcoming pokok ──
+test('X8. reports the gap between upcoming pokok and the sinking pocket', () => {
+  const st = S({
+    investorContracts: [{ id: 'c1', nama: 'Veda', schedule: [
+      { tanggal: '2026-11-11', tipe: 'pokok', jumlah: 9, status: 'pending' },
+      { tanggal: '2026-12-03', tipe: 'pokok', jumlah: 66.15, status: 'pending' },
+      { tanggal: '2027-08-01', tipe: 'pokok', jumlah: 50, status: 'pending' }, // beyond 180d window
+      { tanggal: '2026-11-11', tipe: 'bagihasil', jumlah: 0.2, status: 'pending' }, // not pokok
+    ] }],
+    ledger: [ entry('2026-08-12', [dr('1040', 5), cr('2000', 5)], { id: 'seed' }) ], // sinking holds 5
+  });
+  const r = T.sinkingShortfall(st, T.cfgOf({}), '2026-08-12');
+  assert.strictEqual(r.dueTotal, 75.15, 'sums pokok within the window, ignores bagi hasil + far-future');
+  assert.strictEqual(r.sinkBal, 5);
+  assert.strictEqual(r.shortfall, 70.15);
+  assert.strictEqual(r.nextPokok.tanggal, '2026-11-11');
+});
+
+test('X9. no shortfall once the sinking pocket already covers the upcoming pokok', () => {
+  const st = S({
+    investorContracts: [{ id: 'c1', nama: 'Laili', schedule: [
+      { tanggal: '2026-11-11', tipe: 'pokok', jumlah: 10, status: 'pending' },
+      { tanggal: '2026-10-01', tipe: 'pokok', jumlah: 5, status: 'paid' }, // already paid → excluded
+    ] }],
+    ledger: [ entry('2026-08-12', [dr('1040', 20), cr('2000', 20)], { id: 'seed' }) ],
+  });
+  const r = T.sinkingShortfall(st, T.cfgOf({}), '2026-08-12');
+  assert.strictEqual(r.shortfall, 0, 'sinking already covers it');
+});
+
 test('X6. leaves the entry alone when the match is ambiguous (two identical payments same day)', () => {
   const st = S({
     investorContracts: [{ id: 'c1', nama: 'Veda (hong kong)', schedule: [

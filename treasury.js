@@ -1004,6 +1004,27 @@
     return fixes;
   }
 
+  // When money comes IN, the smart move for a fund that guarantees fixed returns
+  // is to set some aside for the next investor PRINCIPAL maturities before it gets
+  // spent. This measures the gap: how much the sinking pocket (1040) is still short
+  // of the pokok coming due inside the planning window. Pure; the UI turns a >0
+  // shortfall into a "sisihkan Rp X ke sinking" suggestion on each incoming.
+  function sinkingShortfall(state, cfg, today) {
+    const horizon = (cfg && cfg.sinkTargetDays) || 180;
+    let dueTotal = 0, next = null;
+    (state.investorContracts || []).forEach((c) => {
+      (c.schedule || []).forEach((s) => {
+        if (s.tipe !== 'pokok' || s.status === 'paid' || !s.tanggal) return;
+        if (today && daysBetween(today, s.tanggal) > horizon) return; // beyond the window → not this nudge
+        dueTotal = R4(dueTotal + (+s.jumlah || 0));
+        if (!next || s.tanggal < next.tanggal) next = { nama: c.nama || c.label || '', tanggal: s.tanggal, jumlah: R4(+s.jumlah || 0) };
+      });
+    });
+    const sinkBal = R4(pocketBal(state, '1040'));
+    const shortfall = Math.max(0, R4(dueTotal - sinkBal));
+    return { shortfall, dueTotal, sinkBal, nextPokok: next, horizon };
+  }
+
   // ── SAFE CONCURRENT WRITES (app ↔ Telegram bot) ───────────────────────────
   // The whole fund lives in ONE Firestore document, so a naive whole-state write
   // from the app would silently erase anything the bot posted while the page was
@@ -1151,7 +1172,7 @@
     // recommendations
     returnWaterfall, fundingRecommendation, pickSourcesForDeal, guaranteeGate, maxSafeTicket, buildTieredSchedule, fundingNeed,
     // validation + metrics + migration
-    validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, healthChecks, migrate, mergeCloudOps, pickPaymentPocket, proposePocketFix, proposeLedgerRedate, incomeBreakdown, deckMetrics, statements,
+    validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, healthChecks, migrate, mergeCloudOps, pickPaymentPocket, proposePocketFix, proposeLedgerRedate, sinkingShortfall, incomeBreakdown, deckMetrics, statements,
     // bot operations (shared posting rules)
     OPS, buildEntry, opBayarBagiHasil, opKembalikanPokok, opReturnProyek, opTransfer, opSetorModal, opReversal, applyOp,
   };

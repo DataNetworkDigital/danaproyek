@@ -525,6 +525,7 @@ function engineState(){
     accounts: allAccounts(), pockets: S.pockets||[], ledger: S.ledger||[],
     contracts: S.capitalContracts||[], providers: S.capitalProviders||[],
     allocations: S.capitalAllocations||[], projects: engineProjects(),
+    investorContracts: S.investorContracts||[],
     orgConfig: S.orgConfig||{}, today: todayISO(),
   };
 }
@@ -1981,7 +1982,14 @@ function inboxPost(ev, pocket, date, amount){
 }
 function inboxAccept(id){
   const ev=pendingEvents().find(e=>e.id===id); if(!ev) return;
-  if(ev.arah!=='keluar'){ inboxPost(ev,'1000',todayISO(),ev.jumlah); toast('✅ Dicatat'); return; }
+  if(ev.arah!=='keluar'){
+    inboxPost(ev,'1000',todayISO(),ev.jumlah);
+    if(ev.arah==='masuk'){
+      const sink=Treasury.sinkingShortfall?Treasury.sinkingShortfall(engineState(),engineCfg(),todayISO()):null;
+      if(sink && sink.shortfall>0.005){ toast(`✅ Masuk ke Utama · 💡 sisihkan ${fj(Math.min(ev.jumlah,sink.shortfall))} ke sinking (Transfer kantong)`,{duration:6500}); return; }
+    }
+    toast('✅ Dicatat'); return;
+  }
   // Pay from a pocket that actually holds the money. The sinking fund is only for
   // principal maturities; using it for a monthly bagi hasil pushes it negative.
   const pick=Treasury.pickPaymentPocket(engineState(), engineCfg(), ev.tipe, ev.jumlah);
@@ -2029,6 +2037,13 @@ function rKeuInbox(){
         : `<div style="font-size:10.5px;font-weight:800;margin-top:6px;color:#DC2626">⚠️ Belum ada kantong cukup (kurang ${fj(pk.short)}) — tunggu pemasukan atau setor dulu</div>`;
     } else if(e.arah==='masuk'){
       recLine=`<div style="font-size:10.5px;font-weight:800;margin-top:6px;color:#0B8F46">📥 Masuk ke kantong Utama</div>`;
+      // Smart nudge: if investor principal is coming due and the sinking pocket is
+      // short, suggest setting some of this inflow aside so the pokok stays covered.
+      const sink=Treasury.sinkingShortfall?Treasury.sinkingShortfall(st,cfg,todayISO()):null;
+      if(sink && sink.shortfall>0.005){
+        const setAside=Math.min(e.jumlah, sink.shortfall);
+        recLine+=`<div style="font-size:10px;font-weight:800;margin-top:5px;color:#B45309;background:#FEF3C7;border-radius:9px;padding:7px 9px;line-height:1.45">💡 Sisihkan <b>${fj(setAside)}</b> ke kantong <b>Investor Jatuh Tempo</b> dulu.${sink.nextPokok?` Pokok ${esc(sink.nextPokok.nama)} (${fd(sink.nextPokok.tanggal)}) belum tertutup`:''} — sinking baru ${fj(sink.sinkBal)}, kurang ${fj(sink.shortfall)}. <span style="color:var(--sub)">Terima dulu ke Utama, lalu Transfer ke sinking.</span></div>`;
+      }
     }
     h+=`<div class="card-s" style="margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
