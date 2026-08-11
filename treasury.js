@@ -971,6 +971,39 @@
     return fixes;
   }
 
+  // A scheduled investor obligation (bagi hasil / pokok) belongs, in the books, to
+  // its DUE date — that is how the owner tracks it ("bagi hasil tanggal 5"). Early
+  // builds stamped the ledger entry with the day the Bayar button was tapped, so a
+  // payment made a few days late landed on the wrong date (same month, wrong day).
+  // This finds already-paid entries still sitting on the tap-day and proposes moving
+  // them to the schedule due date. paidDate is untouched (the on-time metric needs
+  // the real settlement day). Pure + idempotent: once an entry is on its due date it
+  // no longer matches (we only look at entries dated on paidDate ≠ tanggal).
+  function proposeLedgerRedate(state) {
+    const fixes = [];
+    const ledger = state.ledger || [];
+    (state.investorContracts || []).forEach((c) => {
+      const name = c.nama || c.label || '';
+      (c.schedule || []).forEach((s) => {
+        if (s.status !== 'paid' || !s.paidDate || !s.tanggal) return;
+        if (s.tanggal === s.paidDate) return; // paid on the due date → ledger already right
+        const ref = s.tipe === 'pokok' ? 'inv-pokok-out' : 'bayar-bh';
+        // Match by the contract name being IN the memo (not exact-equals) so a memo
+        // that later gained a suffix like " (koreksi kantong)" still matches. ref +
+        // paidDate + amount + a uniqueness guard keep it from ever hitting the wrong entry.
+        const cands = ledger.filter((e) =>
+          e && e.ref === ref && e.tanggal === s.paidDate && name && (e.memo || '').indexOf(name) >= 0 &&
+          (e.lines || []).some((l) => R4(l.debit) === R4(s.jumlah) || R4(l.credit) === R4(s.jumlah))
+        );
+        // Only act when the match is unambiguous, so we can never re-date the wrong entry.
+        if (cands.length === 1) {
+          fixes.push({ entryId: cands[0].id, memo: cands[0].memo, from: s.paidDate, to: s.tanggal });
+        }
+      });
+    });
+    return fixes;
+  }
+
   // ── SAFE CONCURRENT WRITES (app ↔ Telegram bot) ───────────────────────────
   // The whole fund lives in ONE Firestore document, so a naive whole-state write
   // from the app would silently erase anything the bot posted while the page was
@@ -1118,7 +1151,7 @@
     // recommendations
     returnWaterfall, fundingRecommendation, pickSourcesForDeal, guaranteeGate, maxSafeTicket, buildTieredSchedule, fundingNeed,
     // validation + metrics + migration
-    validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, healthChecks, migrate, mergeCloudOps, pickPaymentPocket, proposePocketFix, incomeBreakdown, deckMetrics, statements,
+    validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, healthChecks, migrate, mergeCloudOps, pickPaymentPocket, proposePocketFix, proposeLedgerRedate, incomeBreakdown, deckMetrics, statements,
     // bot operations (shared posting rules)
     OPS, buildEntry, opBayarBagiHasil, opKembalikanPokok, opReturnProyek, opTransfer, opSetorModal, opReversal, applyOp,
   };

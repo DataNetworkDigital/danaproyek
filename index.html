@@ -1185,7 +1185,7 @@ function invBayar(id){
     <div class="fc-note" style="margin-bottom:12px">${esc(c.nama)} · ${isPokok?'Pengembalian pokok':'Bagi hasil'} <b>${fj(nd.jumlah)}</b> · jatuh tempo ${fd(nd.tanggal)}</div>
     ${rec}
     <div class="fg"><label class="fl">Bayar dari kantong</label><select class="fi" id="k-src">${opts}</select></div>
-    <div class="fg"><label class="fl">Tanggal bayar</label><input class="fi" id="k-date" type="date" value="${todayISO()}"></div>
+    <div class="fg"><label class="fl">Tanggal aktual dibayar</label><input class="fi" id="k-date" type="date" value="${todayISO()}"><div style="font-size:9.5px;color:var(--sub);font-weight:700;margin-top:3px">Di jurnal dicatat atas tanggal jatuh tempo ${fd(nd.tanggal)}. Ini cuma catatan kapan uang benar-benar keluar.</div></div>
     <button class="btn pr fw" onclick="invConfirmBayar('${id}')" style="margin-top:8px">Konfirmasi Bayar ${fj(nd.jumlah)}</button>`;
   om('mo-keu');
 }
@@ -1197,8 +1197,10 @@ function invConfirmBayar(id){
   if(pocketBalance(src)+0.005 < nd.jumlah){
     toast('⚠️ Saldo '+acct(src).name+' tidak cukup. Pilih kantong lain atau isi dulu.'); return;
   }
-  if(nd.tipe==='pokok') txKembalikanPokokInvestor(date, nd.jumlah, src, 'Kembalikan pokok: '+c.nama);
-  else ledgerPost(date,'Bagi hasil: '+c.nama,[{account:'5000',debit:nd.jumlah,credit:0},{account:src,debit:0,credit:nd.jumlah}],'bayar-bh');
+  // Book it on the DUE date (nd.tanggal); the chosen date only records when paid.
+  const postDate=nd.tanggal||date;
+  if(nd.tipe==='pokok') txKembalikanPokokInvestor(postDate, nd.jumlah, src, 'Kembalikan pokok: '+c.nama);
+  else ledgerPost(postDate,'Bagi hasil: '+c.nama,[{account:'5000',debit:nd.jumlah,credit:0},{account:src,debit:0,credit:nd.jumlah}],'bayar-bh');
   nd.status='paid'; nd.paidDate=date; nd.paidFrom=src;
   if(!(c.schedule||[]).some(s=>s.status==='pending')) c.status='selesai';
   save(); cm('mo-keu'); rKeu(); toast('✅ Pembayaran dicatat');
@@ -1956,8 +1958,11 @@ function inboxPost(ev, pocket, date, amount){
   amount=(amount!=null)?amount:ev.jumlah;
   if(ev.kind==='inv'){
     const c=invContracts().find(x=>x.id===ev.cid); if(!c) return; const s=c.schedule[ev.idx];
-    if(ev.tipe==='pokok') txKembalikanPokokInvestor(date,amount,pocket,'Kembalikan pokok: '+c.nama);
-    else ledgerPost(date,'Bagi hasil: '+c.nama,[{account:'5000',debit:amount,credit:0},{account:pocket,debit:0,credit:amount}],'bayar-bh');
+    // Book it on the DUE date (matches the schedule + the owner's own records);
+    // `date` only records WHEN it was paid, kept as paidDate for the on-time metric.
+    const postDate=s.tanggal||date;
+    if(ev.tipe==='pokok') txKembalikanPokokInvestor(postDate,amount,pocket,'Kembalikan pokok: '+c.nama);
+    else ledgerPost(postDate,'Bagi hasil: '+c.nama,[{account:'5000',debit:amount,credit:0},{account:pocket,debit:0,credit:amount}],'bayar-bh');
     s.status='paid'; s.paidDate=date; s.paidFrom=pocket;
     if(!(c.schedule||[]).some(x=>x.status==='pending')) c.status='selesai';
   } else if(ev.kind==='proj'){
@@ -1997,7 +2002,7 @@ function inboxCustom(id){
     <div class="fc-note" style="margin-bottom:12px">${ev.judul} · ${ev.arah==='akrual'?'akrual (dicatat, belum dibayar)':'jatuh tempo'} ${fd(ev.tanggal)}</div>
     <div class="fg"><label class="fl">Jumlah aktual (jt)</label><input class="fi" id="ib-amt" type="number" step="0.0001" value="${ev.jumlah}"></div>
     ${pocketFg}
-    <div class="fg"><label class="fl">Tanggal aktual</label><input class="fi" id="ib-date" type="date" value="${todayISO()}"></div>
+    <div class="fg"><label class="fl">Tanggal aktual dibayar</label><input class="fi" id="ib-date" type="date" value="${todayISO()}">${ev.kind==='inv'?`<div style="font-size:9.5px;color:var(--sub);font-weight:700;margin-top:3px">Di jurnal dicatat atas tanggal jatuh tempo ${fd(ev.tanggal)}.</div>`:''}</div>
     <button class="btn pr fw" onclick="inboxConfirm('${id}')" style="margin-top:8px">Catat</button>`;
   om('mo-keu');
 }
@@ -4491,8 +4496,20 @@ function fixScheduleDates(){
   });
   if(changed) save();
 }
+function fixBagiHasilLedgerDates(){
+  // One-time, idempotent: re-date any already-paid bagi hasil / pokok entry that
+  // early builds stamped with the tap-day so it sits on its schedule DUE date.
+  // Merge-safe: mergeCloudOps keeps local ledger entries by id, so the corrected
+  // date wins over the stale cloud copy. Runs on load via rAll(); no-ops once clean.
+  if(!window.Treasury||!Treasury.proposeLedgerRedate) return;
+  let fixes; try{ fixes=Treasury.proposeLedgerRedate(S); }catch(e){ return; }
+  if(!fixes||!fixes.length) return;
+  fixes.forEach(f=>{ const e=(S.ledger||[]).find(x=>x.id===f.entryId); if(e) e.tanggal=f.to; });
+  save();
+}
 function fixProjectStatuses(){
   fixScheduleDates();
+  fixBagiHasilLedgerDates();
   let changed=false;
   S.projects.forEach(p=>{
     if(p.status!=='aktif'&&p.status!=='terlambat') return;

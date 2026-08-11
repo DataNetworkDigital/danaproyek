@@ -906,3 +906,61 @@ test('X2. applying the proposed fix zeroes the negative pocket and keeps the boo
 test('X3. nothing to fix when no pocket is negative', () => {
   assert.strictEqual(T.proposePocketFix(openingState(), T.cfgOf({})).length, 0);
 });
+
+// ── proposeLedgerRedate: scheduled obligations belong on their due date ────────
+test('X4. re-dates a bagi hasil paid late to its schedule due date, keeping paidDate', () => {
+  const st = S({
+    investorContracts: [{ id: 'c1', nama: 'Veda (hong kong)', schedule: [
+      { tanggal: '2026-08-05', tipe: 'bagihasil', jumlah: 0.2, status: 'paid', paidDate: '2026-08-10' },
+    ] }],
+    ledger: [ entry('2026-08-10', [dr('5000', 0.2), cr('1030', 0.2)], { id: 'e1', ref: 'bayar-bh', memo: 'Bagi hasil: Veda (hong kong)' }) ],
+  });
+  const fixes = T.proposeLedgerRedate(st);
+  assert.strictEqual(fixes.length, 1);
+  assert.strictEqual(fixes[0].entryId, 'e1');
+  assert.strictEqual(fixes[0].from, '2026-08-10');
+  assert.strictEqual(fixes[0].to, '2026-08-05', 'moves to the due date');
+});
+
+test('X5. no-op when the entry is already on its due date (idempotent)', () => {
+  const st = S({
+    investorContracts: [{ id: 'c1', nama: 'Laili', schedule: [
+      { tanggal: '2026-08-11', tipe: 'bagihasil', jumlah: 0.2, status: 'paid', paidDate: '2026-08-11' },
+    ] }],
+    ledger: [ entry('2026-08-11', [dr('5000', 0.2), cr('1030', 0.2)], { id: 'e1', ref: 'bayar-bh', memo: 'Bagi hasil: Laili' }) ],
+  });
+  assert.strictEqual(T.proposeLedgerRedate(st).length, 0);
+  // and after a re-date the same entry no longer matches → running twice is safe
+  const st2 = S({
+    investorContracts: [{ id: 'c1', nama: 'Veda (hong kong)', schedule: [
+      { tanggal: '2026-08-05', tipe: 'bagihasil', jumlah: 0.2, status: 'paid', paidDate: '2026-08-10' },
+    ] }],
+    ledger: [ entry('2026-08-05', [dr('5000', 0.2), cr('1030', 0.2)], { id: 'e1', ref: 'bayar-bh', memo: 'Bagi hasil: Veda (hong kong)' }) ],
+  });
+  assert.strictEqual(T.proposeLedgerRedate(st2).length, 0, 'already on due date, nothing to do');
+});
+
+test('X7. still matches when the memo gained a suffix (e.g. after a pocket koreksi)', () => {
+  const st = S({
+    investorContracts: [{ id: 'c1', nama: 'Veda (hong kong)', schedule: [
+      { tanggal: '2026-08-05', tipe: 'bagihasil', jumlah: 0.2, status: 'paid', paidDate: '2026-08-10' },
+    ] }],
+    ledger: [ entry('2026-08-10', [dr('5000', 0.2), cr('1030', 0.2)], { id: 'e1', ref: 'bayar-bh', memo: 'Bagi hasil: Veda (hong kong) (koreksi kantong)' }) ],
+  });
+  const fixes = T.proposeLedgerRedate(st);
+  assert.strictEqual(fixes.length, 1);
+  assert.strictEqual(fixes[0].to, '2026-08-05');
+});
+
+test('X6. leaves the entry alone when the match is ambiguous (two identical payments same day)', () => {
+  const st = S({
+    investorContracts: [{ id: 'c1', nama: 'Veda (hong kong)', schedule: [
+      { tanggal: '2026-08-05', tipe: 'bagihasil', jumlah: 0.2, status: 'paid', paidDate: '2026-08-10' },
+    ] }],
+    ledger: [
+      entry('2026-08-10', [dr('5000', 0.2), cr('1030', 0.2)], { id: 'e1', ref: 'bayar-bh', memo: 'Bagi hasil: Veda (hong kong)' }),
+      entry('2026-08-10', [dr('5000', 0.2), cr('1030', 0.2)], { id: 'e2', ref: 'bayar-bh', memo: 'Bagi hasil: Veda (hong kong)' }),
+    ],
+  });
+  assert.strictEqual(T.proposeLedgerRedate(st).length, 0, 'refuse to guess between duplicates');
+});
