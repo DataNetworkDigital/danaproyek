@@ -37,17 +37,17 @@ Chat ke **@BotFather** → `/newbot` → simpan **token**-nya. Catat juga **chat
 kamu (chat ke @userinfobot).
 
 ### 2. Akses tulis ke Firestore untuk n8n
-Firebase console → Project settings → Service accounts → **Generate new private
-key**. Simpan JSON-nya. Di n8n, tambah credential **Google Service Account**,
-scope `https://www.googleapis.com/auth/datastore`. Beri role **Datastore User**
-saja, jangan Owner.
+**Belum perlu service account sekarang.** Aturan Firestore masih terbuka (belum
+di-deploy), jadi n8n bisa baca/tulis lewat REST dengan API key publik yang sama
+seperti browser. Service account baru wajib nanti, saat aturan keamanan
+diaktifkan (lihat `FIREBASE_SETUP.md`).
 
-### 3. (untuk PDF terjadwal) Gotenberg
-Jalankan di sebelah n8n:
-
-```bash
-docker run -d --name gotenberg -p 3000:3000 gotenberg/gotenberg:8
-```
+### 3. PDF: pakai yang sudah ada, tidak perlu Gotenberg
+Bot Daniel sudah membuat PDF lewat **Supabase Edge Function** (`generate-invoice`)
+dan mengirimnya lewat proxy `tg/sendDocument` (token Telegram disimpan di sana,
+tidak di n8n). Pola yang sama dipakai di sini, cukup tambah satu edge function
+`generate-laporan`. Gotenberg hanya perlu kalau kita ingin PDF-nya persis
+tampilan `laporan.html` (butuh mesin browser).
 
 ---
 
