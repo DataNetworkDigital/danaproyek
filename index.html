@@ -1550,12 +1550,23 @@ function rTreasuryHub(){
   if(!window.Treasury) return `<div class="es"><div class="ei">⚙️</div><div class="et">Engine belum termuat</div><div class="esb">treasury.js gagal load. Muat ulang halaman.</div></div>`;
   const st=engineState(), cfg=engineCfg(), today=todayISO();
   let h='';
-  // 1) opening-position integrity
-  const oc=Treasury.openingChecks(st);
-  const allOk=oc.checks.every(c=>c.ok);
-  h+=`<div class="rep-sec" style="color:var(--p-deep)">🔎 Cek Posisi Awal</div>
-    <div class="card-s" style="margin-bottom:12px;border-left:4px solid ${allOk?'#0B8F46':'#B45309'}">`;
-  oc.checks.forEach(c=>{ h+=`<div class="rep-r"><span class="rl">${c.ok?'✅':'⚠️'} ${c.label}</span><span class="rv">${fj(c.actual)}</span></div>`; });
+  // 1) live health checks — real invariants with a plain reason + what to do
+  const hc=Treasury.healthChecks(st,cfg,today);
+  const bad=hc.checks.filter(c=>!c.ok);
+  h+=`<div class="rep-sec" style="color:var(--p-deep)">${hc.allOk?'✅':'⚠️'} Kesehatan Data</div>
+    <div class="card-s" style="margin-bottom:12px;border-left:4px solid ${hc.allOk?'#0B8F46':'#B45309'}">`;
+  if(hc.allOk){
+    h+=`<div style="font-size:12px;font-weight:800;color:#0B8F46">Semua cocok. Jurnal seimbang, neraca bertemu, kontrak dan proyek sesuai catatan.</div>
+      <div style="font-size:10px;color:var(--sub);font-weight:700;margin-top:4px">${hc.checks.length} pemeriksaan dijalankan tiap kali halaman ini dibuka.</div>`;
+  } else {
+    h+=`<div style="font-size:12px;font-weight:900;color:#B45309;margin-bottom:6px">${bad.length} hal perlu dilihat</div>`;
+    bad.forEach(c=>{ h+=`<div style="padding:7px 0;border-top:1px solid var(--bdr)">
+      <div style="font-size:12px;font-weight:900">⚠️ ${c.label}</div>
+      <div style="font-size:10.5px;color:var(--sub);font-weight:700;margin-top:1px">${c.detail}</div>
+      <div style="font-size:11px;font-weight:700;color:var(--txt);margin-top:3px">${c.fix}</div></div>`; });
+    const okn=hc.checks.length-bad.length;
+    if(okn) h+=`<div style="font-size:10px;color:var(--sub);font-weight:700;margin-top:7px;padding-top:6px;border-top:1px solid var(--bdr)">${okn} pemeriksaan lain aman.</div>`;
+  }
   h+=`</div>`;
   // 2) liquidity scenarios
   const scs=['base','conservative','stress'].map(s=>({s,p:Treasury.projectScenario(st,cfg,s,today), rrpr:Treasury.requiredRRPR(st,cfg,today)}));
@@ -1935,7 +1946,19 @@ function inboxPost(ev, pocket, date, amount){
   }
   save(); rKeu();
 }
-function inboxAccept(id){ const ev=pendingEvents().find(e=>e.id===id); if(!ev) return; inboxPost(ev, ev.arah==='keluar'?'1040':'1000', todayISO(), ev.jumlah); toast('✅ Dicatat'); }
+function inboxAccept(id){
+  const ev=pendingEvents().find(e=>e.id===id); if(!ev) return;
+  if(ev.arah!=='keluar'){ inboxPost(ev,'1000',todayISO(),ev.jumlah); toast('✅ Dicatat'); return; }
+  // Pay from a pocket that actually holds the money. The sinking fund is only for
+  // principal maturities; using it for a monthly bagi hasil pushes it negative.
+  const pick=Treasury.pickPaymentPocket(engineState(), engineCfg(), ev.tipe, ev.jumlah);
+  if(!pick.enough){
+    toast('⚠️ Saldo kantong tidak cukup — pilih sendiri lewat Custom');
+    inboxCustom(id); return;
+  }
+  inboxPost(ev, pick.code, todayISO(), ev.jumlah);
+  toast('✅ Dicatat · dibayar dari '+acct(pick.code).name);
+}
 function inboxSkip(id){ window._inboxSkip=window._inboxSkip||{}; window._inboxSkip[id]=1; rKeu(); toast('Dilewati (muncul lagi nanti)'); }
 function inboxCustom(id){
   const ev=pendingEvents().find(e=>e.id===id); if(!ev) return;

@@ -783,6 +783,65 @@
     };
   }
 
+  // ── LIVE HEALTH CHECKS ────────────────────────────────────────────────────
+  // Invariants that must hold FOREVER, not a snapshot of one opening day.
+  // Hardcoding "investor = 177,65" turns every real deposit into a false alarm,
+  // so these compare the books against themselves instead. Each check carries a
+  // plain explanation and what to do, because a warning with no reason is noise.
+  function healthChecks(state, cfg, today) {
+    const out = [];
+    const add = (key, label, ok, detail, fix) => out.push({ key, label, ok, detail, fix: ok ? null : fix });
+
+    // 1) every journal entry balances, and so does the whole book
+    let unbalanced = 0, td = 0, tk = 0;
+    (state.ledger || []).forEach((e) => {
+      const d = (e.lines || []).reduce((s, l) => s + (+l.debit || 0), 0);
+      const k = (e.lines || []).reduce((s, l) => s + (+l.credit || 0), 0);
+      td += d; tk += k;
+      if (Math.abs(d - k) > 0.005) unbalanced++;
+    });
+    add('jurnal', 'Jurnal seimbang', unbalanced === 0 && Math.abs(td - tk) < 0.01,
+      unbalanced === 0 ? 'Semua ' + (state.ledger || []).length + ' jurnal seimbang' : unbalanced + ' jurnal tidak seimbang',
+      'Ada jurnal yang debit dan kreditnya beda. Cek Laporan → Jurnal, cari barisnya, lalu perbaiki lewat jurnal pembalik.');
+
+    // 2) balance sheet identity
+    const s = statements(state, cfg, null, today || null);
+    add('neraca', 'Aset = Liabilitas + Ekuitas', s.neraca.balanced,
+      fmt(s.neraca.totalAset) + ' vs ' + fmt(s.neraca.totalLiab + s.neraca.totalEkuitas),
+      'Neraca tidak bertemu. Biasanya karena ada jurnal yang salah akun. Cek Neraca Saldo.');
+
+    // 3) recorded investor liability equals the sum of live contracts
+    const liab = balanceOf(state.ledger, state.accounts, '2000');
+    const kontrak = R4((state.contracts || []).filter((c) => c.status !== 'selesai')
+      .reduce((sum, c) => sum + R4(c.principal != null ? c.principal : c.pokok), 0));
+    add('investor', 'Dana investor cocok dengan kontrak', Math.abs(liab - kontrak) < 0.01,
+      'Buku ' + fmt(liab) + ' · kontrak aktif ' + fmt(kontrak),
+      Math.abs(liab - kontrak) < 0.01 ? null
+        : (liab > kontrak
+          ? 'Buku mencatat lebih banyak dari total kontrak. Mungkin ada kontrak yang sudah selesai tapi pokoknya belum dikembalikan di jurnal.'
+          : 'Ada kontrak yang belum tercatat uang masuknya di jurnal. Buka Investor, cek kontrak yang baru dibuat.'));
+
+    // 4) money marked as deployed equals the deploys of active projects
+    const deployed = balanceOf(state.ledger, state.accounts, '1100');
+    const aktif = R4((state.projects || []).filter((p) => p.status === 'aktif' || p.status === 'terlambat')
+      .reduce((sum, p) => sum + R4(p.deploy != null ? p.deploy : p.jumlah), 0));
+    add('proyek', 'Dana terpakai cocok dengan proyek aktif', Math.abs(deployed - aktif) < 0.01,
+      'Buku ' + fmt(deployed) + ' · proyek aktif ' + fmt(aktif),
+      deployed > aktif
+        ? 'Ada uang tercatat terpakai tapi proyeknya belum ditandai aktif. Buka Treasury, pakai tombol "Tandai proyek ini aktif".'
+        : 'Ada proyek aktif yang uangnya belum tercatat keluar di jurnal.');
+
+    // 5) no pocket may go negative — you cannot spend cash you do not have
+    const minus = (state.pockets || []).map((p) => ({ nama: p.nama, bal: pocketBal(state, p.code) }))
+      .filter((x) => x.bal < -0.005);
+    add('kantong', 'Tidak ada kantong minus', minus.length === 0,
+      minus.length ? minus.map((x) => x.nama + ' ' + fmt(x.bal)).join(', ') : 'Semua kantong positif',
+      'Kantong tidak boleh minus. Kemungkinan ada pembayaran dicatat dari kantong yang salah.');
+
+    return { checks: out, allOk: out.every((c) => c.ok) };
+  }
+  function fmt(v) { return 'Rp ' + (Math.round(R4(v) * 100) / 100); }
+
   // ── opening-position validator ────────────────────────────────────────────
   function openingChecks(state) {
     const eq = (code) => balanceOf(state.ledger, state.accounts, code);
@@ -869,6 +928,25 @@
     if (hasPosted(state.ledger, entry.idem)) return { state: state, applied: false, reason: 'sudah pernah dicatat' };
     const out = Object.assign({}, state, { ledger: (state.ledger || []).concat([entry]) });
     return { state: out, applied: true, reason: null };
+  }
+
+  // Which pocket should actually pay this? The sinking fund exists for PRINCIPAL
+  // maturities only — paying a monthly bagi hasil from it drains a pocket that was
+  // pre-funded for something else and pushes it negative. Pick the first pocket in
+  // the right order that genuinely holds the money.
+  function pickPaymentPocket(state, cfg, tipe, amount) {
+    const order = tipe === 'pokok'
+      ? [POCKET.SINKING, POCKET.HUB, POCKET.GDE, POCKET.IDLE_INV]   // sinking is FOR this
+      : [POCKET.HUB, POCKET.GDE, POCKET.IDLE_INV];                  // never the sinking fund
+    const amt = R4(amount);
+    for (let i = 0; i < order.length; i++) {
+      if (pocketBal(state, order[i]) + 0.005 >= amt) return { code: order[i], enough: true, order: order };
+    }
+    // nothing covers it: return the richest allowed pocket and say so, so the UI
+    // can warn instead of silently creating a negative balance.
+    let best = order[0], bestBal = pocketBal(state, order[0]);
+    order.forEach((c) => { const b = pocketBal(state, c); if (b > bestBal) { best = c; bestBal = b; } });
+    return { code: best, enough: false, short: R4(amt - bestBal), order: order };
   }
 
   // ── SAFE CONCURRENT WRITES (app ↔ Telegram bot) ───────────────────────────
@@ -1018,7 +1096,7 @@
     // recommendations
     returnWaterfall, fundingRecommendation, pickSourcesForDeal, guaranteeGate, maxSafeTicket, buildTieredSchedule, fundingNeed,
     // validation + metrics + migration
-    validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, migrate, mergeCloudOps, incomeBreakdown, deckMetrics, statements,
+    validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, healthChecks, migrate, mergeCloudOps, pickPaymentPocket, incomeBreakdown, deckMetrics, statements,
     // bot operations (shared posting rules)
     OPS, buildEntry, opBayarBagiHasil, opKembalikanPokok, opReturnProyek, opTransfer, opSetorModal, opReversal, applyOp,
   };

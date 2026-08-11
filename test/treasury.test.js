@@ -791,3 +791,84 @@ test('B6. setor modal credits the right owner equity account', () => {
   assert.strictEqual(T.opSetorModal('1020', 10, '2026-09-01').lines.find((l) => l.credit > 0).account, '3010');
   assert.strictEqual(T.opSetorModal('1010', 10, '2026-09-01').lines.find((l) => l.credit > 0).account, '3000');
 });
+
+// ── Live health checks: real invariants, never a hardcoded snapshot ─────────
+test('H1. a legitimate new investor deposit does NOT raise a warning', () => {
+  // opening book + a fresh 20jt investor received into the idle pocket
+  const st = openingState();
+  st.ledger = st.ledger.concat([entry('2026-08-20', [dr('1030', 20), cr('2000', 20)], { id: 'new20' })]);
+  st.contracts = st.contracts.concat([{ id: 'ctr:baru', providerId: 'prov:baru', principal: 20, schedule: [] }]);
+  const h = T.healthChecks(st, T.cfgOf({}), '2026-08-31');
+  const investor = h.checks.find((c) => c.key === 'investor');
+  assert.strictEqual(investor.ok, true, 'growth is not an error: ' + investor.detail);
+  const neraca = h.checks.find((c) => c.key === 'neraca');
+  assert.strictEqual(neraca.ok, true);
+  const jurnal = h.checks.find((c) => c.key === 'jurnal');
+  assert.strictEqual(jurnal.ok, true);
+});
+
+test('H2. an unbalanced journal entry is caught and explained', () => {
+  const st = S({ ledger: [entry('2026-08-01', [dr('1010', 5), cr('3000', 4)], { id: 'bad' })] });
+  const h = T.healthChecks(st, T.cfgOf({}), '2026-08-31');
+  const j = h.checks.find((c) => c.key === 'jurnal');
+  assert.strictEqual(j.ok, false);
+  assert.ok(j.fix && j.fix.length > 20, 'a failing check must say what to do');
+});
+
+test('H3. money deployed without an active project is caught with the right fix', () => {
+  const st = S({
+    ledger: [entry('2026-08-01', [dr('1100', 50), cr('3000', 50)], { id: 'd' })],
+    projects: [{ id: 'p1', name: 'Belum ditandai', deploy: 50, status: 'tersedia' }],
+  });
+  const c = T.healthChecks(st, T.cfgOf({}), '2026-08-31').checks.find((x) => x.key === 'proyek');
+  assert.strictEqual(c.ok, false);
+  assert.ok(/Tandai proyek ini aktif/.test(c.fix), 'points at the actual repair button');
+});
+
+test('H4. a negative pocket is caught', () => {
+  const st = S({ ledger: [entry('2026-08-01', [dr('3000', 5), cr('1010', 5)], { id: 'n' })] });
+  const c = T.healthChecks(st, T.cfgOf({}), '2026-08-31').checks.find((x) => x.key === 'kantong');
+  assert.strictEqual(c.ok, false);
+});
+
+test('H5. every failing check carries a human explanation, never a bare flag', () => {
+  const st = S({ ledger: [entry('2026-08-01', [dr('1010', 5), cr('3000', 4)], { id: 'bad' })] });
+  T.healthChecks(st, T.cfgOf({}), '2026-08-31').checks.filter((c) => !c.ok).forEach((c) => {
+    assert.ok(c.detail && c.detail.length > 0, c.key + ' has detail');
+    assert.ok(c.fix && c.fix.length > 0, c.key + ' says how to fix it');
+  });
+});
+
+// ── Payment pocket choice: never drain the sinking fund for a monthly payout ─
+test('P1. a monthly bagi hasil is never paid from the locked sinking fund', () => {
+  const st = S({ ledger: [
+    entry('2026-08-01', [dr('1040', 100), cr('2000', 100)], { id: 's' }),  // sinking full
+    entry('2026-08-01', [dr('1000', 5), cr('3000', 5)], { id: 'u' }),      // Utama has enough
+  ] });
+  const pick = T.pickPaymentPocket(st, T.cfgOf({}), 'bagihasil', 1);
+  assert.notStrictEqual(pick.code, '1040', 'sinking is never offered for bagi hasil');
+  assert.strictEqual(pick.code, '1000');
+  assert.strictEqual(pick.enough, true);
+});
+
+test('P2. a principal maturity IS paid from the sinking fund, that is its job', () => {
+  const st = S({ ledger: [entry('2026-08-01', [dr('1040', 100), cr('2000', 100)], { id: 's' })] });
+  const pick = T.pickPaymentPocket(st, T.cfgOf({}), 'pokok', 50);
+  assert.strictEqual(pick.code, '1040');
+  assert.strictEqual(pick.enough, true);
+});
+
+test('P3. when no pocket covers it, it reports the shortfall instead of going negative', () => {
+  const st = S({ ledger: [entry('2026-08-01', [dr('1000', 0.5), cr('3000', 0.5)], { id: 'u' })] });
+  const pick = T.pickPaymentPocket(st, T.cfgOf({}), 'bagihasil', 2);
+  assert.strictEqual(pick.enough, false);
+  assert.strictEqual(pick.short, 1.5);
+});
+
+test('P4. the old behaviour would have gone negative — regression guard', () => {
+  // empty sinking fund, cash sitting in Utama: the old code paid from 1040 anyway
+  const st = S({ ledger: [entry('2026-08-01', [dr('1000', 10), cr('3000', 10)], { id: 'u' })] });
+  const pick = T.pickPaymentPocket(st, T.cfgOf({}), 'bagihasil', 0.2);
+  assert.strictEqual(T.pocketBal(st, '1040'), 0, 'sinking is empty');
+  assert.strictEqual(pick.code, '1000', 'so we must not pay from it');
+});
