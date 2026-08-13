@@ -1572,6 +1572,40 @@ function m6Recommendations(){
 // skenario likuiditas, maturity ladder, matriks alokasi, metrik, rekomendasi.
 function tFpc(x){ return (x==null)?'—':(Math.round(x*10)/10)+'%'; }
 function tFx(x){ return (Math.round(x*100)/100)+'×'; }
+function rRencanaKas(st, cfg, today){
+  const f=Treasury.cashForecast(st,cfg,today);
+  const safe=Treasury.safeAttackBudget(st,cfg,today);
+  let h=`<div class="rep-sec" style="color:var(--p-deep)">🗓️ Rencana Kas — putar atau tahan</div>`;
+  const holdLine = (f.hold>0.005 && f.binding)
+    ? `Tahan <b>${fj(f.hold)}</b> buat <b>${esc(f.binding.label)}</b> (${fd(f.binding.date)}) — belum ada inflow yang menutup sebelum itu`
+    : `Tidak ada yang perlu ditahan — semua kewajiban terdekat tertutup inflow`;
+  h+=`<div class="card-s" style="margin-bottom:8px;border-left:4px solid #0B8F46">
+    <div style="font-size:10.5px;font-weight:800;color:var(--sub)">Kas bisa diputar (Utama + Gde + Investor blm dialokasikan): <b style="color:var(--txt)">${fj(f.available)}</b></div>
+    <div style="font-size:16px;font-weight:900;color:#0B8F46;margin-top:3px">Bebas diputar hari ini: ${fj(f.freeToDeploy)}</div>
+    <div style="font-size:11.5px;font-weight:800;color:${f.hold>0.005?'#B45309':'var(--sub)'};margin-top:2px">${holdLine}</div>
+    <div style="font-size:9.5px;color:var(--sub);font-weight:700;margin-top:5px;padding-top:5px;border-top:1px solid var(--bdr)">Versi hati-hati (haircut + timing 30 hari): <b>${fj(safe)}</b>. Angka besar di atas mengasumsikan semua inflow mendarat penuh & tepat waktu.</div>
+  </div>`;
+  if(f.events.length){
+    h+=`<div class="card-s" style="margin-bottom:12px;max-height:300px;overflow-y:auto">
+      <div style="display:flex;justify-content:space-between;font-size:9px;font-weight:800;color:var(--sub);text-transform:uppercase;letter-spacing:.5px;padding-bottom:4px">
+        <span>Tanggal · kejadian</span><span>Jumlah · saldo berjalan</span></div>`;
+    f.events.forEach(e=>{
+      const isBind = f.binding && e.date===f.binding.date && Math.abs(e.amount-f.binding.amount)<0.005 && e.label===f.binding.label;
+      const col = e.io==='in' ? '#0B8F46' : 'var(--r)';
+      h+=`<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:5px 4px;border-top:1px solid var(--bdr);${isBind?'background:#FEF3C7;border-radius:6px':''}">
+        <div style="min-width:0"><div style="font-size:11px;font-weight:800">${fd(e.date)}</div>
+          <div style="font-size:9.5px;color:var(--sub);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(e.label)}</div></div>
+        <div style="text-align:right;flex-shrink:0">
+          <div class="t-num" style="font-size:11.5px;font-weight:900;color:${col}">${e.io==='in'?'+':'−'}${fj(Math.abs(e.amount))}</div>
+          <div class="t-num" style="font-size:10px;font-weight:800;color:${e.balance<-0.005?'var(--r)':'var(--sub)'}">${fj(e.balance)}</div></div>
+      </div>`;
+    });
+    h+=`</div>`;
+  } else {
+    h+=`<div class="fc-note" style="margin-bottom:12px">Belum ada jadwal masuk/keluar ke depan.</div>`;
+  }
+  return h;
+}
 function rTreasuryHub(){
   if(!window.Treasury) return `<div class="es"><div class="ei">⚙️</div><div class="et">Engine belum termuat</div><div class="esb">treasury.js gagal load. Muat ulang halaman.</div></div>`;
   const st=engineState(), cfg=engineCfg(), today=todayISO();
@@ -1611,6 +1645,8 @@ function rTreasuryHub(){
     <div class="mc-sub">kas terendah${p.firstBreach?' · jebol '+fd(p.firstBreach):''}</div></div>`; });
   h+=`</div>`;
   h+=`<div class="fc-note" style="margin:2px 0 12px">Cadangan RRPR: <b>${fj(rrprActual)}</b> dari target <b>${fj(scs[1].rrpr)}</b> (celah stress ×1,25 + cushion). ${rrprActual>=scs[1].rrpr?'✅ cukup':'⚠️ di bawah target'}. Ketuk kartu untuk lihat timeline kejadian.</div>`;
+  // 2b) Rencana Kas — forward inflow/outflow timeline → putar atau tahan
+  h+=rRencanaKas(st,cfg,today);
   // 3) metrics grid (drill-down)
   const m=Treasury.metrics(st,cfg,today);
   window._tMetrics=m; window._tCfg=cfg;
