@@ -1784,6 +1784,10 @@ function tWaterfall(){
   const w=Treasury.returnWaterfall(engineState(),engineCfg(),amt,todayISO());
   let h=`<div class="card-s" style="background:var(--clay-card)">`;
   w.steps.forEach(s=>{ h+=`<div class="rep-r"><span class="rl" style="font-size:11px">${s.to}<div style="font-size:9.5px;color:var(--sub)">${s.why}</div></span><span class="rv" style="font-weight:800">${fj(s.amount)}</span></div>`; });
+  // the actual decision: how much of the Gde portion can go back out to work
+  h+= (w.hold>0.005)
+    ? `<div style="font-size:10.5px;font-weight:800;margin-top:8px;color:#B45309;background:#FEF3C7;border-radius:9px;padding:8px 10px;line-height:1.45">💡 Putar <b>${fj(w.reinvest)}</b>, tahan <b>${fj(w.hold)}</b>${w.forObligation?` buat <b>${esc(w.forObligation.label)}</b> (${fd(w.forObligation.date)})`:' buat jaga-jaga kas'}. Belum ada inflow lain yang menutup sebelum itu.</div>`
+    : `<div style="font-size:10.5px;font-weight:800;margin-top:8px;color:#0B8F46;background:#DCFCE7;border-radius:9px;padding:8px 10px;line-height:1.45">💡 Boleh diputar semua (<b>${fj(w.reinvest)}</b>) — kewajiban terdekat sudah tertutup inflow lain.</div>`;
   h+=`</div>`;
   document.getElementById('t-ret-out').innerHTML=h;
 }
@@ -2081,8 +2085,8 @@ function rKeuInbox(){
       // that no earlier inflow covers. (Supersedes the older sinking-only nudge.)
       const a=Treasury.allocateInflow?Treasury.allocateInflow(st,cfg,todayISO(),{amount:e.jumlah,date:e.tanggal,label:null}):null;
       if(a){
-        if(a.hold>0.005 && a.forObligation){
-          recLine+=`<div style="font-size:10px;font-weight:800;margin-top:5px;color:#B45309;background:#FEF3C7;border-radius:9px;padding:7px 9px;line-height:1.45">💡 Tahan <b>${fj(a.hold)}</b> buat <b>${esc(a.forObligation.label)}</b> (${fd(a.forObligation.date)})${a.reinvest>0.005?`, sisanya <b>${fj(a.reinvest)}</b> boleh diputar`:''}. Belum ada inflow lain yang menutup sebelum tanggal itu.</div>`;
+        if(a.hold>0.005){
+          recLine+=`<div style="font-size:10px;font-weight:800;margin-top:5px;color:#B45309;background:#FEF3C7;border-radius:9px;padding:7px 9px;line-height:1.45">💡 Tahan <b>${fj(a.hold)}</b>${a.forObligation?` buat <b>${esc(a.forObligation.label)}</b> (${fd(a.forObligation.date)})`:' buat jaga-jaga kas'}${a.reinvest>0.005?`, sisanya <b>${fj(a.reinvest)}</b> boleh diputar`:''}. Belum ada inflow lain yang menutup sebelum tanggal itu.</div>`;
         } else {
           recLine+=`<div style="font-size:10px;font-weight:800;margin-top:5px;color:#0B8F46;background:#DCFCE7;border-radius:9px;padding:7px 9px;line-height:1.45">💡 Boleh diputar semua (<b>${fj(a.reinvest)}</b>) ke proyek baru — kewajiban terdekat sudah tertutup inflow lain.</div>`;
         }
