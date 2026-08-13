@@ -505,36 +505,39 @@
   // Given incoming project cash, recommend where it goes:
   // 1) fund sinking for near principal maturities, 2) restore RRPR to required,
   // 3) reserve accrued-due obligations, 4) remainder → free attack capital.
+  // How much has actually been BORROWED from RRPR to fund a deployment (bridges).
+  // Returns repay THIS first (asas mengembalikan); they never top RRPR up to its
+  // target. RRPR fills only from dana talangan, which is a separate funding event.
+  function rrprBorrowed(state) {
+    return R4((state.bridges || []).reduce((s, b) => {
+      if (!b || b.settled || b.status === 'settled' || b.status === 'lunas') return s;
+      const fromRRPR = b.from === POCKET.RRPR || b.pocket === POCKET.RRPR || b.dari === POCKET.RRPR || b.source === 'RRPR' || b.sumber === 'RRPR';
+      return fromRRPR ? s + (+b.amount || +b.jumlah || 0) : s;
+    }, 0));
+  }
+
+  // Where an incoming amount goes, plus the reinvest/hold verdict for the Gde part.
+  // Order: repay any RRPR borrowing (0 when nothing was borrowed) → rest to Gde. The
+  // forecast then splits the Gde portion into free-to-reinvest vs held-for-obligation.
+  // RRPR is NEVER topped up to target from returns.
   function returnWaterfall(state, cfg, amount, today) {
     amount = R4(amount);
-    let rem = amount;
-    const sinking = pocketBal(state, POCKET.SINKING);
-    const principalSoon = investorObligations(state, today)
-      .filter((e) => e.kind === 'inv_principal' && daysBetween(today, e.date) <= cfg.sinkHorizonDays && daysBetween(today, e.date) >= -3650)
-      .reduce((s, e) => s - e.amount, 0);
-    const sinkNeed = Math.max(0, R4(principalSoon - sinking));
-    const toSinking = R4(Math.min(rem, sinkNeed)); rem = R4(rem - toSinking);
-    const rrpr = pocketBal(state, POCKET.RRPR), rrprReq = requiredRRPR(state, cfg, today);
-    const rrprNeed = Math.max(0, R4(rrprReq - rrpr));
-    const toRRPR = R4(Math.min(rem, rrprNeed)); rem = R4(rem - toRRPR);
-    // accrued bagi-hasil terutang currently due (2010 balance capped by amount left)
-    const accrued = balanceOf(state.ledger, state.accounts, '2010');
-    const toDue = R4(Math.min(rem, Math.max(0, accrued))); rem = R4(rem - toDue);
-    // Owner spread is the residual claim: hold it back while any near obligation
-    // is still unfunded. Over-releasing here is how a guarantee quietly breaks.
-    const ladderAfter = paymentLadder(state, cfg, today, {});
-    const trapped = !!cfg.ownerCashTrap && (ladderAfter.firstBreach !== null || sinkNeed > 0.005 || rrprNeed > 0.005);
-    const freeAttack = trapped ? 0 : R4(Math.max(0, rem));
+    const repayRRPR = R4(Math.min(amount, rrprBorrowed(state)));
+    const toGde = R4(amount - repayRRPR);
+    const alloc = allocateInflow(state, cfg, today, { amount: toGde, date: today, label: null });
     return {
       total: amount,
-      ownerTrapped: trapped,
+      repayRRPR: repayRRPR,
+      toGde: toGde,
+      reinvest: alloc.reinvest,
+      hold: alloc.hold,
+      forObligation: alloc.forObligation,
+      ownerTrapped: alloc.hold > 0.005,
+      freeAttack: alloc.reinvest,
       steps: [
-        { to: 'Investor Jatuh Tempo (sinking)', code: POCKET.SINKING, amount: toSinking, why: 'Pra-danai pokok investor yang jatuh tempo ≤ ' + cfg.sinkHorizonDays + ' hari.' },
-        { to: 'RRPR (cadangan)', code: POCKET.RRPR, amount: toRRPR, why: 'Pulihkan cadangan sampai target ' + R4(rrprReq) + '.' },
-        { to: 'Bagi hasil terutang', code: '2010', amount: toDue, why: 'Sisihkan untuk bagi hasil yang sudah jatuh tempo.' },
-        { to: trapped ? 'Ditahan (kewajiban belum aman)' : 'Modal Serang (Gde)', code: POCKET.GDE, amount: freeAttack, why: trapped ? 'Untung ditahan dulu sampai semua kewajiban investor aman.' : 'Sisanya bebas untuk proyek baru.' },
+        { to: 'RRPR (balikin talangan)', code: POCKET.RRPR, amount: repayRRPR, why: 'Kembalikan dana talangan yang dipakai dari RRPR.' },
+        { to: 'Modal Gde', code: POCKET.GDE, amount: toGde, why: 'Sisanya masuk Gde; ' + (alloc.hold > 0.005 ? 'tahan ' + alloc.hold + ' buat kewajiban terdekat' : 'bebas diputar') + '.' },
       ].filter((s) => s.amount > 0.0001 || s.code === POCKET.GDE),
-      freeAttack: freeAttack,
     };
   }
 
@@ -1032,21 +1035,13 @@
   // investorContracts[].schedule {jumlah,tipe,tanggal,status}) so the numbers and
   // names match the Inbox and the Telegram reminder exactly. Flexible investors
   // (Papa/RRPR) are excluded — no fixed obligation. Overdue events clamp to today.
-  function forecastEvents(state, today) {
+  function forecastEvents(state, cfg, today) {
     const evs = [];
-    (state.projects || []).forEach((p) => {
-      if (p.status !== 'aktif' && p.status !== 'terlambat') return;
-      const nama = p.peminjam || p.name || p.nama || 'Proyek';
-      (p.schedule || []).forEach((s) => {
-        if (s.status === 'paid') return;
-        const amt = +s.amount; if (!amt) return;
-        const d = s.dueDate < today ? today : s.dueDate;
-        evs.push({ date: d, amount: R4(amt), io: 'in', label: nama + ' · return' });
-      });
-      if (p.tanggalJT && !p.pokokRecorded) {
-        const amt = +(p.deploy || p.jumlah || 0);
-        if (amt) { const d = p.tanggalJT < today ? today : p.tanggalJT; evs.push({ date: d, amount: R4(amt), io: 'in', label: nama + ' · pokok balik' }); }
-      }
+    // Inflows = expected project returns + principal, NET of Mas Hena's fee (that is
+    // the cash the fund actually banks). 'base' = full expected, no haircut/delay.
+    projectInflows(state, cfg, 'base', today).forEach((i) => {
+      if (i.date < today) return; // don't bank money already due but not received
+      evs.push({ date: i.date, amount: R4(i.amount), io: 'in', label: i.label });
     });
     (state.investorContracts || []).forEach((c) => {
       if (c.flexible) return;
@@ -1075,7 +1070,7 @@
     opts = opts || {};
     const floor = resolveNumber(cfg && cfg.operatingFloor, 0);
     const available = forecastAvailable(state);
-    const raw = forecastEvents(state, today);
+    const raw = forecastEvents(state, cfg, today);
     let bal = available, minBalance = available, minDate = today, binding = null;
     const events = raw.map((e) => {
       bal = R4(bal + e.amount);
@@ -1095,7 +1090,7 @@
   function allocateInflow(state, cfg, today, inflow) {
     const floor = resolveNumber(cfg && cfg.operatingFloor, 0);
     const available = forecastAvailable(state);
-    const all = forecastEvents(state, today);
+    const all = forecastEvents(state, cfg, today);
     let removed = false;
     const events = all.filter((e) => {
       if (!removed && e.amount > 0 && e.date === inflow.date && Math.abs(e.amount - R4(inflow.amount)) < 0.005 && (!inflow.label || e.label === inflow.label)) { removed = true; return false; }
@@ -1258,7 +1253,7 @@
     investorObligations, papaCallEvents, projectInflows, buildEvents, sortEvents, projectScenario,
     obligationsWithin, cushion, requiredRRPR, safeAttackBudget, maturityLadder, concentration, paymentLadder,
     // recommendations
-    returnWaterfall, fundingRecommendation, pickSourcesForDeal, guaranteeGate, maxSafeTicket, buildTieredSchedule, fundingNeed,
+    returnWaterfall, rrprBorrowed, fundingRecommendation, pickSourcesForDeal, guaranteeGate, maxSafeTicket, buildTieredSchedule, fundingNeed,
     // validation + metrics + migration
     validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, healthChecks, migrate, mergeCloudOps, pickPaymentPocket, proposePocketFix, proposeLedgerRedate, sinkingShortfall, forecastEvents, cashForecast, allocateInflow, incomeBreakdown, deckMetrics, statements,
     // bot operations (shared posting rules)

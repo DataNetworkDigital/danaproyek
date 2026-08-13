@@ -199,19 +199,39 @@ test('12. conservative & stress timelines are deterministic and distinct', () =>
   assert.ok(Math.abs(sInflow.amount) < Math.abs(cInflow.amount), 'stress inflow smaller (haircut)');
 });
 
-// ── 13. return waterfall priority ───────────────────────────────────────────
-test('13. return waterfall funds sinking first, RRPR second, attack last', () => {
+// ── 13. return goes Gde-first; RRPR only gets repaid what was borrowed ───────
+test('13. return routes to Gde; nothing to RRPR unless borrowed; forecast holds the gap', () => {
   const st = S({
-    contracts: [{ id: 'c', providerId: 'p', principal: 20, schedule: [{ tanggal: '2026-08-30', jumlah: 20, tipe: 'pokok', status: 'pending' }] }],
-    providers: [{ id: 'p', classification: 'investor_debt', subtype: 'regular' }],
-    ledger: [entry('2026-08-01', [dr('1010', 5), cr('3000', 5)])], // some cash, empty sinking + RRPR
+    ledger: [entry('2026-08-01', [dr('1010', 5), cr('3000', 5)])], // 5 cash in Gde, RRPR empty
+    investorContracts: [{ nama: 'Investor A', schedule: [{ tanggal: '2026-08-30', jumlah: 20, tipe: 'pokok', status: 'pending' }] }],
   });
   const w = T.returnWaterfall(st, CFG, 30, TODAY);
-  assert.strictEqual(w.steps[0].code, T.POCKET.SINKING, 'sinking first');
-  assert.strictEqual(w.steps[0].amount, 20, 'funds the 20 principal maturity');
-  assert.strictEqual(w.steps[w.steps.length - 1].code, T.POCKET.GDE, 'attack (Gde) last');
-  const sum = T.R4(w.steps.reduce((s, x) => s + x.amount, 0));
-  assert.strictEqual(sum, 30, 'waterfall conserves the full amount');
+  assert.strictEqual(w.repayRRPR, 0, 'RRPR never borrowed → gets nothing');
+  assert.ok(!w.steps.some((s) => s.code === T.POCKET.RRPR), 'no RRPR step at all');
+  assert.strictEqual(w.toGde, 30, 'all of it lands in Gde');
+  assert.strictEqual(w.hold, 15, 'hold covers the 20 pokok gap left after 5 cash');
+  assert.strictEqual(w.reinvest, 15, 'the rest is free to reinvest');
+  assert.strictEqual(T.R4(w.steps.reduce((s, x) => s + x.amount, 0)), 30, 'conserves the full amount');
+});
+
+// ── 13b. when RRPR WAS borrowed for a deployment, returns repay that first ───
+test('13b. an outstanding RRPR bridge is repaid before Gde', () => {
+  const st = S({
+    ledger: [entry('2026-08-01', [dr('1010', 2), cr('3000', 2)])],
+    bridges: [{ from: '1020', amount: 5, status: 'open' }],
+    investorContracts: [],
+  });
+  assert.strictEqual(T.rrprBorrowed(st), 5, 'sums the open RRPR bridge');
+  const w = T.returnWaterfall(st, CFG, 8, TODAY);
+  assert.strictEqual(w.repayRRPR, 5, 'repay the 5 borrowed from RRPR');
+  assert.strictEqual(w.toGde, 3, 'remainder to Gde');
+  assert.strictEqual(w.steps[0].code, T.POCKET.RRPR, 'RRPR repayment shown first');
+});
+
+// ── 13c. a settled bridge is not counted as outstanding borrowing ───────────
+test('13c. settled RRPR bridges are ignored', () => {
+  const st = S({ bridges: [{ from: '1020', amount: 5, status: 'settled' }, { pocket: '1020', amount: 4, settled: true }] });
+  assert.strictEqual(T.rrprBorrowed(st), 0);
 });
 
 // ── 14. recommendation-generated ledger entries are balanced ────────────────
@@ -496,8 +516,7 @@ test('T5c. a 0% fee stays 0% (does not fall back to the default)', () => {
 test('T9a. owner draw is suppressed while a near obligation is unfunded', () => {
   const st = S({
     ledger: [entry('2026-08-01', [dr('1010', 5), cr('3000', 5)])],
-    providers: [{ id: 'p1', classification: 'investor_debt', subtype: 'regular' }],
-    contracts: [{ id: 'c1', providerId: 'p1', principal: 40, nama: 'Investor A', schedule: [
+    investorContracts: [{ id: 'c1', nama: 'Investor A', schedule: [
       { tanggal: '2026-08-20', jumlah: 40, tipe: 'pokok', status: 'pending' },
     ] }],
   });
@@ -1024,7 +1043,7 @@ test('CF2. an unfunded future outflow forces the whole balance to be held', () =
 test('CF3. an inflow before the outflow frees up cash', () => {
   const st = fcState({
     ledger: [gde(4)],
-    projects: [{ peminjam: 'Ayam', status: 'aktif', schedule: [{ dueDate: '2026-09-02', amount: 8, status: 'pending' }] }],
+    projects: [{ name: 'Ayam', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-09-02', amount: 8, status: 'pending' }] }],
     investorContracts: [{ nama: 'Laili', schedule: [{ tanggal: '2026-10-02', tipe: 'pokok', jumlah: 10, status: 'pending' }] }],
   });
   const f = T.cashForecast(st, CFG, TODAY);
@@ -1046,7 +1065,7 @@ test('CF4. overdue outflow is clamped to today and still counted', () => {
 // ── allocateInflow: per-inflow reinvest vs hold (excludes the inflow itself) ──
 test('AI1. inflow fully held when only obligation ahead and no other inflow', () => {
   const st = fcState({
-    projects: [{ peminjam: 'Ayam', status: 'aktif', schedule: [{ dueDate: '2026-09-02', amount: 2.75, status: 'pending' }] }],
+    projects: [{ name: 'Ayam', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-09-02', amount: 2.75, status: 'pending' }] }],
     investorContracts: [{ nama: 'Laili', schedule: [{ tanggal: '2026-10-02', tipe: 'pokok', jumlah: 10, status: 'pending' }] }],
   });
   const r = T.allocateInflow(st, CFG, TODAY, { amount: 2.75, date: '2026-09-02', label: 'Ayam · return' });
@@ -1058,8 +1077,8 @@ test('AI1. inflow fully held when only obligation ahead and no other inflow', ()
 test('AI2. inflow fully reinvestable when a later inflow already covers the outflow', () => {
   const st = fcState({
     projects: [
-      { peminjam: 'Ayam', status: 'aktif', schedule: [{ dueDate: '2026-09-02', amount: 2.75, status: 'pending' }] },
-      { peminjam: 'Tani', status: 'aktif', schedule: [{ dueDate: '2026-09-20', amount: 11, status: 'pending' }] },
+      { name: 'Ayam', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-09-02', amount: 2.75, status: 'pending' }] },
+      { name: 'Tani', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-09-20', amount: 11, status: 'pending' }] },
     ],
     investorContracts: [{ nama: 'Laili', schedule: [{ tanggal: '2026-10-02', tipe: 'pokok', jumlah: 10, status: 'pending' }] }],
   });
@@ -1071,7 +1090,7 @@ test('AI2. inflow fully reinvestable when a later inflow already covers the outf
 
 test('AI3. partial hold — reinvest the surplus over the shortfall', () => {
   const st = fcState({
-    projects: [{ peminjam: 'Ayam', status: 'aktif', schedule: [{ dueDate: '2026-08-13', amount: 2.75, status: 'pending' }] }],
+    projects: [{ name: 'Ayam', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-08-13', amount: 2.75, status: 'pending' }] }],
     investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-08-20', tipe: 'bagihasil', jumlah: 2, status: 'pending' }] }],
   });
   const r = T.allocateInflow(st, CFG, TODAY, { amount: 2.75, date: '2026-08-13', label: 'Ayam · return' });
