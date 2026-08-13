@@ -1025,6 +1025,94 @@
     return { shortfall, dueTotal, sinkBal, nextPokok: next, horizon };
   }
 
+  // ── FORECAST-DRIVEN CAPITAL ALLOCATION ────────────────────────────────────
+  // The deterministic forward calendar the owner reasons about: every expected
+  // project inflow and every investor outflow, on its date. Reads the RAW app
+  // shapes (projects[].schedule {amount,dueDate,status} + tanggalJT, and
+  // investorContracts[].schedule {jumlah,tipe,tanggal,status}) so the numbers and
+  // names match the Inbox and the Telegram reminder exactly. Flexible investors
+  // (Papa/RRPR) are excluded — no fixed obligation. Overdue events clamp to today.
+  function forecastEvents(state, today) {
+    const evs = [];
+    (state.projects || []).forEach((p) => {
+      if (p.status !== 'aktif' && p.status !== 'terlambat') return;
+      const nama = p.peminjam || p.name || p.nama || 'Proyek';
+      (p.schedule || []).forEach((s) => {
+        if (s.status === 'paid') return;
+        const amt = +s.amount; if (!amt) return;
+        const d = s.dueDate < today ? today : s.dueDate;
+        evs.push({ date: d, amount: R4(amt), io: 'in', label: nama + ' · return' });
+      });
+      if (p.tanggalJT && !p.pokokRecorded) {
+        const amt = +(p.deploy || p.jumlah || 0);
+        if (amt) { const d = p.tanggalJT < today ? today : p.tanggalJT; evs.push({ date: d, amount: R4(amt), io: 'in', label: nama + ' · pokok balik' }); }
+      }
+    });
+    (state.investorContracts || []).forEach((c) => {
+      if (c.flexible) return;
+      const nama = c.nama || c.label || 'Investor';
+      (c.schedule || []).forEach((s) => {
+        if (s.status === 'paid') return;
+        if (s.tipe !== 'bagihasil' && s.tipe !== 'pokok') return;
+        const amt = +s.jumlah; if (!amt) return;
+        const d = s.tanggal < today ? today : s.tanggal;
+        evs.push({ date: d, amount: R4(-amt), io: 'out', tipe: s.tipe, label: nama + ' · ' + (s.tipe === 'pokok' ? 'pokok' : 'bagi hasil') });
+      });
+    });
+    // Same day: settle outflows before inflows (never let a same-day inflow rescue
+    // a same-day payment — matches the paymentLadder prudence rule).
+    evs.sort((a, b) => (a.date < b.date ? -1 : (a.date > b.date ? 1 : (a.amount - b.amount))));
+    return evs;
+  }
+
+  // Deployable cash on hand = HUB + GDE + IDLE_INV (RRPR fortress and SINKING lock
+  // are NOT deployable). freeToDeploy = the most we can pull out today without any
+  // future point of the running balance dropping below the operating floor.
+  function forecastAvailable(state) {
+    return R4(pocketBal(state, POCKET.HUB) + pocketBal(state, POCKET.GDE) + pocketBal(state, POCKET.IDLE_INV));
+  }
+  function cashForecast(state, cfg, today, opts) {
+    opts = opts || {};
+    const floor = resolveNumber(cfg && cfg.operatingFloor, 0);
+    const available = forecastAvailable(state);
+    const raw = forecastEvents(state, today);
+    let bal = available, minBalance = available, minDate = today, binding = null;
+    const events = raw.map((e) => {
+      bal = R4(bal + e.amount);
+      if (bal < minBalance) { minBalance = bal; minDate = e.date; if (e.amount < 0) binding = e; }
+      return Object.assign({}, e, { balance: bal });
+    });
+    // Can't deploy more than is on hand today, nor more than the tightest point allows.
+    const freeToDeploy = R4(Math.max(0, Math.min(available, minBalance - floor)));
+    const hold = R4(Math.max(0, available - freeToDeploy));
+    return { available, floor, events, minBalance, minDate, binding, freeToDeploy, hold };
+  }
+
+  // Per-inflow verdict: of THIS incoming amount, how much can be reinvested vs must
+  // be held for a specific obligation that no OTHER inflow covers before its date.
+  // Excludes this inflow from the timeline, then measures the worst shortfall from
+  // the inflow's date onward. inflow = { amount, date, label? }.
+  function allocateInflow(state, cfg, today, inflow) {
+    const floor = resolveNumber(cfg && cfg.operatingFloor, 0);
+    const available = forecastAvailable(state);
+    const all = forecastEvents(state, today);
+    let removed = false;
+    const events = all.filter((e) => {
+      if (!removed && e.amount > 0 && e.date === inflow.date && Math.abs(e.amount - R4(inflow.amount)) < 0.005 && (!inflow.label || e.label === inflow.label)) { removed = true; return false; }
+      return true;
+    });
+    let bal = available, minAfter = Infinity, oblig = null;
+    events.forEach((e) => {
+      bal = R4(bal + e.amount);
+      if (e.date >= inflow.date && bal < minAfter) { minAfter = bal; if (e.amount < 0) oblig = e; }
+    });
+    if (minAfter === Infinity) minAfter = bal;
+    const shortfall = R4(Math.max(0, floor - minAfter));
+    const hold = R4(Math.min(R4(inflow.amount), shortfall));
+    const reinvest = R4(R4(inflow.amount) - hold);
+    return { reinvest, hold, forObligation: hold > 0.005 ? oblig : null, available, minAfter };
+  }
+
   // ── SAFE CONCURRENT WRITES (app ↔ Telegram bot) ───────────────────────────
   // The whole fund lives in ONE Firestore document, so a naive whole-state write
   // from the app would silently erase anything the bot posted while the page was
@@ -1172,7 +1260,7 @@
     // recommendations
     returnWaterfall, fundingRecommendation, pickSourcesForDeal, guaranteeGate, maxSafeTicket, buildTieredSchedule, fundingNeed,
     // validation + metrics + migration
-    validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, healthChecks, migrate, mergeCloudOps, pickPaymentPocket, proposePocketFix, proposeLedgerRedate, sinkingShortfall, incomeBreakdown, deckMetrics, statements,
+    validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, healthChecks, migrate, mergeCloudOps, pickPaymentPocket, proposePocketFix, proposeLedgerRedate, sinkingShortfall, forecastEvents, cashForecast, allocateInflow, incomeBreakdown, deckMetrics, statements,
     // bot operations (shared posting rules)
     OPS, buildEntry, opBayarBagiHasil, opKembalikanPokok, opReturnProyek, opTransfer, opSetorModal, opReversal, applyOp,
   };

@@ -994,3 +994,87 @@ test('X6. leaves the entry alone when the match is ambiguous (two identical paym
   });
   assert.strictEqual(T.proposeLedgerRedate(st).length, 0, 'refuse to guess between duplicates');
 });
+
+// ── cashForecast: forward deterministic timeline → free vs hold ───────────────
+// available cash = HUB(1000)+GDE(1010)+IDLE(1030); RRPR + sinking excluded.
+function fcState(over) { return S(Object.assign({ ledger: [], projects: [], investorContracts: [] }, over)); }
+const gde = (v) => entry(TODAY, [dr('1010', v), cr('3000', v)]); // put v into GDE → available
+
+test('CF1. no events → all available is free, nothing held, no binding', () => {
+  const st = fcState({ ledger: [gde(5)] });
+  const f = T.cashForecast(st, CFG, TODAY);
+  assert.strictEqual(f.available, 5);
+  assert.strictEqual(f.freeToDeploy, 5);
+  assert.strictEqual(f.hold, 0);
+  assert.strictEqual(f.binding, null);
+});
+
+test('CF2. an unfunded future outflow forces the whole balance to be held', () => {
+  const st = fcState({ ledger: [gde(4)], investorContracts: [
+    { nama: 'Laili', schedule: [{ tanggal: '2026-10-02', tipe: 'pokok', jumlah: 10, status: 'pending' }] },
+  ] });
+  const f = T.cashForecast(st, CFG, TODAY);
+  assert.strictEqual(f.available, 4);
+  assert.strictEqual(f.minBalance, -6);
+  assert.strictEqual(f.freeToDeploy, 0);
+  assert.strictEqual(f.hold, 4);
+  assert.ok(f.binding && f.binding.label.indexOf('Laili') >= 0, 'binding names the obligation');
+});
+
+test('CF3. an inflow before the outflow frees up cash', () => {
+  const st = fcState({
+    ledger: [gde(4)],
+    projects: [{ peminjam: 'Ayam', status: 'aktif', schedule: [{ dueDate: '2026-09-02', amount: 8, status: 'pending' }] }],
+    investorContracts: [{ nama: 'Laili', schedule: [{ tanggal: '2026-10-02', tipe: 'pokok', jumlah: 10, status: 'pending' }] }],
+  });
+  const f = T.cashForecast(st, CFG, TODAY);
+  assert.strictEqual(f.minBalance, 2, '4 + 8 - 10');
+  assert.strictEqual(f.freeToDeploy, 2);
+  assert.strictEqual(f.hold, 2);
+});
+
+test('CF4. overdue outflow is clamped to today and still counted', () => {
+  const st = fcState({ ledger: [gde(5)], investorContracts: [
+    { nama: 'Veda', schedule: [{ tanggal: '2026-07-01', tipe: 'bagihasil', jumlah: 3, status: 'pending' }] },
+  ] });
+  const f = T.cashForecast(st, CFG, TODAY);
+  assert.strictEqual(f.events[0].date, TODAY, 'overdue clamped to today');
+  assert.strictEqual(f.freeToDeploy, 2);
+  assert.strictEqual(f.hold, 3);
+});
+
+// ── allocateInflow: per-inflow reinvest vs hold (excludes the inflow itself) ──
+test('AI1. inflow fully held when only obligation ahead and no other inflow', () => {
+  const st = fcState({
+    projects: [{ peminjam: 'Ayam', status: 'aktif', schedule: [{ dueDate: '2026-09-02', amount: 2.75, status: 'pending' }] }],
+    investorContracts: [{ nama: 'Laili', schedule: [{ tanggal: '2026-10-02', tipe: 'pokok', jumlah: 10, status: 'pending' }] }],
+  });
+  const r = T.allocateInflow(st, CFG, TODAY, { amount: 2.75, date: '2026-09-02', label: 'Ayam · return' });
+  assert.strictEqual(r.reinvest, 0);
+  assert.strictEqual(r.hold, 2.75);
+  assert.ok(r.forObligation && r.forObligation.label.indexOf('Laili') >= 0);
+});
+
+test('AI2. inflow fully reinvestable when a later inflow already covers the outflow', () => {
+  const st = fcState({
+    projects: [
+      { peminjam: 'Ayam', status: 'aktif', schedule: [{ dueDate: '2026-09-02', amount: 2.75, status: 'pending' }] },
+      { peminjam: 'Tani', status: 'aktif', schedule: [{ dueDate: '2026-09-20', amount: 11, status: 'pending' }] },
+    ],
+    investorContracts: [{ nama: 'Laili', schedule: [{ tanggal: '2026-10-02', tipe: 'pokok', jumlah: 10, status: 'pending' }] }],
+  });
+  const r = T.allocateInflow(st, CFG, TODAY, { amount: 2.75, date: '2026-09-02', label: 'Ayam · return' });
+  assert.strictEqual(r.hold, 0, 'Tani 11 on 20 Sep covers the Laili 10 on 2 Oct');
+  assert.strictEqual(r.reinvest, 2.75);
+  assert.strictEqual(r.forObligation, null);
+});
+
+test('AI3. partial hold — reinvest the surplus over the shortfall', () => {
+  const st = fcState({
+    projects: [{ peminjam: 'Ayam', status: 'aktif', schedule: [{ dueDate: '2026-08-13', amount: 2.75, status: 'pending' }] }],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-08-20', tipe: 'bagihasil', jumlah: 2, status: 'pending' }] }],
+  });
+  const r = T.allocateInflow(st, CFG, TODAY, { amount: 2.75, date: '2026-08-13', label: 'Ayam · return' });
+  assert.strictEqual(r.hold, 2);
+  assert.strictEqual(r.reinvest, 0.75);
+});
