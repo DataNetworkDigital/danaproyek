@@ -213,12 +213,18 @@
       return (a.label || '') < (b.label || '') ? -1 : ((a.label || '') > (b.label || '') ? 1 : 0);
     });
   }
+  // Overdue money owed does NOT disappear: an unpaid obligation is clamped to today
+  // so it still weighs on the forward curve. (Dropping it made the fund look SAFER
+  // the later it paid.) A late project inflow is the opposite: a borrower who has
+  // not paid is not cash, so it stays excluded.
+  function clampOverdue(events, today) {
+    return events.map((e) => (e.date < today ? Object.assign({}, e, { date: today, overdue: true }) : e));
+  }
   function buildEvents(state, cfg, scenario, today) {
-    const ev = [].concat(
-      investorObligations(state, today),
-      papaCallEvents(state, cfg, scenario, today),
-      projectInflows(state, cfg, scenario, today)
-    ).filter((e) => e.date >= today);
+    const ev = clampOverdue(
+      [].concat(investorObligations(state, today), papaCallEvents(state, cfg, scenario, today)),
+      today
+    ).concat(projectInflows(state, cfg, scenario, today).filter((e) => e.date >= today));
     return sortEvents(ev);
   }
 
@@ -241,7 +247,7 @@
   // ── obligations within N days (out) ───────────────────────────────────────
   function obligationsWithin(state, cfg, days, today, scenario) {
     const evs = [].concat(investorObligations(state, today), papaCallEvents(state, cfg, scenario || 'conservative', today))
-      .filter((e) => { const d = daysBetween(today, e.date); return d >= 0 && d <= days; });
+      .filter((e) => daysBetween(today, e.date) <= days); // overdue (d<0) still owed
     return R4(evs.reduce((s, e) => s + (-e.amount), 0));
   }
   function cushion(state, cfg, today) { return R4(obligationsWithin(state, cfg, 30, today, 'conservative') * (cfg.cushionPct / 100)); }
@@ -249,7 +255,11 @@
   // ── required RRPR reserve = stress gap × margin + cushion ──────────────────
   function requiredRRPR(state, cfg, today) {
     const stress = projectScenario(state, cfg, 'stress', today);
-    const gap = Math.max(0, -stress.minCash);
+    // Size the reserve on cash that EXCLUDES the reserve being sized. The stress
+    // curve starts from total liquid (RRPR included), so measuring the gap as
+    // -minCash let a full fortress prove it needed no fortress, collapsing the
+    // target to zero and releasing the whole 1020 balance to the next deal.
+    const gap = Math.max(0, R4(pocketBal(state, POCKET.RRPR) - stress.minCash));
     return R4(gap * cfg.rrprMultiplier + cushion(state, cfg, today));
   }
 
@@ -476,7 +486,7 @@
     const infl = projectInflows(state, cfg, scenario, today);
     const sinking = pocketBal(state, POCKET.SINKING);
     return [7, 30, 60, 90].map((h) => {
-      const inRange = (d) => { const x = daysBetween(today, d); return x >= 0 && x <= h; };
+      const inRange = (d) => daysBetween(today, d) <= h; // overdue rows stay in the ladder
       const principal = R4(invOb.filter((e) => e.kind === 'inv_principal' && inRange(e.date)).reduce((s, e) => s - e.amount, 0));
       const ret = R4(invOb.filter((e) => e.kind === 'inv_return' && inRange(e.date)).reduce((s, e) => s - e.amount, 0));
       const papaCall = R4(papa.filter((e) => inRange(e.date)).reduce((s, e) => s - e.amount, 0));

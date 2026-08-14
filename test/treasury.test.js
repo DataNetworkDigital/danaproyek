@@ -1097,3 +1097,63 @@ test('AI3. partial hold — reinvest the surplus over the shortfall', () => {
   assert.strictEqual(r.hold, 2);
   assert.strictEqual(r.reinvest, 0.75);
 });
+
+// ── A1: overdue investor obligations must NOT vanish ─────────────────────────
+// Being late on a payment used to make every safety number improve, because the
+// obligation was filtered out of the forward calendar entirely.
+function ovState(schedule) {
+  return S({
+    ledger: [entry('2026-08-01', [dr('1010', 20), cr('3000', 20)])],
+    providers: [{ id: 'p1', classification: 'investor_debt', subtype: 'regular' }],
+    contracts: [{ id: 'c1', providerId: 'p1', principal: 40, nama: 'Veda', schedule }],
+  });
+}
+const OV_LATE = [{ tanggal: '2026-07-20', jumlah: 1.323, tipe: 'bagihasil', status: 'pending' }]; // before TODAY
+const OV_ONTIME = [{ tanggal: '2026-08-20', jumlah: 1.323, tipe: 'bagihasil', status: 'pending' }];
+
+test('OV1. an overdue obligation still appears in buildEvents, clamped to today', () => {
+  const evs = T.buildEvents(ovState(OV_LATE), CFG, 'conservative', TODAY);
+  const hit = evs.find((e) => e.kind === 'inv_return');
+  assert.ok(hit, 'overdue obligation is still on the calendar');
+  assert.strictEqual(hit.date, TODAY, 'clamped to today');
+  assert.strictEqual(hit.overdue, true, 'flagged as overdue');
+});
+
+test('OV2. obligationsWithin counts an overdue payment', () => {
+  assert.strictEqual(T.obligationsWithin(ovState(OV_LATE), CFG, 30, TODAY, 'conservative'), 1.323);
+});
+
+test('OV3. falling behind never improves the safe attack budget', () => {
+  const onTime = T.safeAttackBudget(ovState(OV_ONTIME), CFG, TODAY);
+  const late = T.safeAttackBudget(ovState(OV_LATE), CFG, TODAY);
+  assert.ok(late <= onTime + 0.0001, `late (${late}) must not be safer than on-time (${onTime})`);
+});
+
+test('OV4. a late project inflow is still NOT counted as cash', () => {
+  const st = S({
+    ledger: [entry('2026-08-01', [dr('1010', 5), cr('3000', 5)])],
+    projects: [{ name: 'Ayam', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-07-01', amount: 9, status: 'pending' }] }],
+  });
+  const evs = T.buildEvents(st, CFG, 'conservative', TODAY);
+  assert.strictEqual(evs.filter((e) => e.kind === 'inflow').length, 0, 'a borrower who is late has not paid');
+});
+
+// ── A2: requiredRRPR must not be measured on a curve that spends RRPR ────────
+test('RR1. requiredRRPR is invariant to the RRPR balance it is sizing', () => {
+  const book = (rrpr) => S({
+    ledger: [
+      entry('2026-08-01', [dr('1010', 10), cr('3000', 10)]),
+      entry('2026-08-01', [dr('1020', rrpr), cr('3010', rrpr)]),
+    ],
+    providers: [{ id: 'p1', classification: 'investor_debt', subtype: 'regular' }],
+    contracts: [{ id: 'c1', providerId: 'p1', principal: 60, nama: 'Veda', schedule: [
+      { tanggal: '2026-10-01', jumlah: 60, tipe: 'pokok', status: 'pending' },
+    ] }],
+  });
+  const a = T.requiredRRPR(book(0), CFG, TODAY);
+  const b = T.requiredRRPR(book(13.19), CFG, TODAY);
+  const c = T.requiredRRPR(book(60), CFG, TODAY);
+  assert.strictEqual(a, b, 'target must not shrink just because the fortress has money in it');
+  assert.strictEqual(b, c, 'and must not collapse to zero once it looks full');
+  assert.ok(a > 0, 'a real 60 jt maturity demands a real reserve');
+});
