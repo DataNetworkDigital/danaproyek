@@ -191,14 +191,14 @@
       if ((p.type || 'onetime') === 'monthly') {
         (p.monthlyReturns || []).forEach((r) => {
           if (r.status === 'paid') return;
-          out.push({ date: addDays(r.date, shift), amount: R4((+r.amount || 0) * hc), kind: 'inflow', rank: 4, label: (p.name || 'Proyek') + ' · return', quality: p.inflowQuality || 'contracted' });
+          out.push({ date: addDays(r.date, shift), srcDate: r.date, gross: R4(+r.amount || 0), amount: R4((+r.amount || 0) * hc), kind: 'inflow', rank: 4, label: (p.name || 'Proyek') + ' · return', quality: p.inflowQuality || 'contracted' });
         });
-        if (p.principalDate && !p.principalPaid) out.push({ date: addDays(p.principalDate, shift), amount: R4((+p.deploy || 0) * hc), kind: 'inflow', rank: 4, label: (p.name || 'Proyek') + ' · pokok balik', quality: p.inflowQuality || 'contracted' });
+        if (p.principalDate && !p.principalPaid) out.push({ date: addDays(p.principalDate, shift), srcDate: p.principalDate, gross: R4(+p.deploy || 0), amount: R4((+p.deploy || 0) * hc), kind: 'inflow', rank: 4, label: (p.name || 'Proyek') + ' · pokok balik', quality: p.inflowQuality || 'contracted' });
       } else {
         if (p.principalPaid) return;
         const date = addDays(p.principalDate || p.maturityDate, shift);
         const gross = R4((+p.deploy || 0) + (+p.profit || 0)); // principal + profit, ONCE
-        out.push({ date, amount: R4(gross * hc), kind: 'inflow', rank: 4, label: (p.name || 'Proyek') + ' · pokok + laba', quality: p.inflowQuality || 'contracted' });
+        out.push({ date, srcDate: p.principalDate || p.maturityDate, gross: R4(gross), amount: R4(gross * hc), kind: 'inflow', rank: 4, label: (p.name || 'Proyek') + ' · pokok + laba', quality: p.inflowQuality || 'contracted' });
       }
     });
     return out;
@@ -1071,7 +1071,7 @@
     // the quality haircut and the timing delay; 'base' is the untouched best case.
     projectInflows(state, cfg, scenario || 'conservative', today).forEach((i) => {
       if (i.date < today) return; // don't bank money already due but not received
-      evs.push({ date: i.date, amount: R4(i.amount), io: 'in', label: i.label });
+      evs.push({ date: i.date, srcDate: i.srcDate || i.date, gross: i.gross, amount: R4(i.amount), io: 'in', label: i.label });
     });
     (state.investorContracts || []).forEach((c) => {
       if (c.flexible) return;
@@ -1124,9 +1124,21 @@
     const floor = resolveNumber(cfg && cfg.operatingFloor, 0);
     const available = forecastAvailable(state);
     const all = forecastEvents(state, cfg, today, inflow.scenario || 'conservative');
+    // The event we are deciding must leave the calendar, or its money is counted
+    // twice. Under the careful basis the amount is haircut and the date shifted, so
+    // identify it by label + unshifted source date; fall back to the raw amount only
+    // when the caller gave no label (a manual, unscheduled amount).
     let removed = false;
+    const want = R4(inflow.amount);
     const events = all.filter((e) => {
-      if (!removed && e.amount > 0 && e.date === inflow.date && Math.abs(e.amount - R4(inflow.amount)) < 0.005 && (!inflow.label || e.label === inflow.label)) { removed = true; return false; }
+      if (removed || e.amount <= 0) return true;
+      const src = e.srcDate || e.date;
+      const sameDay = src === inflow.date || e.date === inflow.date;
+      if (!sameDay) return true;
+      const match = inflow.label
+        ? e.label === inflow.label
+        : (Math.abs(R4(e.gross != null ? e.gross : e.amount) - want) < 0.005 || Math.abs(e.amount - want) < 0.005);
+      if (match) { removed = true; return false; }
       return true;
     });
     let bal = available, minAfter = Infinity, oblig = null;
@@ -1215,6 +1227,53 @@
       else if (r.shortfall < was - 0.005) better.push({ label: r.obligation.label, date: r.obligation.date, shortfallBefore: was, shortfallAfter: r.shortfall });
     });
     return { worse, better };
+  }
+
+  // ── PLAN SNAPSHOT + DRIFT ─────────────────────────────────────────────────
+  // The plan itself is always recomputed, never trusted from storage. What IS
+  // stored is a snapshot of the facts at the moment a deal was accepted, so the
+  // app can later say "this is not what you agreed to". Facts only: the verdict,
+  // the pocket mix, the RRPR reliance, and the coverage that justified it.
+  function planSnapshot(meta, plan) {
+    return {
+      id: meta.id || ('plan:' + (meta.dealId || 'x') + ':' + (meta.tanggal || '')),
+      dealId: meta.dealId || null, nama: meta.nama || null, tanggal: meta.tanggal || null,
+      verdict: meta.verdict || null, dependsOnRRPR: R4(meta.dependsOnRRPR || 0),
+      mix: (meta.mix || []).map((m) => ({ code: m.code, amount: R4(m.amount), bridge: !!m.bridge })),
+      totalShortfall: R4((plan && plan.totalShortfall) || 0),
+      coverage: ((plan && plan.rows) || []).map((r) => ({
+        label: r.obligation.label, date: r.obligation.date, amount: r.obligation.amount,
+        shortfall: r.shortfall,
+        from: r.covered.map((c) => ({ label: c.label, date: c.date, amount: c.amount })),
+      })),
+    };
+  }
+
+  // Compare the live picture against that snapshot. Only reports obligations that
+  // got WORSE and are still outstanding — a payment that has since been settled has
+  // left the calendar and is not drift, it is progress.
+  function planDrift(state, cfg, today, snapshot, opts) {
+    opts = opts || {};
+    // Callers checking many plans at once can pass the live plan in, so the matching
+    // is computed once instead of once per snapshot.
+    const live = opts.live || coveragePlan(state, cfg, today, { scenario: opts.scenario || 'conservative' });
+    const now = {};
+    live.rows.forEach((r) => { now[r.obligation.label + '|' + r.obligation.date] = r; });
+    const changed = [];
+    ((snapshot && snapshot.coverage) || []).forEach((c) => {
+      const k = c.label + '|' + c.date;
+      const cur = now[k];
+      if (!cur) return; // settled or gone: not a broken promise
+      if (cur.shortfall > c.shortfall + 0.005) {
+        changed.push({
+          label: c.label, date: c.date, amount: c.amount,
+          shortfallPlanned: R4(c.shortfall), shortfallNow: R4(cur.shortfall),
+          plannedFrom: (c.from || []).map((f) => f.label),
+          nowFrom: cur.covered.map((f) => f.label),
+        });
+      }
+    });
+    return { hasDrift: changed.length > 0, changed, live };
   }
 
   // Move a flexible (perpetual, callable) investor onto the same fixed terms as
@@ -1308,6 +1367,9 @@
     if ((cloud.decisionLog || []).length) out.decisionLog = unionById(local.decisionLog, cloud.decisionLog);
     if ((cloud.investors || []).length) out.investors = unionById(local.investors, cloud.investors);
 
+    // Plans are the owner's record of what he agreed to; union by id so a plan
+    // written on the phone is never lost to a save from the laptop.
+    out.plans = unionById(local.plans, cloud.plans);
     return { state: out, recovered: { entries, schedules: schedules, contracts: newC.length, projects: newP.length } };
   }
 
@@ -1393,7 +1455,7 @@
     // recommendations
     returnWaterfall, rrprBorrowed, fundingRecommendation, pickSourcesForDeal, guaranteeGate, maxSafeTicket, buildTieredSchedule, fundingNeed,
     // validation + metrics + migration
-    validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, healthChecks, migrate, mergeCloudOps, pickPaymentPocket, proposePocketFix, proposeLedgerRedate, sinkingShortfall, forecastEvents, cashForecast, allocateInflow, convertFlexibleToRegular, coveragePlan, coverageDelta, incomeBreakdown, deckMetrics, statements,
+    validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, healthChecks, migrate, mergeCloudOps, pickPaymentPocket, proposePocketFix, proposeLedgerRedate, sinkingShortfall, forecastEvents, cashForecast, allocateInflow, convertFlexibleToRegular, coveragePlan, coverageDelta, planSnapshot, planDrift, incomeBreakdown, deckMetrics, statements,
     // bot operations (shared posting rules)
     OPS, buildEntry, opBayarBagiHasil, opKembalikanPokok, opReturnProyek, opTransfer, opSetorModal, opReversal, applyOp,
   };

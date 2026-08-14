@@ -1395,3 +1395,85 @@ test('C6. a deal whose return lands in time does NOT knock the obligation out', 
   assert.strictEqual(T.coverageDelta(before, after).worse.length, 0);
   assert.ok(/Proyek Baru/.test(after.rows[0].covered[0].label), 'and it is the new deal that pays it');
 });
+
+// ── Phase D: the snapshot taken at entry, and detecting drift from it ───────
+test('D1. planDrift is silent while reality still matches the plan', () => {
+  const st = cvState({
+    ledger: [cash(12)],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-09-20', tipe: 'pokok', jumlah: 12, status: 'pending' }] }],
+  });
+  const live = T.coveragePlan(st, CFG, TODAY, { scenario: 'base' });
+  const snap = T.planSnapshot({ dealId: 'd1', nama: 'Proyek A', tanggal: TODAY, verdict: 'GREEN', dependsOnRRPR: 0, mix: [] }, live);
+  const drift = T.planDrift(st, CFG, TODAY, snap, { scenario: 'base' });
+  assert.strictEqual(drift.changed.length, 0);
+  assert.strictEqual(drift.hasDrift, false);
+});
+
+test('D2. planDrift names an obligation whose cover disappeared since entry', () => {
+  const covered = cvState({
+    ledger: [cash(12)],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-09-20', tipe: 'pokok', jumlah: 12, status: 'pending' }] }],
+  });
+  const snap = T.planSnapshot({ dealId: 'd1', nama: 'Proyek A', tanggal: TODAY, verdict: 'GREEN', dependsOnRRPR: 0, mix: [] },
+    T.coveragePlan(covered, CFG, TODAY, { scenario: 'base' }));
+  // reality moved on: the cash went out the door
+  const drained = cvState({
+    ledger: [cash(12), entry(TODAY, [dr('1100', 12), cr('1010', 12)])],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-09-20', tipe: 'pokok', jumlah: 12, status: 'pending' }] }],
+  });
+  const drift = T.planDrift(drained, CFG, TODAY, snap, { scenario: 'base' });
+  assert.strictEqual(drift.hasDrift, true);
+  assert.strictEqual(drift.changed.length, 1);
+  assert.ok(/Veda/.test(drift.changed[0].label));
+  assert.strictEqual(drift.changed[0].shortfallNow, 12);
+  assert.strictEqual(drift.changed[0].shortfallPlanned, 0);
+});
+
+test('D3. a paid obligation is not reported as drift', () => {
+  const st = cvState({
+    ledger: [cash(12)],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-09-20', tipe: 'pokok', jumlah: 12, status: 'pending' }] }],
+  });
+  const snap = T.planSnapshot({ dealId: 'd1', nama: 'A', tanggal: TODAY, verdict: 'GREEN', dependsOnRRPR: 0, mix: [] },
+    T.coveragePlan(st, CFG, TODAY, { scenario: 'base' }));
+  const settled = cvState({
+    ledger: [cash(12)],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-09-20', tipe: 'pokok', jumlah: 12, status: 'paid' }] }],
+  });
+  assert.strictEqual(T.planDrift(settled, CFG, TODAY, snap, { scenario: 'base' }).hasDrift, false, 'settled, not broken');
+});
+
+test('D4. stored plans survive a cloud merge and never duplicate', () => {
+  const local = { ledger: [], plans: [{ id: 'plan:1', dealId: 'd1' }] };
+  const cloud = { ledger: [], plans: [{ id: 'plan:1', dealId: 'd1' }, { id: 'plan:2', dealId: 'd2' }] };
+  const merged = T.mergeCloudOps(local, cloud).state;
+  assert.strictEqual(merged.plans.length, 2, 'adopts the plan only the cloud has');
+  const ids = merged.plans.map((p) => p.id);
+  assert.strictEqual(new Set(ids).size, ids.length, 'no duplicates');
+});
+
+// ── Regression: the inflow being decided must be excluded even when the careful
+// basis has haircut and delayed it (otherwise it is counted twice again). ──────
+test('E1. allocateInflow excludes its own event under the conservative basis', () => {
+  const st = cvState({
+    projects: [{ name: 'Ayam', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-09-10', amount: 10, status: 'pending' }] }],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-09-20', tipe: 'pokok', jumlah: 12, status: 'pending' }] }],
+  });
+  const r = T.allocateInflow(st, CFG, TODAY, { amount: 10, date: '2026-09-10', label: 'Ayam · return' });
+  assert.strictEqual(r.hold, 10, 'all of it is needed for the 12 pokok; nothing may be released');
+  assert.strictEqual(r.reinvest, 0);
+});
+
+test('E2. two projects paying on the same day are told apart by name', () => {
+  const st = cvState({
+    projects: [
+      { name: 'Ayam', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-09-10', amount: 10, status: 'pending' }] },
+      { name: 'Pelayaran', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-09-10', amount: 10, status: 'pending' }] },
+    ],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-09-20', tipe: 'pokok', jumlah: 26, status: 'pending' }] }],
+  });
+  // Deciding Ayam's 10 must leave Pelayaran's inflow on the calendar (7 after haircut)
+  const r = T.allocateInflow(st, CFG, TODAY, { amount: 10, date: '2026-09-10', label: 'Ayam · return' });
+  assert.strictEqual(r.hold, 10, '26 owed, only Pelayaran 7 counted => still short, hold everything');
+  assert.strictEqual(r.minAfter, -19, '0 + 7 - 26');
+});

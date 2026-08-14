@@ -1624,6 +1624,34 @@ function rRencanaKas(st, cfg, today){
   } else {
     h+=`<div class="fc-note" style="margin-bottom:12px">Belum ada jadwal masuk/keluar ke depan.</div>`;
   }
+  h+=rPlanDrift(st,cfg,today);
+  return h;
+}
+// "Beda dari rencana awal": compare every accepted deal's snapshot against the live
+// picture. Only obligations that got WORSE and are still outstanding are reported —
+// a payment already settled is progress, not drift.
+function rPlanDrift(st, cfg, today){
+  const plans=(S.plans||[]);
+  if(!plans.length || !Treasury.planDrift) return '';
+  let live; try{ live=Treasury.coveragePlan(st,cfg,today,{}); }catch(e){ return ''; }
+  const hits=[];
+  plans.forEach(pl=>{
+    let d; try{ d=Treasury.planDrift(st,cfg,today,pl,{live}); }catch(e){ return; }
+    if(d.hasDrift) hits.push({pl,d});
+  });
+  if(!hits.length) return '';
+  let h=`<div class="rep-sec" style="color:#B45309">⚠️ Beda dari rencana awal</div>
+    <div class="card-s" style="margin-bottom:12px;background:#FEF3C7;border-left:4px solid #B45309">`;
+  hits.slice(0,3).forEach(({pl,d})=>{
+    h+=`<div style="padding:5px 0;border-top:1px solid rgba(0,0,0,.06)">
+      <div style="font-size:11.5px;font-weight:900">${esc(pl.nama||'Proyek')} · disetujui ${fd(pl.tanggal)}</div>`;
+    d.changed.slice(0,3).forEach(c=>{
+      h+=`<div style="font-size:10.5px;font-weight:700;color:var(--txt);margin-top:3px">• <b>${esc(c.label)}</b> (${fd(c.date)}) tadinya ${c.shortfallPlanned>0.005?`kurang ${fj(c.shortfallPlanned)}`:'aman'}${c.plannedFrom.length?` lewat ${esc(c.plannedFrom[0])}`:''}, sekarang kurang <b>${fj(c.shortfallNow)}</b></div>`;
+    });
+    if(d.changed.length>3) h+=`<div style="font-size:9.5px;color:var(--sub);font-weight:700;margin-top:2px">+${d.changed.length-3} lainnya</div>`;
+    h+=`</div>`;
+  });
+  h+=`<div style="font-size:9.5px;color:var(--sub);font-weight:700;margin-top:6px">Rencana selalu dihitung ulang dari keadaan terbaru. Ini cuma menandai bedanya dengan yang kamu setujui dulu.</div></div>`;
   return h;
 }
 function rTreasuryHub(){
@@ -2020,6 +2048,14 @@ function pendingEvents(){
   const skip=window._inboxSkip||{};
   return events.filter(e=>!skip[e.id]).sort((a,b)=>a.tanggal<b.tanggal?-1:1);
 }
+// The engine's name for an incoming event, so allocateInflow can identify (and
+// therefore exclude) the very inflow being decided instead of counting it twice.
+function inflowLabelOf(ev){
+  if(!ev||!ev.pname) return null;
+  if(ev.kind==='proj') return ev.pname+' · return';
+  if(ev.kind==='projpokok') return ev.pname+' · pokok balik';
+  return null;
+}
 function inboxPost(ev, pocket, date, amount){
   amount=(amount!=null)?amount:ev.jumlah;
   if(ev.kind==='inv'){
@@ -2050,7 +2086,7 @@ function inboxAccept(id){
   if(ev.arah!=='keluar'){
     // Compute the reinvest/hold verdict BEFORE posting (while the inflow is still a
     // pending forecast event), then land the cash in Gde per the owner's model.
-    const a=(ev.arah==='masuk' && Treasury.allocateInflow)?Treasury.allocateInflow(engineState(),engineCfg(),todayISO(),{amount:ev.jumlah,date:ev.tanggal,label:null}):null;
+    const a=(ev.arah==='masuk' && Treasury.allocateInflow)?Treasury.allocateInflow(engineState(),engineCfg(),todayISO(),{amount:ev.jumlah,date:ev.tanggal,label:inflowLabelOf(ev)}):null;
     inboxPost(ev, ev.arah==='masuk'?'1010':'1000', todayISO(), ev.jumlah);
     if(a){
       if(a.hold>0.005 && a.forObligation) toast(`✅ Masuk Gde · 💡 tahan ${fj(a.hold)} buat ${a.forObligation.label} (${fd(a.forObligation.date)})`,{duration:7000});
@@ -2108,7 +2144,7 @@ function rKeuInbox(){
       recLine=`<div style="font-size:10.5px;font-weight:800;margin-top:6px;color:#0B8F46">📥 Masuk ke kantong Gde</div>`;
       // Forecast verdict for THIS inflow: reinvest or hold for a specific obligation
       // that no earlier inflow covers. (Supersedes the older sinking-only nudge.)
-      const a=Treasury.allocateInflow?Treasury.allocateInflow(st,cfg,todayISO(),{amount:e.jumlah,date:e.tanggal,label:null}):null;
+      const a=Treasury.allocateInflow?Treasury.allocateInflow(st,cfg,todayISO(),{amount:e.jumlah,date:e.tanggal,label:inflowLabelOf(e)}):null;
       if(a){
         if(a.hold>0.005){
           recLine+=`<div style="font-size:10px;font-weight:800;margin-top:5px;color:#B45309;background:#FEF3C7;border-radius:9px;padding:7px 9px;line-height:1.45">💡 Tahan <b>${fj(a.hold)}</b>${a.forObligation?` buat <b>${esc(a.forObligation.label)}</b> (${fd(a.forObligation.date)})`:' buat jaga-jaga kas'}${a.reinvest>0.005?`, sisanya <b>${fj(a.reinvest)}</b> boleh diputar`:''}. Belum ada inflow lain yang menutup sebelum tanggal itu.</div>`;
@@ -2864,6 +2900,18 @@ function confirmMasuk(id){
   if(p.peminjam && !names.includes(p.peminjam)){ names.push(p.peminjam); S.orgConfig.activeProjectNames=names; addedName=p.peminjam; }
   const bridge=mix.find(m=>m.bridge);
   if(bridge){ S.bridges=S.bridges||[]; S.bridges.push({id:'brg:'+uid(), from:'1020', amount:bridge.amount, restoreBy:bridge.restoreBy, dealId:p.id, settled:false}); }
+  // Snapshot of what was agreed, so a later screen can say "this is not the plan
+  // you accepted". Facts only; the plan itself is always recomputed live.
+  try{
+    if(Treasury.planSnapshot && Treasury.coveragePlan){
+      const planAtEntry=Treasury.coveragePlan(engineState(),engineCfg(),todayISO(),{mix, deal:dealFromProject(p)});
+      S.plans=S.plans||[];
+      S.plans.push(Treasury.planSnapshot({
+        id:'plan:'+uid(), dealId:p.id, nama:p.peminjam, tanggal:todayISO(),
+        verdict:fresh.verdict, dependsOnRRPR:fresh.dependsOnRRPR, mix
+      }, planAtEntry));
+    }
+  }catch(err){ console.warn('[plan snapshot]',err); }
   S.decisionLog=S.decisionLog||[];
   const logTs=new Date().toISOString();
   S.decisionLog.push({ts:logTs, dealId:p.id, verdict:_pendingDeal.verdict,
@@ -2880,6 +2928,7 @@ function undoEnterDeal(){
   const p=(S.projects||[]).find(x=>x.id===_lastEnter.projectId);
   if(p){ p.status=_lastEnter.prev.status; p.tanggalAktif=_lastEnter.prev.tanggalAktif; }
   if(_lastEnter.hadBridge) S.bridges=(S.bridges||[]).filter(b=>b.dealId!==_lastEnter.projectId);
+  S.plans=(S.plans||[]).filter(pl=>pl.dealId!==_lastEnter.projectId);
   S.decisionLog=(S.decisionLog||[]).filter(d=>d.ts!==_lastEnter.logTs);
   if(_lastEnter.addedName) S.orgConfig.activeProjectNames=(S.orgConfig.activeProjectNames||[]).filter(n=>n!==_lastEnter.addedName);
   _lastEnter=null; save(); rAll(); toast('↩ Dibatalkan');
