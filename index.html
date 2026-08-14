@@ -1222,8 +1222,27 @@ function invDetail(id){
   const c=invContracts().find(x=>x.id===id); if(!c) return;
   document.getElementById('mo-keu-t').textContent='📅 Jadwal · '+c.nama;
   let b=`<div class="fc-note" style="margin-bottom:10px">${fj(c.pokok)} · ${c.ratePct}%/bln · ${c.tenorBulan} bln · ${(INV_STRUKTUR[c.struktur]||INV_STRUKTUR.bulanan).label}</div>`;
+  // Coverage plan, indexed by obligation, so each unpaid row can show which future
+  // money pays it — same data as the return allocation, so the two never disagree.
+  const cov={};
+  try{
+    if(Treasury.coveragePlan) Treasury.coveragePlan(engineState(),engineCfg(),todayISO(),{}).rows
+      .forEach(r=>{ cov[r.obligation.label+'|'+r.obligation.date]=r; });
+  }catch(e){}
   (c.schedule||[]).forEach(s=>{
-    b+=`<div class="ir"><div class="ik">${s.tipe==='pokok'?'💰 Pokok':'📈 Bagi hasil'} · ${fd(s.tanggal)}</div><div class="iv" style="color:${s.status==='paid'?'#0B8F46':'var(--txt)'}">${fj(s.jumlah)} ${s.status==='paid'?'✅':''}</div></div>`;
+    const paid=s.status==='paid';
+    b+=`<div class="ir"><div class="ik">${s.tipe==='pokok'?'💰 Pokok':'📈 Bagi hasil'} · ${fd(s.tanggal)}</div><div class="iv" style="color:${paid?'#0B8F46':'var(--txt)'}">${fj(s.jumlah)} ${paid?'✅':''}</div></div>`;
+    if(paid) return;
+    const pr=cov[(c.nama+' · '+(s.tipe==='pokok'?'pokok':'bagi hasil'))+'|'+s.tanggal];
+    const srcs=(pr&&pr.covered)||[];
+    b+=`<div style="margin:1px 0 9px 12px;padding-left:9px;border-left:2px solid var(--bdr)">
+      <div style="font-size:9px;font-weight:800;color:var(--sub);text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">Rencana bayar${srcs.length>1?` · ${srcs.length} sumber`:''}</div>`;
+    srcs.forEach(cv=>{
+      b+=`<div style="font-size:10.5px;font-weight:700;color:#0B8F46;line-height:1.55">↳ ${fj(cv.amount)} dari <b>${esc(cv.label)}</b> <span style="color:var(--sub);font-weight:700">${fd(cv.date)}</span></div>`;
+    });
+    if(pr && pr.shortfall>0.005) b+=`<div style="font-size:10.5px;font-weight:800;color:var(--r);line-height:1.55">↳ kurang ${fj(pr.shortfall)} — belum ada sumber yang menutup</div>`;
+    if(!srcs.length && !(pr&&pr.shortfall>0.005)) b+=`<div style="font-size:10px;font-weight:700;color:var(--sub)">belum terjadwal</div>`;
+    b+=`</div>`;
   });
   document.getElementById('mo-keu-b').innerHTML=b;
   om('mo-keu');

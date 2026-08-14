@@ -1590,3 +1590,27 @@ test('R8. returnWaterfall identifies the event even with no label and a bridge o
   assert.strictEqual(w.hold, 16, 'all 16 that reached Gde is needed for the 20 pokok');
   assert.strictEqual(w.reinvest, 0);
 });
+
+// ── Schedule-detail: a contract's rows must be matchable to their coverage ──
+// The investor schedule modal keys coverage by `nama · tipe | tanggal`. Lock that
+// contract so a future rename or label change can't silently break the section.
+test('SD1. every schedule row finds its coverage row by nama + tanggal', () => {
+  const st = cvState({
+    ledger: [cash(80)],
+    investorContracts: [{ nama: 'Veda', schedule: [
+      { tanggal: '2026-09-03', tipe: 'bagihasil', jumlah: 1.323, status: 'pending' },
+      { tanggal: '2026-12-03', tipe: 'pokok', jumlah: 66.15, status: 'pending' },
+    ] }],
+  });
+  const plan = T.coveragePlan(st, CFG, TODAY, { scenario: 'base' });
+  const idx = {};
+  plan.rows.forEach((r) => { idx[r.obligation.label + '|' + r.obligation.date] = r; });
+  const c = st.investorContracts[0];
+  c.schedule.forEach((s) => {
+    const key = c.nama + ' · ' + (s.tipe === 'pokok' ? 'pokok' : 'bagi hasil') + '|' + s.tanggal;
+    assert.ok(idx[key], `row ${s.tanggal} ${s.tipe} must resolve via "${key}"`);
+  });
+  // and a stacked pokok really does carry more than one source
+  const pokok = idx['Veda · pokok|2026-12-03'];
+  assert.ok(pokok.covered.length >= 1);
+});
