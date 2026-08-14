@@ -566,7 +566,7 @@
       freeAttack: alloc.reinvest,
       steps: [
         { to: 'RRPR (balikin talangan)', code: POCKET.RRPR, amount: repayRRPR, why: 'Kembalikan dana talangan yang dipakai dari RRPR.' },
-        { to: 'Modal Gde', code: POCKET.GDE, amount: toGde, why: 'Sisanya masuk Gde; ' + (alloc.hold > 0.005 ? 'tahan ' + alloc.hold + ' buat kewajiban terdekat' : 'bebas diputar') + '.' },
+        { to: 'Modal Gde', code: POCKET.GDE, amount: toGde, why: 'Sisanya masuk Gde; ' + (alloc.hold > 0.005 ? 'sebagian ditahan buat kewajiban terdekat' : 'bebas diputar') + '.' },
       ].filter((s) => s.amount > 0.0001 || s.code === POCKET.GDE),
     };
   }

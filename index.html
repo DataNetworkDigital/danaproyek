@@ -1602,10 +1602,15 @@ function rRencanaKas(st, cfg, today){
       ? `Kas sudah habis, tidak ada yang bisa ditahan — kas ke depan masih kurang <b>${fj(kurang)}</b> di ${fd(f.minDate)}${f.binding?` (${esc(f.binding.label)})`:''}`
       : `Tidak ada yang perlu ditahan — semua kewajiban terdekat tertutup inflow`);
   const warn = (f.hold>0.005 || kurang>0.005);
+  // Holding everything on hand is not the same as being covered: say how deep the
+  // hole still is, even when there IS cash to hold.
+  const shortLine = (f.hold>0.005 && kurang>0.005)
+    ? `<div style="font-size:10.5px;font-weight:800;color:var(--r);margin-top:3px">Menahan semuanya pun belum cukup — kas ke depan masih kurang <b>${fj(kurang)}</b> di ${fd(f.minDate)}</div>`
+    : '';
   h+=`<div class="card-s" style="margin-bottom:8px;border-left:4px solid ${kurang>0.005?'#DC2626':'#0B8F46'}">
     <div style="font-size:10.5px;font-weight:800;color:var(--sub)">Kas bisa diputar (Utama + Gde + Investor blm dialokasikan): <b style="color:var(--txt)">${fj(f.available)}</b></div>
     <div style="font-size:16px;font-weight:900;color:${kurang>0.005?'var(--r)':'#0B8F46'};margin-top:3px">Bebas diputar hari ini: ${fj(f.freeToDeploy)}</div>
-    <div style="font-size:11.5px;font-weight:800;color:${warn?'#B45309':'var(--sub)'};margin-top:2px">${holdLine}</div>
+    <div style="font-size:11.5px;font-weight:800;color:${warn?'#B45309':'var(--sub)'};margin-top:2px">${holdLine}</div>${shortLine}
     <div style="font-size:9.5px;color:var(--sub);font-weight:700;margin-top:5px;padding-top:5px;border-top:1px solid var(--bdr)">Angka di atas dihitung <b>hati-hati</b>: uang masuk dianggap bisa telat sekitar 7 hari dan tidak mendarat penuh. Ini yang dipakai buat semua janji.<br>Kalau semua mendarat penuh dan tepat waktu, potensinya <b>${fj(opt.freeToDeploy)}</b>. Selisih <b>${fj(Math.max(0,opt.freeToDeploy-f.freeToDeploy))}</b> itu bantalan jaga-jaga.</div>
   </div>`;
   if(f.events.length){
@@ -2834,7 +2839,7 @@ function renderDecision(id, overrideMix){
   rows.forEach(r=>{
     const mark=!r.covered?'❌':(r.tight?'⚠️':'✅');
     const col=!r.covered?'var(--r)':(r.tight?'#B45309':'#0B8F46');
-    b+=`<div class="rep-r"><span class="rl" style="font-size:11px">${mark} ${r.label}
+    b+=`<div class="rep-r"><span class="rl" style="font-size:11px">${mark} ${esc(r.label)}
       <div style="font-size:9.5px;color:var(--sub)">${fd(r.date)} · sisa kas ${fj(r.cumulativeCash)}</div></span>
       <span class="rv" style="color:${col}">${fj(r.obligation)}</span></div>`;
   });
