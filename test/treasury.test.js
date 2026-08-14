@@ -1477,3 +1477,66 @@ test('E2. two projects paying on the same day are told apart by name', () => {
   assert.strictEqual(r.hold, 10, '26 owed, only Pelayaran 7 counted => still short, hold everything');
   assert.strictEqual(r.minAfter, -19, '0 + 7 - 26');
 });
+
+// ── Review round: defects found by the adversarial pass ────────────────────
+test('R1. an overdue obligation CAN be paid from cash already in the bank', () => {
+  // clamped to today; the pool also sits at today, and "cash in advance" was
+  // rejecting it, so every overdue payment falsely read as uncovered.
+  const st = cvState({
+    ledger: [cash(20)],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-07-01', tipe: 'bagihasil', jumlah: 3, status: 'pending' }] }],
+  });
+  const plan = T.coveragePlan(st, CFG, TODAY, { scenario: 'base' });
+  assert.strictEqual(plan.rows.length, 1);
+  assert.strictEqual(plan.rows[0].shortfall, 0, 'the money is already sitting there');
+  assert.ok(/Kas sekarang/.test(plan.rows[0].covered[0].label));
+});
+
+test('R2. the coverage pool is PAYMENT cash: sinking and RRPR may pay investors', () => {
+  const st = cvState({
+    ledger: [entry(TODAY, [dr('1040', 30), cr('2000', 30)])], // sinking fund only
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-09-20', tipe: 'pokok', jumlah: 30, status: 'pending' }] }],
+  });
+  const plan = T.coveragePlan(st, CFG, TODAY, { scenario: 'base' });
+  assert.strictEqual(plan.rows[0].shortfall, 0, 'the sinking fund exists precisely to pay this');
+});
+
+test('R3. maturityLadder does not bank project money that never arrived', () => {
+  const st = S({
+    ledger: [entry('2026-08-01', [dr('1010', 5), cr('3000', 5)])],
+    projects: [{ name: 'Ayam', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-07-01', amount: 9, status: 'pending' }] }],
+  });
+  const l = T.maturityLadder(st, CFG, TODAY, 'conservative');
+  assert.strictEqual(l[0].inflow, 0, 'a borrower who never paid is not inflow');
+});
+
+test('R4. withoutRRPR does not subtract a bridged draw twice', () => {
+  const st = S({
+    ledger: [entry('2026-08-01', [dr('1010', 10), cr('3000', 10)]), entry('2026-08-01', [dr('1020', 20), cr('3010', 20)])],
+    providers: [{ id: 'p1', classification: 'investor_debt', subtype: 'regular' }],
+    contracts: [{ id: 'c1', providerId: 'p1', principal: 5, nama: 'Veda', schedule: [
+      { tanggal: '2026-09-20', jumlah: 5, tipe: 'pokok', status: 'pending' },
+    ] }],
+  });
+  const mix = [{ code: '1020', amount: 8, bridge: true }];
+  const withR = T.paymentLadder(st, CFG, TODAY, { mix });
+  const noR = T.paymentLadder(st, CFG, TODAY, { mix, withoutRRPR: true });
+  // total liquid 30, drawn 8 => 22. Removing the fortress removes only what is LEFT
+  // in it (20 - 8 = 12), not the whole 20.
+  assert.strictEqual(withR.startCash, 22);
+  assert.strictEqual(noR.startCash, 10, 'cash outside the fortress');
+});
+
+test('R5. returnWaterfall identifies the calendar event by the FULL amount arriving', () => {
+  const st = cvState({
+    bridges: [{ id: 'b1', from: '1020', amount: 4, settled: false }],
+    projects: [{ name: 'Wartini', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-08-30', amount: 20, status: 'pending' }] }],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-12-03', tipe: 'pokok', jumlah: 30, status: 'pending' }] }],
+  });
+  const w = T.returnWaterfall(st, CFG, 20, TODAY, { date: '2026-08-30', label: 'Wartini · return' });
+  assert.strictEqual(w.repayRRPR, 4, 'the bridge is repaid first');
+  // 16 reaches Gde; the 20 event must be gone from the calendar, not still counted
+  const a = T.allocateInflow(st, CFG, TODAY, { amount: 16, date: '2026-08-30', label: 'Wartini · return' });
+  assert.strictEqual(w.hold, a.hold);
+  assert.strictEqual(w.reinvest, a.reinvest);
+});

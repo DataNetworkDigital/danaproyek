@@ -349,8 +349,9 @@
     const drawn = (opts.mix || []).reduce((s, m) => s + R4(m.amount), 0);
     // opts.withoutRRPR re-runs the same proof with the fortress removed, so the caller
     // can report how much of a GREEN verdict is actually leaning on RRPR.
-    const held = opts.withoutRRPR ? pocketBal(state, POCKET.RRPR) : 0;
-    const startCash = R4(totalLiquid(state) - drawn - Math.max(0, held));
+    const drawnFromRRPR = (opts.mix || []).reduce((s, m) => s + (m.code === POCKET.RRPR ? R4(+m.amount || 0) : 0), 0);
+    const held = opts.withoutRRPR ? Math.max(0, R4(pocketBal(state, POCKET.RRPR) - drawnFromRRPR)) : 0;
+    const startCash = R4(totalLiquid(state) - drawn - held);
 
     // minBuffer = timing cushion sized on the near-term outflow rate
     const near = obligations.filter((e) => daysBetween(today, e.date) <= 30)
@@ -500,7 +501,7 @@
       const principal = R4(invOb.filter((e) => e.kind === 'inv_principal' && inRange(e.date)).reduce((s, e) => s - e.amount, 0));
       const ret = R4(invOb.filter((e) => e.kind === 'inv_return' && inRange(e.date)).reduce((s, e) => s - e.amount, 0));
       const papaCall = R4(papa.filter((e) => inRange(e.date)).reduce((s, e) => s - e.amount, 0));
-      const inflow = R4(infl.filter((e) => inRange(e.date)).reduce((s, e) => s + e.amount, 0));
+      const inflow = R4(infl.filter((e) => e.date >= today && inRange(e.date)).reduce((s, e) => s + e.amount, 0));
       // uncovered = worst cash dip within horizon
       let cash = sc.start, minC = sc.start;
       sc.events.forEach((e) => { if (inRange(e.date)) { cash = R4(cash + e.amount); if (cash < minC) minC = cash; } });
@@ -1169,7 +1170,11 @@
     const evs = forecastEvents(state, cfg, today, scenario);
 
     const drawn = (opts.mix || []).reduce((s, m) => s + R4(+m.amount || 0), 0);
-    const pool = [{ date: today, label: 'Kas sekarang', amount: R4(forecastAvailable(state) - drawn), remaining: R4(forecastAvailable(state) - drawn) }];
+    // Cash that can PAY an investor is not the same pool as cash that may be DEPLOYED
+    // into a new project: the sinking fund and RRPR exist to honour investors. Use
+    // total liquid here so this plan agrees with the payability proof (paymentLadder).
+    const onHand = R4(totalLiquid(state) - drawn);
+    const pool = [{ date: today, label: 'Kas sekarang', amount: onHand, remaining: onHand }];
     evs.filter((e) => e.io === 'in').forEach((e) => pool.push({ date: e.date, label: e.label, amount: R4(e.amount), remaining: R4(e.amount) }));
 
     if (opts.deal && opts.deal.maturityDate) {
@@ -1196,7 +1201,11 @@
       const covered = [];
       pool.forEach((p) => {
         if (need <= 0.0001 || p.remaining <= 0.0001) return;
-        if (!(p.date < o.date)) return; // cash-in-advance: landing ON the due date is too late
+        // Cash in advance: money must land BEFORE the due date to pay it. Money
+        // already in the bank (dated today) is the exception — it can settle an
+        // obligation due today or already overdue.
+        const alreadyBanked = p.date === today;
+        if (!alreadyBanked && !(p.date < o.date)) return;
         const take = R4(Math.min(p.remaining, need));
         p.remaining = R4(p.remaining - take);
         need = R4(need - take);

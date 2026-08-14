@@ -505,10 +505,13 @@ function migrateSchema(){
     //    ada di jadwal: 1 Sep 2026 s/d 1 Agu 2027) dan pokok Rp 50 jt balik bareng
     //    pembayaran terakhir, 1 Agu 2027. Must run BEFORE migrate() so the derived
     //    capitalContracts mirror is rebuilt as a regular contract too.
-    try{
-      const n=Treasury.convertFlexibleToRegular(S,{match:/papa/i, tenorBulan:12, maturityDate:'2027-08-01'});
-      if(n) console.log('[papa] kontrak fleksibel diubah jadi reguler ('+n+' perubahan)');
-    }catch(e){ console.warn('[papa migrate]',e); }
+    if(!S.orgConfig.papaRegularized){
+      try{
+        const n=Treasury.convertFlexibleToRegular(S,{match:/papa/i, tenorBulan:12, maturityDate:'2027-08-01'});
+        S.orgConfig.papaRegularized=true; // one-time correction; never re-force later edits
+        if(n) console.log('[papa] kontrak fleksibel diubah jadi reguler ('+n+' perubahan)');
+      }catch(e){ console.warn('[papa migrate]',e); }
+    }
     try{ Treasury.migrate(S); }catch(e){ console.warn('[migrate v4]',e); }
   }
 }
@@ -1756,8 +1759,10 @@ function rTreasuryHub(){
   h+=`<div class="rep-sec" style="color:var(--p-deep)">🎯 Alat Rekomendasi</div>
     <div class="card-s" style="margin-bottom:8px">
       <div style="font-weight:900;font-size:12.5px;margin-bottom:6px">💧 Return proyek masuk → alokasikan</div>
+      <select class="fi" id="t-ret-pick" onchange="tRetPick()" style="margin-bottom:6px">${tRetOptions()}</select>
       <div style="display:flex;gap:6px;flex-wrap:wrap"><input class="fi" id="t-ret-amt" type="number" step="0.01" placeholder="jumlah (jt)" style="flex:1;min-width:110px"><input class="fi" id="t-ret-date" type="date" value="${todayISO()}" style="flex:1;min-width:130px"><button class="btn pr" onclick="tWaterfall()" style="padding:8px 14px;font-size:12px">Hitung</button></div>
-      <div style="font-size:9.5px;color:var(--sub);font-weight:700;margin-top:4px">Tanggal = kapan uangnya benar-benar masuk. Kalau ini return yang sudah terjadwal, pakai tanggal jadwalnya biar tidak dihitung dua kali.</div>
+      <input type="hidden" id="t-ret-label" value="">
+      <div style="font-size:9.5px;color:var(--sub);font-weight:700;margin-top:4px">Pilih return yang sudah terjadwal biar tidak dihitung dua kali. Kalau uangnya di luar jadwal, pilih "Lainnya" dan isi sendiri.</div>
       <div id="t-ret-out" style="margin-top:8px"></div></div>
     <div class="card-s" style="margin-bottom:12px">
       <div style="font-weight:900;font-size:12.5px;margin-bottom:6px">🚀 Proyek baru → sumber dana + keamanan</div>
@@ -1827,6 +1832,25 @@ function tDrill(key){
   b+=`</div><div class="fc-note">${D[4]}</div>`;
   document.getElementById('mo-keu-b').innerHTML=b; om('mo-keu');
 }
+// Upcoming scheduled inflows, so the owner picks the exact one instead of typing a
+// number the engine then has to guess at. Picking fills amount, date and the engine
+// label used to drop that event from the calendar.
+function tRetOptions(){
+  if(!window.Treasury||!Treasury.forecastEvents) return '<option value="">Lainnya (isi manual)</option>';
+  let evs=[]; try{ evs=Treasury.forecastEvents(engineState(),engineCfg(),todayISO(),'conservative').filter(e=>e.io==='in').slice(0,12); }catch(e){}
+  window._tRetEvs=evs;
+  return '<option value="">Lainnya (isi manual)</option>'+evs.map((e,i)=>
+    `<option value="${i}">${esc(e.label)} · ${fd(e.srcDate||e.date)} · ${fj(e.gross!=null?e.gross:e.amount)}</option>`).join('');
+}
+function tRetPick(){
+  const i=document.getElementById('t-ret-pick').value;
+  const e=(window._tRetEvs||[])[i];
+  const setV=(id,v)=>{ const el=document.getElementById(id); if(el) el.value=v; };
+  if(!e){ setV('t-ret-label',''); return; }
+  setV('t-ret-amt', e.gross!=null?e.gross:e.amount);
+  setV('t-ret-date', e.srcDate||e.date);
+  setV('t-ret-label', e.label);
+}
 function tWaterfall(){
   const amt=parseFloat(document.getElementById('t-ret-amt').value||0);
   if(!(amt>0)){ document.getElementById('t-ret-out').innerHTML='<div class="fc-note" style="color:var(--r)">Isi jumlah dulu.</div>'; return; }
@@ -1834,7 +1858,8 @@ function tWaterfall(){
   const inflowDate=(dEl&&dEl.value)||todayISO();
   // Judge the money on the date it actually lands; passing today for a future-dated
   // scheduled return left that return in the timeline AND added the amount again.
-  const w=Treasury.returnWaterfall(engineState(),engineCfg(),amt,todayISO(),{date:inflowDate});
+  const lEl=document.getElementById('t-ret-label');
+  const w=Treasury.returnWaterfall(engineState(),engineCfg(),amt,todayISO(),{date:inflowDate, label:(lEl&&lEl.value)||null});
   let h=`<div class="card-s" style="background:var(--clay-card)">`;
   w.steps.forEach(s=>{ h+=`<div class="rep-r"><span class="rl" style="font-size:11px">${s.to}<div style="font-size:9.5px;color:var(--sub)">${s.why}</div></span><span class="rv" style="font-weight:800">${fj(s.amount)}</span></div>`; });
   // the actual decision: how much of the Gde portion can go back out to work
@@ -2053,7 +2078,13 @@ function pendingEvents(){
 function inflowLabelOf(ev){
   if(!ev||!ev.pname) return null;
   if(ev.kind==='proj') return ev.pname+' · return';
-  if(ev.kind==='projpokok') return ev.pname+' · pokok balik';
+  if(ev.kind==='projpokok'){
+    // engineProjects maps a 'sekali' project to type 'onetime', whose single inflow
+    // the engine labels "· pokok + laba"; only 'bulanan' projects get "· pokok balik".
+    const pr=(S.projects||[]).find(x=>x.peminjam===ev.pname);
+    const bulanan=((pr&&pr.returnType)||'sekali')==='bulanan';
+    return ev.pname+(bulanan?' · pokok balik':' · pokok + laba');
+  }
   return null;
 }
 function inboxPost(ev, pocket, date, amount){
@@ -2891,6 +2922,13 @@ function confirmMasuk(id){
   if(lacking){ toast('⚠️ Saldo kantong berubah — dicek ulang'); renderDecision(id); return; }
   const fresh=Treasury.guaranteeGate(_st,engineCfg(),dealFromProject(p),mix,todayISO());
   if(fresh.verdict!==_pendingDeal.verdict){ toast('⚠️ Kondisi kas berubah — cek ulang'); renderDecision(id); return; }
+  // Capture the accepted plan BEFORE anything is posted: once the deploy hits the
+  // ledger and the project flips to aktif, engineState() already contains the deal,
+  // so passing mix+deal again would subtract the draw twice and bank its return twice.
+  let planAtEntry=null;
+  try{
+    if(Treasury.coveragePlan) planAtEntry=Treasury.coveragePlan(_st,engineCfg(),todayISO(),{mix, deal:dealFromProject(p)});
+  }catch(err){ console.warn('[plan snapshot]',err); }
   const lines=[{account:'1100',debit:total,credit:0}].concat(mix.map(m=>({account:m.code,debit:0,credit:m.amount})));
   const e=ledgerPost(todayISO(),'Deploy ke proyek: '+(p.peminjam||''),lines,'deploy');
   const prev={status:p.status, tanggalAktif:p.tanggalAktif};
@@ -2903,13 +2941,23 @@ function confirmMasuk(id){
   // Snapshot of what was agreed, so a later screen can say "this is not the plan
   // you accepted". Facts only; the plan itself is always recomputed live.
   try{
-    if(Treasury.planSnapshot && Treasury.coveragePlan){
-      const planAtEntry=Treasury.coveragePlan(engineState(),engineCfg(),todayISO(),{mix, deal:dealFromProject(p)});
+    if(Treasury.planSnapshot && planAtEntry){
       S.plans=S.plans||[];
-      S.plans.push(Treasury.planSnapshot({
+      const snap=Treasury.planSnapshot({
         id:'plan:'+uid(), dealId:p.id, nama:p.peminjam, tanggal:todayISO(),
         verdict:fresh.verdict, dependsOnRRPR:fresh.dependsOnRRPR, mix
-      }, planAtEntry));
+      }, planAtEntry);
+      // One Firestore document holds the whole fund. Keep only the obligations this
+      // plan actually says something about (uncovered first, then nearest) so a long
+      // run of deals can never push the document past its size limit.
+      const MAXROWS=25;
+      if(snap.coverage.length>MAXROWS){
+        const gaps=snap.coverage.filter(c=>c.shortfall>0.005);
+        const rest=snap.coverage.filter(c=>c.shortfall<=0.005);
+        snap.coverage=gaps.concat(rest).slice(0,MAXROWS);
+        snap.truncated=true;
+      }
+      S.plans.push(snap);
     }
   }catch(err){ console.warn('[plan snapshot]',err); }
   S.decisionLog=S.decisionLog||[];
@@ -4103,6 +4151,8 @@ function undoActivation(pid){
   p.status='tersedia';
   // Take the name back out of the engine's active registry, the way undoEnterDeal
   // does. Leaving it in kept the cancelled project's returns on the cash calendar.
+  S.bridges=(S.bridges||[]).filter(bx=>bx.dealId!==pid);
+  S.plans=(S.plans||[]).filter(pl=>pl.dealId!==pid);
   if(p.peminjam && S.orgConfig && Array.isArray(S.orgConfig.activeProjectNames)
      && !S.projects.some(x=>x.id!==pid && x.peminjam===p.peminjam && x.status!=='tersedia')){
     S.orgConfig.activeProjectNames=S.orgConfig.activeProjectNames.filter(n=>n!==p.peminjam);
