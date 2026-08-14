@@ -1540,3 +1540,53 @@ test('R5. returnWaterfall identifies the calendar event by the FULL amount arriv
   assert.strictEqual(w.hold, a.hold);
   assert.strictEqual(w.reinvest, a.reinvest);
 });
+
+// ── Review round 2 ─────────────────────────────────────────────────────────
+test('R6. drift stays visible once a promised payment goes overdue', () => {
+  // The obligation's date is clamped to today when it goes unpaid. Keying the plan
+  // on that moving date made the snapshot row stop matching, so the app went QUIET
+  // exactly when an investor payment was late.
+  const st = cvState({
+    ledger: [cash(20)],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-08-20', tipe: 'pokok', jumlah: 12, status: 'pending' }] }],
+  });
+  const snap = T.planSnapshot({ dealId: 'd1', nama: 'A', tanggal: TODAY, verdict: 'GREEN', dependsOnRRPR: 0, mix: [] },
+    T.coveragePlan(st, CFG, TODAY, { scenario: 'base' }));
+  assert.strictEqual(snap.coverage[0].date, '2026-08-20', 'the snapshot records the real due date');
+  // time passes: the payment is now overdue AND the cash is gone
+  const later = cvState({
+    ledger: [cash(20), entry('2026-08-25', [dr('1100', 20), cr('1010', 20)])],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-08-20', tipe: 'pokok', jumlah: 12, status: 'pending' }] }],
+  });
+  const drift = T.planDrift(later, CFG, '2026-08-25', snap, { scenario: 'base' });
+  assert.strictEqual(drift.hasDrift, true, 'an overdue, now-uncovered payment must still be reported');
+  assert.ok(/Veda/.test(drift.changed[0].label));
+});
+
+test('R7. coveragePlan rows report the REAL due date, not the clamped one', () => {
+  const st = cvState({
+    ledger: [cash(1)],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-07-01', tipe: 'bagihasil', jumlah: 3, status: 'pending' }] }],
+  });
+  const r = T.coveragePlan(st, CFG, TODAY, { scenario: 'base' }).rows[0];
+  assert.strictEqual(r.obligation.date, '2026-07-01', 'shows when it was actually due');
+  assert.strictEqual(r.obligation.overdue, true);
+});
+
+test('R8. returnWaterfall identifies the event even with no label and a bridge open', () => {
+  const st = cvState({
+    bridges: [{ id: 'b1', from: '1020', amount: 4, settled: false }],
+    ledger: [entry(TODAY, [dr('1020', 10), cr('3010', 10)])],
+    projects: [{ name: 'Wartini', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-08-30', amount: 20, status: 'pending' }] }],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-12-03', tipe: 'pokok', jumlah: 20, status: 'pending' }] }],
+  });
+  // no label given (a manual entry): identification must still use the ARRIVING 20,
+  // not the 16 left after repaying the bridge. Sized so the phantom inflow WOULD
+  // change the answer (hold 6 / reinvest 10) if the event were left on the calendar.
+  const w = T.returnWaterfall(st, CFG, 20, TODAY, { date: '2026-08-30' });
+  const withLabel = T.returnWaterfall(st, CFG, 20, TODAY, { date: '2026-08-30', label: 'Wartini · return' });
+  assert.strictEqual(w.hold, withLabel.hold, 'same answer with or without the label');
+  assert.strictEqual(w.reinvest, withLabel.reinvest);
+  assert.strictEqual(w.hold, 16, 'all 16 that reached Gde is needed for the 20 pokok');
+  assert.strictEqual(w.reinvest, 0);
+});

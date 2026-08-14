@@ -4151,8 +4151,10 @@ function undoActivation(pid){
   p.status='tersedia';
   // Take the name back out of the engine's active registry, the way undoEnterDeal
   // does. Leaving it in kept the cancelled project's returns on the cash calendar.
-  S.bridges=(S.bridges||[]).filter(bx=>bx.dealId!==pid);
-  S.plans=(S.plans||[]).filter(pl=>pl.dealId!==pid);
+  // NOTE: deliberately does NOT touch S.bridges or S.plans. Unlike undoEnterDeal
+  // (which removes its ledger entry), this path leaves the deploy posted — the money
+  // really did leave RRPR — so clearing the bridge would erase a genuine debt and
+  // release capital the fund does not have.
   if(p.peminjam && S.orgConfig && Array.isArray(S.orgConfig.activeProjectNames)
      && !S.projects.some(x=>x.id!==pid && x.peminjam===p.peminjam && x.status!=='tersedia')){
     S.orgConfig.activeProjectNames=S.orgConfig.activeProjectNames.filter(n=>n!==p.peminjam);

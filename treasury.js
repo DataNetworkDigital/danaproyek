@@ -554,7 +554,7 @@
     inflow = inflow || {};
     const repayRRPR = R4(Math.min(amount, rrprBorrowed(state)));
     const toGde = R4(amount - repayRRPR);
-    const alloc = allocateInflow(state, cfg, today, { amount: toGde, date: inflow.date || today, label: inflow.label || null });
+    const alloc = allocateInflow(state, cfg, today, { amount: toGde, gross: amount, date: inflow.date || today, label: inflow.label || null });
     return {
       total: amount,
       repayRRPR: repayRRPR,
@@ -1082,7 +1082,7 @@
         if (s.tipe !== 'bagihasil' && s.tipe !== 'pokok') return;
         const amt = +s.jumlah; if (!amt) return;
         const d = s.tanggal < today ? today : s.tanggal;
-        evs.push({ date: d, amount: R4(-amt), io: 'out', tipe: s.tipe, label: nama + ' · ' + (s.tipe === 'pokok' ? 'pokok' : 'bagi hasil') });
+        evs.push({ date: d, srcDate: s.tanggal, overdue: s.tanggal < today, amount: R4(-amt), io: 'out', tipe: s.tipe, label: nama + ' · ' + (s.tipe === 'pokok' ? 'pokok' : 'bagi hasil') });
       });
     });
     // Same day: settle outflows before inflows (never let a same-day inflow rescue
@@ -1130,7 +1130,7 @@
     // identify it by label + unshifted source date; fall back to the raw amount only
     // when the caller gave no label (a manual, unscheduled amount).
     let removed = false;
-    const want = R4(inflow.amount);
+    const want = R4(inflow.gross != null ? inflow.gross : inflow.amount);
     const events = all.filter((e) => {
       if (removed || e.amount <= 0) return true;
       const src = e.srcDate || e.date;
@@ -1212,7 +1212,7 @@
         covered.push({ label: p.label, date: p.date, amount: take, isNewDeal: !!p.isNewDeal });
       });
       return {
-        obligation: { label: o.label, date: o.date, amount: R4(-o.amount), tipe: o.tipe, overdue: !!o.overdue },
+        obligation: { label: o.label, date: o.srcDate || o.date, effDate: o.date, amount: R4(-o.amount), tipe: o.tipe, overdue: !!o.overdue },
         covered, shortfall: R4(Math.max(0, need)),
       };
     });
