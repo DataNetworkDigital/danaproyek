@@ -1582,8 +1582,12 @@ function m6Recommendations(){
 function tFpc(x){ return (x==null)?'—':(Math.round(x*10)/10)+'%'; }
 function tFx(x){ return (Math.round(x*100)/100)+'×'; }
 function rRencanaKas(st, cfg, today){
-  const f=Treasury.cashForecast(st,cfg,today);
-  const safe=Treasury.safeAttackBudget(st,cfg,today);
+  // Governing number = careful basis (inflow dipotong + telat), per the owner's rule
+  // that every promise is judged conservatively.
+  const f=Treasury.cashForecast(st,cfg,today,{scenario:'conservative'});
+  // The optimistic figure comes from the SAME function so the two are comparable
+  // like for like; it is upside only and never justifies a commitment.
+  const opt=Treasury.cashForecast(st,cfg,today,{scenario:'base'});
   let h=`<div class="rep-sec" style="color:var(--p-deep)">🗓️ Rencana Kas — putar atau tahan</div>`;
   // A zero hold can mean two opposite things: everything is covered, or there is
   // simply no cash left to hold. Say which, and never print "aman" over a book
@@ -1599,7 +1603,7 @@ function rRencanaKas(st, cfg, today){
     <div style="font-size:10.5px;font-weight:800;color:var(--sub)">Kas bisa diputar (Utama + Gde + Investor blm dialokasikan): <b style="color:var(--txt)">${fj(f.available)}</b></div>
     <div style="font-size:16px;font-weight:900;color:${kurang>0.005?'var(--r)':'#0B8F46'};margin-top:3px">Bebas diputar hari ini: ${fj(f.freeToDeploy)}</div>
     <div style="font-size:11.5px;font-weight:800;color:${warn?'#B45309':'var(--sub)'};margin-top:2px">${holdLine}</div>
-    <div style="font-size:9.5px;color:var(--sub);font-weight:700;margin-top:5px;padding-top:5px;border-top:1px solid var(--bdr)">Angka di atas = <b>potensi</b>: semua inflow dianggap mendarat penuh & tepat waktu, dihitung sampai kewajiban terakhir.<br>Versi <b>hati-hati</b> (inflow dipotong + telat, cuma 30 hari ke depan): <b>${fj(safe)}</b>. Dua angka ini beda dasar hitungan, jadi wajar kalau tidak sama.</div>
+    <div style="font-size:9.5px;color:var(--sub);font-weight:700;margin-top:5px;padding-top:5px;border-top:1px solid var(--bdr)">Angka di atas dihitung <b>hati-hati</b>: uang masuk dianggap bisa telat sekitar 7 hari dan tidak mendarat penuh. Ini yang dipakai buat semua janji.<br>Kalau semua mendarat penuh dan tepat waktu, potensinya <b>${fj(opt.freeToDeploy)}</b>. Selisih <b>${fj(Math.max(0,opt.freeToDeploy-f.freeToDeploy))}</b> itu bantalan jaga-jaga.</div>
   </div>`;
   if(f.events.length){
     h+=`<div class="card-s" style="margin-bottom:12px;max-height:300px;overflow-y:auto">
@@ -2731,7 +2735,8 @@ function renderDecision(id, overrideMix){
   const V={GREEN:{c:'#0B8F46',bg:'#D1FAE5',t:'AMAN'},YELLOW:{c:'#B45309',bg:'#FEF3C7',t:'HATI-HATI'},RED:{c:'#DC2626',bg:'#FEE2E2',t:'TIDAK AMAN'}}[g.verdict];
   let b=`<div class="card-s" style="background:${V.bg};margin-bottom:12px;text-align:center;padding:14px">
     <div style="font-size:20px;font-weight:900;color:${V.c}">${V.t}</div>
-    <div style="font-size:11px;font-weight:700;color:var(--txt);margin-top:2px">${g.reason}</div></div>`;
+    <div style="font-size:11px;font-weight:700;color:var(--txt);margin-top:2px">${g.reason}</div>
+    ${(g.dependsOnRRPR>0.005)?`<div style="font-size:10.5px;font-weight:800;color:#B45309;background:#FEF3C7;border-radius:9px;padding:7px 9px;margin-top:8px;line-height:1.45">🏰 Bersandar pada RRPR <b>${fj(g.dependsOnRRPR)}</b>. Tanpa benteng, kewajiban investor tidak tertutup. Aman di atas kertas, tapi hanya kalau kamu rela benteng terpakai.</div>`:''}</div>`;
   b+=`<div class="rep-sec">Uang dari kantong <button class="btn ou" onclick="toggleMixEdit('${id}')" style="float:right;font-size:10px;padding:3px 9px;text-transform:none;letter-spacing:0">${_mixEdit?'Batal':'Ubah'}</button></div>
     <div class="card-s" style="margin-bottom:12px">`;
   if(_mixEdit){

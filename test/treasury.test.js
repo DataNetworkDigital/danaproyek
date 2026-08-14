@@ -1046,7 +1046,7 @@ test('CF3. an inflow before the outflow frees up cash', () => {
     projects: [{ name: 'Ayam', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-09-02', amount: 8, status: 'pending' }] }],
     investorContracts: [{ nama: 'Laili', schedule: [{ tanggal: '2026-10-02', tipe: 'pokok', jumlah: 10, status: 'pending' }] }],
   });
-  const f = T.cashForecast(st, CFG, TODAY);
+  const f = T.cashForecast(st, CFG, TODAY, { scenario: 'base' }); // mechanics, no haircut
   assert.strictEqual(f.minBalance, 2, '4 + 8 - 10');
   assert.strictEqual(f.freeToDeploy, 2);
   assert.strictEqual(f.hold, 2);
@@ -1082,7 +1082,7 @@ test('AI2. inflow fully reinvestable when a later inflow already covers the outf
     ],
     investorContracts: [{ nama: 'Laili', schedule: [{ tanggal: '2026-10-02', tipe: 'pokok', jumlah: 10, status: 'pending' }] }],
   });
-  const r = T.allocateInflow(st, CFG, TODAY, { amount: 2.75, date: '2026-09-02', label: 'Ayam · return' });
+  const r = T.allocateInflow(st, CFG, TODAY, { amount: 2.75, date: '2026-09-02', label: 'Ayam · return', scenario: 'base' });
   assert.strictEqual(r.hold, 0, 'Tani 11 on 20 Sep covers the Laili 10 on 2 Oct');
   assert.strictEqual(r.reinvest, 2.75);
   assert.strictEqual(r.forObligation, null);
@@ -1244,4 +1244,61 @@ test('PA3. once regular, Papa appears as a real obligation in the forecast', () 
   const evs = T.forecastEvents(st, CFG, TODAY);
   assert.strictEqual(evs.length, 2, 'now the bagi hasil AND the 50 jt pokok are on the calendar');
   assert.ok(evs.every((e) => /Papa/.test(e.label)), 'named');
+});
+
+// ── Phase B: one calendar, scenario-parameterised; conservative governs ─────
+function bState() {
+  return S({
+    ledger: [entry('2026-08-01', [dr('1010', 20), cr('3000', 20)])],
+    projects: [{ name: 'Ayam', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-09-10', amount: 20, status: 'pending' }] }],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-09-20', tipe: 'pokok', jumlah: 30, status: 'pending' }] }],
+  });
+}
+
+test('B1. cashForecast defaults to the conservative basis (promises are governed by it)', () => {
+  const st = bState();
+  const def = T.cashForecast(st, CFG, TODAY);
+  const cons = T.cashForecast(st, CFG, TODAY, { scenario: 'conservative' });
+  assert.strictEqual(def.freeToDeploy, cons.freeToDeploy, 'default == conservative');
+  assert.strictEqual(def.scenario, 'conservative');
+});
+
+test('B2. the optimistic basis is available and is never smaller than the careful one', () => {
+  const st = bState();
+  const base = T.cashForecast(st, CFG, TODAY, { scenario: 'base' });
+  const cons = T.cashForecast(st, CFG, TODAY, { scenario: 'conservative' });
+  assert.ok(base.freeToDeploy >= cons.freeToDeploy, `base ${base.freeToDeploy} >= conservative ${cons.freeToDeploy}`);
+  assert.ok(base.freeToDeploy > cons.freeToDeploy, 'a 30% haircut + 7d delay must actually bite here');
+});
+
+test('B3. allocateInflow is governed by the same conservative basis', () => {
+  const st = bState();
+  const a = T.allocateInflow(st, CFG, TODAY, { amount: 20, date: '2026-09-10', label: 'Ayam · return' });
+  const b = T.allocateInflow(st, CFG, TODAY, { amount: 20, date: '2026-09-10', label: 'Ayam · return', scenario: 'conservative' });
+  assert.strictEqual(a.hold, b.hold);
+});
+
+test('B4. the verdict reports how much of the proof leans on the RRPR fortress', () => {
+  // 40 pokok due, only 10 outside RRPR + 25 inside it => proof needs 25 of RRPR
+  const st = S({
+    ledger: [entry('2026-08-01', [dr('1010', 10), cr('3000', 10)]), entry('2026-08-01', [dr('1020', 25), cr('3010', 25)])],
+    providers: [{ id: 'p1', classification: 'investor_debt', subtype: 'regular' }],
+    contracts: [{ id: 'c1', providerId: 'p1', principal: 30, nama: 'Veda', schedule: [
+      { tanggal: '2026-09-20', jumlah: 30, tipe: 'pokok', status: 'pending' },
+    ] }],
+  });
+  const g = T.guaranteeGate(st, CFG, { ticket: 0, name: 'x', maturityDate: null }, [], TODAY);
+  assert.ok(g.dependsOnRRPR > 0, 'the proof cannot stand without the fortress');
+  assert.strictEqual(g.dependsOnRRPR, 20, '30 owed, 10 outside RRPR => 20 of RRPR needed');
+});
+
+test('B5. no RRPR dependence when the fortress is not needed', () => {
+  const st = S({
+    ledger: [entry('2026-08-01', [dr('1010', 50), cr('3000', 50)]), entry('2026-08-01', [dr('1020', 25), cr('3010', 25)])],
+    providers: [{ id: 'p1', classification: 'investor_debt', subtype: 'regular' }],
+    contracts: [{ id: 'c1', providerId: 'p1', principal: 30, nama: 'Veda', schedule: [
+      { tanggal: '2026-09-20', jumlah: 30, tipe: 'pokok', status: 'pending' },
+    ] }],
+  });
+  assert.strictEqual(T.guaranteeGate(st, CFG, { ticket: 0, name: 'x', maturityDate: null }, [], TODAY).dependsOnRRPR, 0);
 });

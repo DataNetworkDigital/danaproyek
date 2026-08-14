@@ -347,7 +347,10 @@
     }
 
     const drawn = (opts.mix || []).reduce((s, m) => s + R4(m.amount), 0);
-    const startCash = R4(totalLiquid(state) - drawn);
+    // opts.withoutRRPR re-runs the same proof with the fortress removed, so the caller
+    // can report how much of a GREEN verdict is actually leaning on RRPR.
+    const held = opts.withoutRRPR ? pocketBal(state, POCKET.RRPR) : 0;
+    const startCash = R4(totalLiquid(state) - drawn - Math.max(0, held));
 
     // minBuffer = timing cushion sized on the near-term outflow rate
     const near = obligations.filter((e) => daysBetween(today, e.date) <= 30)
@@ -377,6 +380,13 @@
   // but thin, bridged, or concentrated; GREEN = safe with buffer to spare.
   function guaranteeGate(state, cfg, deal, mix, today) {
     const ladder = paymentLadder(state, cfg, today, { deal: deal, mix: mix });
+    // The proof legitimately draws on the sinking fund and RRPR (that is what they
+    // are for), but the owner must be told when a GREEN light only stands because
+    // the fortress is counted. Re-run the same proof without it and measure.
+    const ladderNoRRPR = paymentLadder(state, cfg, today, { deal: deal, mix: mix, withoutRRPR: true });
+    const dependsOnRRPR = ladderNoRRPR.minGap < -0.005
+      ? R4(Math.min(pocketBal(state, POCKET.RRPR), -ladderNoRRPR.minGap))
+      : 0;
     const usesBridge = (mix || []).some((m) => m.bridge);
     const liquid = totalLiquid(state);
     const exposurePct = liquid > 0 ? R4(R4(deal.ticket) / liquid * 100) : 0;
@@ -387,14 +397,14 @@
     // A deal we cannot fully fund is never "just cautious" — there is no money for it.
     if (shortfall > 0.005) {
       return {
-        verdict: 'RED', ladder, exposurePct, usesBridge, shortfall,
+        verdict: 'RED', ladder, exposurePct, usesBridge, shortfall, dependsOnRRPR,
         firstBreach: ladder.firstBreach,
         reason: 'Dana tidak cukup: kurang ' + shortfall + ' jt dari kantong yang boleh dipakai.',
       };
     }
     if (ladder.firstBreach) {
       return {
-        verdict: 'RED', ladder, exposurePct, usesBridge, shortfall,
+        verdict: 'RED', ladder, exposurePct, usesBridge, shortfall, dependsOnRRPR,
         firstBreach: ladder.firstBreach,
         reason: 'Kewajiban ' + ladder.firstBreach.label + ' pada ' + ladder.firstBreach.date + ' tidak tertutup.',
       };
@@ -404,11 +414,11 @@
     if (usesBridge) reasons.push('memakai cadangan RRPR (harus dikembalikan)');
     if (overConcentrated) reasons.push('proyek ini ' + exposurePct + '% dari kas likuid');
     if (reasons.length) {
-      return { verdict: 'YELLOW', ladder, exposurePct, usesBridge, shortfall, firstBreach: null,
+      return { verdict: 'YELLOW', ladder, exposurePct, usesBridge, shortfall, dependsOnRRPR, firstBreach: null,
         reason: reasons.join('; ') + '.' };
     }
     const lastDate = ladder.rows.length ? ladder.rows[ladder.rows.length - 1].date : null;
-    return { verdict: 'GREEN', ladder, exposurePct, usesBridge, shortfall, firstBreach: null,
+    return { verdict: 'GREEN', ladder, exposurePct, usesBridge, shortfall, dependsOnRRPR, firstBreach: null,
       reason: lastDate ? 'Semua kewajiban investor tertutup sampai ' + lastDate + '.' : 'Tidak ada kewajiban investor terjadwal.' };
   }
 
@@ -1054,11 +1064,12 @@
   // investorContracts[].schedule {jumlah,tipe,tanggal,status}) so the numbers and
   // names match the Inbox and the Telegram reminder exactly. Flexible investors
   // (Papa/RRPR) are excluded — no fixed obligation. Overdue events clamp to today.
-  function forecastEvents(state, cfg, today) {
+  function forecastEvents(state, cfg, today, scenario) {
     const evs = [];
     // Inflows = expected project returns + principal, NET of Mas Hena's fee (that is
-    // the cash the fund actually banks). 'base' = full expected, no haircut/delay.
-    projectInflows(state, cfg, 'base', today).forEach((i) => {
+    // the cash the fund actually banks). 'conservative' (the governing basis) applies
+    // the quality haircut and the timing delay; 'base' is the untouched best case.
+    projectInflows(state, cfg, scenario || 'conservative', today).forEach((i) => {
       if (i.date < today) return; // don't bank money already due but not received
       evs.push({ date: i.date, amount: R4(i.amount), io: 'in', label: i.label });
     });
@@ -1088,8 +1099,11 @@
   function cashForecast(state, cfg, today, opts) {
     opts = opts || {};
     const floor = resolveNumber(cfg && cfg.operatingFloor, 0);
+    // Every promise (verdict, hold, coverage) is judged on the careful basis; 'base'
+    // exists only to show the owner the upside, never to justify a commitment.
+    const scenario = opts.scenario || 'conservative';
     const available = forecastAvailable(state);
-    const raw = forecastEvents(state, cfg, today);
+    const raw = forecastEvents(state, cfg, today, scenario);
     let bal = available, minBalance = available, minDate = today, binding = null;
     const events = raw.map((e) => {
       bal = R4(bal + e.amount);
@@ -1099,7 +1113,7 @@
     // Can't deploy more than is on hand today, nor more than the tightest point allows.
     const freeToDeploy = R4(Math.max(0, Math.min(available, minBalance - floor)));
     const hold = R4(Math.max(0, available - freeToDeploy));
-    return { available, floor, events, minBalance, minDate, binding, freeToDeploy, hold };
+    return { scenario, available, floor, events, minBalance, minDate, binding, freeToDeploy, hold };
   }
 
   // Per-inflow verdict: of THIS incoming amount, how much can be reinvested vs must
@@ -1109,7 +1123,7 @@
   function allocateInflow(state, cfg, today, inflow) {
     const floor = resolveNumber(cfg && cfg.operatingFloor, 0);
     const available = forecastAvailable(state);
-    const all = forecastEvents(state, cfg, today);
+    const all = forecastEvents(state, cfg, today, inflow.scenario || 'conservative');
     let removed = false;
     const events = all.filter((e) => {
       if (!removed && e.amount > 0 && e.date === inflow.date && Math.abs(e.amount - R4(inflow.amount)) < 0.005 && (!inflow.label || e.label === inflow.label)) { removed = true; return false; }
