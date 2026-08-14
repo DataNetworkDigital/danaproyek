@@ -2772,6 +2772,48 @@ function renderDecision(id, overrideMix){
       <span class="rv" style="color:${col}">${fj(r.obligation)}</span></div>`;
   });
   b+=`</div>`;
+  // ── Rencana bayar: which future money pays which named investor, and what this
+  // deal changes for the obligations that were already covered. Derived fresh from
+  // the same calendar as the verdict, so the two can never disagree.
+  if(Treasury.coveragePlan){
+    const planBefore=Treasury.coveragePlan(st,cfg,today,{});
+    const planAfter =Treasury.coveragePlan(st,cfg,today,{mix:picked, deal});
+    const delta=Treasury.coverageDelta(planBefore,planAfter);
+    const shown=planAfter.rows.slice(0,6);
+    b+=`<div class="rep-sec">Rencana bayar — uangnya dari mana</div><div class="card-s" style="margin-bottom:12px">`;
+    if(!shown.length) b+=`<div class="fc-note">Belum ada kewajiban investor terjadwal.</div>`;
+    shown.forEach(r=>{
+      const ok=r.shortfall<=0.005;
+      b+=`<div style="padding:6px 0;border-top:1px solid var(--bdr)">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
+          <span style="font-size:11.5px;font-weight:900">${ok?'✅':'❌'} ${esc(r.obligation.label)}</span>
+          <span class="t-num" style="font-size:11.5px;font-weight:900;color:${ok?'var(--txt)':'var(--r)'}">${fj(r.obligation.amount)}</span></div>
+        <div style="font-size:9.5px;color:var(--sub);font-weight:700">${fd(r.obligation.date)}</div>`;
+      r.covered.forEach(c=>{
+        b+=`<div style="font-size:10px;font-weight:700;color:${c.isNewDeal?'#7C3AED':'#0B8F46'};margin-top:2px">↳ ${fj(c.amount)} dari <b>${esc(c.label)}</b> (${fd(c.date)})${c.isNewDeal?' · proyek ini':''}</div>`;
+      });
+      if(!ok) b+=`<div style="font-size:10px;font-weight:800;color:var(--r);margin-top:2px">↳ kurang ${fj(r.shortfall)}, belum ada yang menutup</div>`;
+      b+=`</div>`;
+    });
+    if(planAfter.rows.length>shown.length){
+      // Never let a big uncovered maturity hide inside "+N lainnya".
+      const rest=planAfter.rows.slice(shown.length);
+      const restGaps=rest.filter(x=>x.shortfall>0.005);
+      const restKurang=Treasury.R4(restGaps.reduce((s,x)=>s+x.shortfall,0));
+      b+=`<div style="font-size:9.5px;color:var(--sub);font-weight:700;margin-top:6px">+${rest.length} kewajiban lain${restGaps.length?'':' · semua tertutup'}</div>`;
+      if(restGaps.length) b+=`<div style="font-size:10.5px;font-weight:800;color:var(--r);margin-top:3px">⚠️ ${restGaps.length} di antaranya belum tertutup (total kurang ${fj(restKurang)}), terdekat <b>${esc(restGaps[0].obligation.label)}</b> ${fd(restGaps[0].obligation.date)}</div>`;
+    }
+    b+=`</div>`;
+    if(delta.worse.length){
+      b+=`<div class="card-s" style="margin-bottom:12px;background:#FEF3C7;border-left:4px solid #B45309">
+        <div style="font-size:11px;font-weight:900;color:#B45309;text-transform:uppercase;letter-spacing:.4px">Efek ke kewajiban lain</div>
+        <div style="font-size:10.5px;font-weight:700;color:var(--txt);margin-top:3px">Kalau proyek ini diambil, yang tadinya aman jadi goyah:</div>`;
+      delta.worse.slice(0,4).forEach(w=>{
+        b+=`<div style="font-size:11px;font-weight:800;margin-top:4px">• ${esc(w.label)} (${fd(w.date)}) — kurang ${fj(w.shortfallAfter)}${w.shortfallBefore>0.005?` (tadinya kurang ${fj(w.shortfallBefore)})`:' (tadinya aman)'}</div>`;
+      });
+      b+=`</div>`;
+    }
+  }
   // Advisory, never a gate: Gde enters the deal he picked. When it is not safe,
   // state exactly how much money must arrive and by when.
   if(g.verdict!=='GREEN'){

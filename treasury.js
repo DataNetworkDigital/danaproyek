@@ -1141,6 +1141,82 @@
     return { reinvest, hold, forObligation: hold > 0.005 ? oblig : null, available, minAfter };
   }
 
+  // ── COVERAGE PLAN ─────────────────────────────────────────────────────────
+  // The question the owner actually asks when entering a deal: "which future money
+  // pays which investor?" Greedy cash-flow matching over the same calendar the
+  // verdict uses — earliest obligation first, paid from the earliest money that has
+  // already landed. Each rupiah of inflow is consumed at most once, so an inflow can
+  // never be shown as covering two different obligations.
+  //
+  // opts: { scenario, mix, deal }. `mix` is the pocket draw of a deal being
+  // considered (it removes cash on hand); `deal` adds that deal's own future return
+  // to the pool, so the sheet can show a deal paying for itself honestly.
+  function coveragePlan(state, cfg, today, opts) {
+    opts = opts || {};
+    const scenario = opts.scenario || 'conservative';
+    const evs = forecastEvents(state, cfg, today, scenario);
+
+    const drawn = (opts.mix || []).reduce((s, m) => s + R4(+m.amount || 0), 0);
+    const pool = [{ date: today, label: 'Kas sekarang', amount: R4(forecastAvailable(state) - drawn), remaining: R4(forecastAvailable(state) - drawn) }];
+    evs.filter((e) => e.io === 'in').forEach((e) => pool.push({ date: e.date, label: e.label, amount: R4(e.amount), remaining: R4(e.amount) }));
+
+    if (opts.deal && opts.deal.maturityDate) {
+      const d = opts.deal;
+      const hc = scenario === 'base' ? 1 : (cfg.inflowQuality[scenario] || cfg.inflowQuality.conservative)[d.inflowQuality || 'contracted'];
+      const shift = scenario === 'base' ? 0 : cfg.timingBufferDays;
+      pool.push({
+        date: addDays(d.maturityDate, shift),
+        label: (d.name || 'Proyek baru') + ' · pokok + laba',
+        amount: R4((R4(d.ticket) + R4(d.profit || 0)) * (hc == null ? 1 : hc)),
+        remaining: R4((R4(d.ticket) + R4(d.profit || 0)) * (hc == null ? 1 : hc)),
+        isNewDeal: true,
+      });
+    }
+    pool.sort((a, b) => (a.date < b.date ? -1 : (a.date > b.date ? 1 : 0)));
+
+    // Principal before profit-share on the same day: missing a pokok is fatal,
+    // missing a bagi hasil is recoverable.
+    const obligations = evs.filter((e) => e.io === 'out')
+      .sort((a, b) => (a.date < b.date ? -1 : (a.date > b.date ? 1 : (a.tipe === b.tipe ? 0 : (a.tipe === 'pokok' ? -1 : 1)))));
+
+    const rows = obligations.map((o) => {
+      let need = R4(-o.amount);
+      const covered = [];
+      pool.forEach((p) => {
+        if (need <= 0.0001 || p.remaining <= 0.0001) return;
+        if (!(p.date < o.date)) return; // cash-in-advance: landing ON the due date is too late
+        const take = R4(Math.min(p.remaining, need));
+        p.remaining = R4(p.remaining - take);
+        need = R4(need - take);
+        covered.push({ label: p.label, date: p.date, amount: take, isNewDeal: !!p.isNewDeal });
+      });
+      return {
+        obligation: { label: o.label, date: o.date, amount: R4(-o.amount), tipe: o.tipe, overdue: !!o.overdue },
+        covered, shortfall: R4(Math.max(0, need)),
+      };
+    });
+
+    const totalShortfall = R4(rows.reduce((s, r) => s + r.shortfall, 0));
+    const firstGap = rows.find((r) => r.shortfall > 0.005) || null;
+    return { scenario, rows, totalShortfall, firstGap, leftover: R4(pool.reduce((s, p) => s + p.remaining, 0)) };
+  }
+
+  // What changed for the OTHER obligations because of this deal. Keyed on
+  // label+date so a row is compared with itself across the two plans.
+  function coverageDelta(before, after) {
+    const key = (r) => r.obligation.label + '|' + r.obligation.date;
+    const prev = {};
+    (before.rows || []).forEach((r) => { prev[key(r)] = r.shortfall; });
+    const worse = [], better = [];
+    (after.rows || []).forEach((r) => {
+      const was = prev[key(r)];
+      if (was == null) return;
+      if (r.shortfall > was + 0.005) worse.push({ label: r.obligation.label, date: r.obligation.date, tipe: r.obligation.tipe, shortfallBefore: was, shortfallAfter: r.shortfall, delta: R4(r.shortfall - was) });
+      else if (r.shortfall < was - 0.005) better.push({ label: r.obligation.label, date: r.obligation.date, shortfallBefore: was, shortfallAfter: r.shortfall });
+    });
+    return { worse, better };
+  }
+
   // Move a flexible (perpetual, callable) investor onto the same fixed terms as
   // everyone else: a real tenor, a real maturity date, and a principal row on the
   // schedule. Until this runs the contract is invisible to the forecast (flexible
@@ -1317,7 +1393,7 @@
     // recommendations
     returnWaterfall, rrprBorrowed, fundingRecommendation, pickSourcesForDeal, guaranteeGate, maxSafeTicket, buildTieredSchedule, fundingNeed,
     // validation + metrics + migration
-    validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, healthChecks, migrate, mergeCloudOps, pickPaymentPocket, proposePocketFix, proposeLedgerRedate, sinkingShortfall, forecastEvents, cashForecast, allocateInflow, convertFlexibleToRegular, incomeBreakdown, deckMetrics, statements,
+    validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, healthChecks, migrate, mergeCloudOps, pickPaymentPocket, proposePocketFix, proposeLedgerRedate, sinkingShortfall, forecastEvents, cashForecast, allocateInflow, convertFlexibleToRegular, coveragePlan, coverageDelta, incomeBreakdown, deckMetrics, statements,
     // bot operations (shared posting rules)
     OPS, buildEntry, opBayarBagiHasil, opKembalikanPokok, opReturnProyek, opTransfer, opSetorModal, opReversal, applyOp,
   };

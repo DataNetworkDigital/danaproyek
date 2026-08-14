@@ -1302,3 +1302,96 @@ test('B5. no RRPR dependence when the fortress is not needed', () => {
   });
   assert.strictEqual(T.guaranteeGate(st, CFG, { ticket: 0, name: 'x', maturityDate: null }, [], TODAY).dependsOnRRPR, 0);
 });
+
+// ── Phase C: coverage plan — which money pays which named obligation ────────
+function cvState(over) {
+  return S(Object.assign({ ledger: [], projects: [], investorContracts: [] }, over));
+}
+const cash = (v) => entry(TODAY, [dr('1010', v), cr('3000', v)]);
+
+test('C1. an obligation is matched to the inflow that actually pays it, by name', () => {
+  const st = cvState({
+    projects: [{ name: 'Tani', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-09-10', amount: 20, status: 'pending' }] }],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-09-20', tipe: 'pokok', jumlah: 12, status: 'pending' }] }],
+  });
+  const plan = T.coveragePlan(st, CFG, TODAY, { scenario: 'base' });
+  assert.strictEqual(plan.rows.length, 1);
+  const r = plan.rows[0];
+  assert.ok(/Veda/.test(r.obligation.label));
+  assert.strictEqual(r.shortfall, 0);
+  assert.strictEqual(r.covered.length, 1);
+  assert.ok(/Tani/.test(r.covered[0].label), 'names the project that pays it');
+  assert.strictEqual(r.covered[0].amount, 12);
+});
+
+test('C2. one inflow cannot be spent twice', () => {
+  const st = cvState({
+    projects: [{ name: 'Tani', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-09-01', amount: 10, status: 'pending' }] }],
+    investorContracts: [{ nama: 'Veda', schedule: [
+      { tanggal: '2026-09-10', tipe: 'pokok', jumlah: 8, status: 'pending' },
+      { tanggal: '2026-09-20', tipe: 'pokok', jumlah: 8, status: 'pending' },
+    ] }],
+  });
+  const plan = T.coveragePlan(st, CFG, TODAY, { scenario: 'base' });
+  assert.strictEqual(plan.rows[0].shortfall, 0, 'first is fully covered');
+  assert.strictEqual(plan.rows[1].shortfall, 6, 'only 2 left of the 10, so 6 is uncovered');
+  assert.strictEqual(plan.totalShortfall, 6);
+});
+
+test('C3. same day, principal is protected before profit-share', () => {
+  const st = cvState({
+    ledger: [cash(5)],
+    investorContracts: [{ nama: 'Veda', schedule: [
+      { tanggal: '2026-09-10', tipe: 'bagihasil', jumlah: 4, status: 'pending' },
+      { tanggal: '2026-09-10', tipe: 'pokok', jumlah: 4, status: 'pending' },
+    ] }],
+  });
+  const plan = T.coveragePlan(st, CFG, TODAY, { scenario: 'base' });
+  assert.strictEqual(plan.rows[0].obligation.tipe, 'pokok', 'pokok is matched first');
+  assert.strictEqual(plan.rows[0].shortfall, 0);
+  assert.strictEqual(plan.rows[1].shortfall, 3, 'bagi hasil takes the leftover 1 of 4');
+});
+
+test('C4. money landing ON the due date is too late to pay it', () => {
+  const st = cvState({
+    projects: [{ name: 'Tani', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-09-20', amount: 20, status: 'pending' }] }],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-09-20', tipe: 'pokok', jumlah: 12, status: 'pending' }] }],
+  });
+  const plan = T.coveragePlan(st, CFG, TODAY, { scenario: 'base' });
+  assert.strictEqual(plan.rows[0].shortfall, 12, 'same-day arrival cannot be relied on');
+});
+
+test('C5. coverageDelta names the obligation a new deal knocks out', () => {
+  const st = cvState({
+    ledger: [cash(12)],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-09-20', tipe: 'pokok', jumlah: 12, status: 'pending' }] }],
+  });
+  const before = T.coveragePlan(st, CFG, TODAY, { scenario: 'base' });
+  assert.strictEqual(before.totalShortfall, 0, 'covered by cash on hand today');
+  const after = T.coveragePlan(st, CFG, TODAY, {
+    scenario: 'base',
+    mix: [{ code: '1010', amount: 12 }],                       // the deal spends the cash
+    deal: { name: 'Proyek Baru', ticket: 12, profit: 2, maturityDate: '2026-12-01', inflowQuality: 'contracted' },
+  });
+  assert.strictEqual(after.totalShortfall, 12, 'the pokok is now uncovered');
+  const d = T.coverageDelta(before, after);
+  assert.strictEqual(d.worse.length, 1);
+  assert.ok(/Veda/.test(d.worse[0].label));
+  assert.strictEqual(d.worse[0].shortfallAfter, 12);
+});
+
+test('C6. a deal whose return lands in time does NOT knock the obligation out', () => {
+  const st = cvState({
+    ledger: [cash(12)],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-12-20', tipe: 'pokok', jumlah: 12, status: 'pending' }] }],
+  });
+  const before = T.coveragePlan(st, CFG, TODAY, { scenario: 'base' });
+  const after = T.coveragePlan(st, CFG, TODAY, {
+    scenario: 'base',
+    mix: [{ code: '1010', amount: 12 }],
+    deal: { name: 'Proyek Baru', ticket: 12, profit: 2, maturityDate: '2026-11-01', inflowQuality: 'contracted' },
+  });
+  assert.strictEqual(after.totalShortfall, 0, 'the deal returns before the pokok is due');
+  assert.strictEqual(T.coverageDelta(before, after).worse.length, 0);
+  assert.ok(/Proyek Baru/.test(after.rows[0].covered[0].label), 'and it is the new deal that pays it');
+});
