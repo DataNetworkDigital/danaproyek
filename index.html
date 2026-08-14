@@ -500,6 +500,15 @@ function migrateSchema(){
     if(S.schemaVersion!==Treasury.SCHEMA_VERSION){
       try{ localStorage.setItem('dt_v3_pre_v4_'+Date.now(), localStorage.getItem('dt_v3')||JSON.stringify(S)); }catch(e){}
     }
+    // 5. Papa is no longer a flexible pihak-berelasi investor. Owner's decision:
+    //    same terms as everyone else — Rp 1 jt bagi hasil tiap tanggal 1 (12x, sudah
+    //    ada di jadwal: 1 Sep 2026 s/d 1 Agu 2027) dan pokok Rp 50 jt balik bareng
+    //    pembayaran terakhir, 1 Agu 2027. Must run BEFORE migrate() so the derived
+    //    capitalContracts mirror is rebuilt as a regular contract too.
+    try{
+      const n=Treasury.convertFlexibleToRegular(S,{match:/papa/i, tenorBulan:12, maturityDate:'2027-08-01'});
+      if(n) console.log('[papa] kontrak fleksibel diubah jadi reguler ('+n+' perubahan)');
+    }catch(e){ console.warn('[papa migrate]',e); }
     try{ Treasury.migrate(S); }catch(e){ console.warn('[migrate v4]',e); }
   }
 }
@@ -509,7 +518,7 @@ function migrateSchema(){
 function resolveNum(v,def){ return window.Treasury?Treasury.resolveNumber(v,def):(v===''||v==null||isNaN(parseFloat(v))?def:parseFloat(v)); }
 function engineProjects(){
   const names=(S.orgConfig&&S.orgConfig.activeProjectNames)||[];
-  return (S.projects||[]).filter(p=>names.includes(p.peminjam)).map(p=>{
+  return (S.projects||[]).filter(p=>names.includes(p.peminjam) && p.status!=='tersedia').map(p=>{
     const fee=resolveNum(p.adminFeePersen,0.5), kontrak=parseFloat(p.kontrak||0), deploy=parseFloat(p.jumlah||0);
     const q=p.inflowQuality||'contracted';
     if((p.returnType||'sekali')==='bulanan'){
@@ -525,7 +534,7 @@ function engineState(){
     accounts: allAccounts(), pockets: S.pockets||[], ledger: S.ledger||[],
     contracts: S.capitalContracts||[], providers: S.capitalProviders||[],
     allocations: S.capitalAllocations||[], projects: engineProjects(),
-    investorContracts: S.investorContracts||[],
+    investorContracts: S.investorContracts||[], bridges: S.bridges||[],
     orgConfig: S.orgConfig||{}, today: todayISO(),
   };
 }
@@ -1477,7 +1486,7 @@ function m6Inflows(scenario){
   const shift = scenario==='stress' ? 21 : (scenario==='conservative' ? 7 : 0);
   const hair  = scenario==='stress' ? 0.85 : 1; // stress: haircut return proyek 15%
   const out=[];
-  (S.projects||[]).filter(p=>names.includes(p.peminjam)).forEach(p=>{
+  (S.projects||[]).filter(p=>names.includes(p.peminjam) && p.status!=='tersedia').forEach(p=>{
     const fee=resolveNum(p.adminFeePersen,0.5), kontrak=parseFloat(p.kontrak||0), deploy=parseFloat(p.jumlah||0);
     (p.schedule||[]).filter(s=>s.status!=='paid'&&s.status!=='skipped').forEach(s=>{
       const net=Math.round((parseFloat(s.amount||0)-kontrak*fee/100)*hair*1e4)/1e4;
@@ -1576,14 +1585,21 @@ function rRencanaKas(st, cfg, today){
   const f=Treasury.cashForecast(st,cfg,today);
   const safe=Treasury.safeAttackBudget(st,cfg,today);
   let h=`<div class="rep-sec" style="color:var(--p-deep)">🗓️ Rencana Kas — putar atau tahan</div>`;
+  // A zero hold can mean two opposite things: everything is covered, or there is
+  // simply no cash left to hold. Say which, and never print "aman" over a book
+  // whose forward balance goes negative.
+  const kurang = Math.max(0, (f.floor||0) - f.minBalance);
   const holdLine = (f.hold>0.005 && f.binding)
     ? `Tahan <b>${fj(f.hold)}</b> buat <b>${esc(f.binding.label)}</b> (${fd(f.binding.date)}) — belum ada inflow yang menutup sebelum itu`
-    : `Tidak ada yang perlu ditahan — semua kewajiban terdekat tertutup inflow`;
-  h+=`<div class="card-s" style="margin-bottom:8px;border-left:4px solid #0B8F46">
+    : (kurang>0.005
+      ? `Kas sudah habis, tidak ada yang bisa ditahan — kas ke depan masih kurang <b>${fj(kurang)}</b> di ${fd(f.minDate)}${f.binding?` (${esc(f.binding.label)})`:''}`
+      : `Tidak ada yang perlu ditahan — semua kewajiban terdekat tertutup inflow`);
+  const warn = (f.hold>0.005 || kurang>0.005);
+  h+=`<div class="card-s" style="margin-bottom:8px;border-left:4px solid ${kurang>0.005?'#DC2626':'#0B8F46'}">
     <div style="font-size:10.5px;font-weight:800;color:var(--sub)">Kas bisa diputar (Utama + Gde + Investor blm dialokasikan): <b style="color:var(--txt)">${fj(f.available)}</b></div>
-    <div style="font-size:16px;font-weight:900;color:#0B8F46;margin-top:3px">Bebas diputar hari ini: ${fj(f.freeToDeploy)}</div>
-    <div style="font-size:11.5px;font-weight:800;color:${f.hold>0.005?'#B45309':'var(--sub)'};margin-top:2px">${holdLine}</div>
-    <div style="font-size:9.5px;color:var(--sub);font-weight:700;margin-top:5px;padding-top:5px;border-top:1px solid var(--bdr)">Versi hati-hati (haircut + timing 30 hari): <b>${fj(safe)}</b>. Angka besar di atas mengasumsikan semua inflow mendarat penuh & tepat waktu.</div>
+    <div style="font-size:16px;font-weight:900;color:${kurang>0.005?'var(--r)':'#0B8F46'};margin-top:3px">Bebas diputar hari ini: ${fj(f.freeToDeploy)}</div>
+    <div style="font-size:11.5px;font-weight:800;color:${warn?'#B45309':'var(--sub)'};margin-top:2px">${holdLine}</div>
+    <div style="font-size:9.5px;color:var(--sub);font-weight:700;margin-top:5px;padding-top:5px;border-top:1px solid var(--bdr)">Angka di atas = <b>potensi</b>: semua inflow dianggap mendarat penuh & tepat waktu, dihitung sampai kewajiban terakhir.<br>Versi <b>hati-hati</b> (inflow dipotong + telat, cuma 30 hari ke depan): <b>${fj(safe)}</b>. Dua angka ini beda dasar hitungan, jadi wajar kalau tidak sama.</div>
   </div>`;
   if(f.events.length){
     h+=`<div class="card-s" style="margin-bottom:12px;max-height:300px;overflow-y:auto">
@@ -1708,7 +1724,8 @@ function rTreasuryHub(){
   h+=`<div class="rep-sec" style="color:var(--p-deep)">🎯 Alat Rekomendasi</div>
     <div class="card-s" style="margin-bottom:8px">
       <div style="font-weight:900;font-size:12.5px;margin-bottom:6px">💧 Return proyek masuk → alokasikan</div>
-      <div style="display:flex;gap:6px"><input class="fi" id="t-ret-amt" type="number" step="0.01" placeholder="jumlah (jt)" style="flex:1"><button class="btn pr" onclick="tWaterfall()" style="padding:8px 14px;font-size:12px">Hitung</button></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap"><input class="fi" id="t-ret-amt" type="number" step="0.01" placeholder="jumlah (jt)" style="flex:1;min-width:110px"><input class="fi" id="t-ret-date" type="date" value="${todayISO()}" style="flex:1;min-width:130px"><button class="btn pr" onclick="tWaterfall()" style="padding:8px 14px;font-size:12px">Hitung</button></div>
+      <div style="font-size:9.5px;color:var(--sub);font-weight:700;margin-top:4px">Tanggal = kapan uangnya benar-benar masuk. Kalau ini return yang sudah terjadwal, pakai tanggal jadwalnya biar tidak dihitung dua kali.</div>
       <div id="t-ret-out" style="margin-top:8px"></div></div>
     <div class="card-s" style="margin-bottom:12px">
       <div style="font-weight:900;font-size:12.5px;margin-bottom:6px">🚀 Proyek baru → sumber dana + keamanan</div>
@@ -1781,7 +1798,11 @@ function tDrill(key){
 function tWaterfall(){
   const amt=parseFloat(document.getElementById('t-ret-amt').value||0);
   if(!(amt>0)){ document.getElementById('t-ret-out').innerHTML='<div class="fc-note" style="color:var(--r)">Isi jumlah dulu.</div>'; return; }
-  const w=Treasury.returnWaterfall(engineState(),engineCfg(),amt,todayISO());
+  const dEl=document.getElementById('t-ret-date');
+  const inflowDate=(dEl&&dEl.value)||todayISO();
+  // Judge the money on the date it actually lands; passing today for a future-dated
+  // scheduled return left that return in the timeline AND added the amount again.
+  const w=Treasury.returnWaterfall(engineState(),engineCfg(),amt,todayISO(),{date:inflowDate});
   let h=`<div class="card-s" style="background:var(--clay-card)">`;
   w.steps.forEach(s=>{ h+=`<div class="rep-r"><span class="rl" style="font-size:11px">${s.to}<div style="font-size:9.5px;color:var(--sub)">${s.why}</div></span><span class="rv" style="font-weight:800">${fj(s.amount)}</span></div>`; });
   // the actual decision: how much of the Gde portion can go back out to work
@@ -1838,7 +1859,7 @@ function mtrList(){
   (S.projects||[]).forEach(p=>(p.schedule||[]).forEach(s=>{ if(s.status==='paid'&&s.paidDate){ totPay++; if(s.paidDate<=s.dueDate) ot++; } }));
   const onTime=totPay>0?r4(ot/totPay*100):null;
   const names=(S.orgConfig&&S.orgConfig.activeProjectNames)||[];
-  const exps=(S.projects||[]).filter(p=>names.includes(p.peminjam)).map(p=>({n:p.peminjam,v:parseFloat(p.jumlah||0)})).sort((a,b)=>b.v-a.v);
+  const exps=(S.projects||[]).filter(p=>names.includes(p.peminjam) && p.status!=='tersedia').map(p=>({n:p.peminjam,v:parseFloat(p.jumlah||0)})).sort((a,b)=>b.v-a.v);
   const totExp=exps.reduce((s,e)=>s+e.v,0), conc=totExp>0?r4(exps[0].v/totExp*100):0;
   const idle=pocketBalance('1030'), idleCost=r4(idle*0.02);
   const M=[];
@@ -1981,7 +2002,7 @@ function pendingEvents(){
     });
   });
   const names=(S.orgConfig&&S.orgConfig.activeProjectNames)||[];
-  (S.projects||[]).filter(p=>names.includes(p.peminjam)).forEach(p=>{
+  (S.projects||[]).filter(p=>names.includes(p.peminjam) && p.status!=='tersedia').forEach(p=>{
     const fee=resolveNum(p.adminFeePersen,0.5), kontrak=parseFloat(p.kontrak||0), deploy=parseFloat(p.jumlah||0);
     (p.schedule||[]).forEach((s,i)=>{
       if(s.status==='paid'||s.status==='skipped') return; const dd=du(s.dueDate); if(dd===null||dd>look) return;
@@ -2795,7 +2816,7 @@ function confirmMasuk(id){
   let addedName=null;
   if(p.peminjam && !names.includes(p.peminjam)){ names.push(p.peminjam); S.orgConfig.activeProjectNames=names; addedName=p.peminjam; }
   const bridge=mix.find(m=>m.bridge);
-  if(bridge){ S.bridges=S.bridges||[]; S.bridges.push({amount:bridge.amount, restoreBy:bridge.restoreBy, dealId:p.id}); }
+  if(bridge){ S.bridges=S.bridges||[]; S.bridges.push({id:'brg:'+uid(), from:'1020', amount:bridge.amount, restoreBy:bridge.restoreBy, dealId:p.id, settled:false}); }
   S.decisionLog=S.decisionLog||[];
   const logTs=new Date().toISOString();
   S.decisionLog.push({ts:logTs, dealId:p.id, verdict:_pendingDeal.verdict,
@@ -3984,6 +4005,12 @@ function undoActivation(pid){
   // Reset project
   delete p.tanggalAktif;
   p.status='tersedia';
+  // Take the name back out of the engine's active registry, the way undoEnterDeal
+  // does. Leaving it in kept the cancelled project's returns on the cash calendar.
+  if(p.peminjam && S.orgConfig && Array.isArray(S.orgConfig.activeProjectNames)
+     && !S.projects.some(x=>x.id!==pid && x.peminjam===p.peminjam && x.status!=='tersedia')){
+    S.orgConfig.activeProjectNames=S.orgConfig.activeProjectNames.filter(n=>n!==p.peminjam);
+  }
   if(p.schedule){
     p.schedule.forEach(s=>{
       if(s.status!=='paid') s.status='pending';

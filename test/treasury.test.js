@@ -1157,3 +1157,91 @@ test('RR1. requiredRRPR is invariant to the RRPR balance it is sizing', () => {
   assert.strictEqual(b, c, 'and must not collapse to zero once it looks full');
   assert.ok(a > 0, 'a real 60 jt maturity demands a real reserve');
 });
+
+// ── A7: obligation rows must carry the real investor name ───────────────────
+test('NM1. migrated contracts expose nama, so obligations are not all "Investor"', () => {
+  const st = T.migrate({
+    investorContracts: [{ id: 'x1', nama: 'Veda (hong kong)', pokok: 10, ratePct: 2, tanggalMulai: '2026-06-05', status: 'aktif',
+      schedule: [{ tanggal: '2026-09-05', tipe: 'bagihasil', jumlah: 0.2, status: 'pending' }] }],
+    projects: [], ledger: [], orgConfig: {},
+  });
+  // the app maps capitalContracts -> state.contracts in engineState()
+  st.contracts = st.capitalContracts; st.providers = st.capitalProviders;
+  const obl = T.investorObligations(st, TODAY);
+  assert.strictEqual(obl.length, 1);
+  assert.ok(/Veda/.test(obl[0].label), `expected the real name, got "${obl[0].label}"`);
+});
+
+// ── A4: returnWaterfall must judge the inflow on ITS OWN date ───────────────
+test('RW4. returnWaterfall agrees with allocateInflow for a future-dated return', () => {
+  const st = S({
+    ledger: [],
+    projects: [{ name: 'Wartini', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-08-30', amount: 89.775, status: 'pending' }] }],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-12-03', tipe: 'pokok', jumlah: 66.15, status: 'pending' }] }],
+  });
+  const inflow = { amount: 89.775, date: '2026-08-30', label: 'Wartini · return' };
+  const a = T.allocateInflow(st, CFG, TODAY, inflow);
+  const w = T.returnWaterfall(st, CFG, 89.775, TODAY, inflow);
+  assert.strictEqual(w.hold, a.hold, 'same money, same hold');
+  assert.strictEqual(w.reinvest, a.reinvest, 'same money, same reinvest');
+});
+
+// ── A5: RRPR bridges must reach the engine in the shape the app writes ──────
+test('BR1. an open RRPR bridge written by deal entry is seen as borrowed', () => {
+  const st = S({ bridges: [{ id: 'b1', from: '1020', amount: 5, dealId: 'p1', restoreBy: '2026-10-01', settled: false }] });
+  assert.strictEqual(T.rrprBorrowed(st), 5);
+});
+test('BR2. a legacy bridge row without `from` still counts (written pre-fix)', () => {
+  const st = S({ bridges: [{ amount: 4, restoreBy: '2026-10-01', dealId: 'p1' }] });
+  assert.strictEqual(T.rrprBorrowed(st), 4, 'deal entry only ever bridges from RRPR');
+});
+test('BR3. a settled bridge does not count', () => {
+  const st = S({ bridges: [{ id: 'b1', from: '1020', amount: 5, settled: true }] });
+  assert.strictEqual(T.rrprBorrowed(st), 0);
+});
+
+// ── A8: Papa moves off flexible terms onto a normal fixed contract ──────────
+test('PA1. a flexible contract converts to regular with a real maturity + pokok row', () => {
+  const st = {
+    investorContracts: [{ id: 'p', nama: 'Papa (RRPR)', label: 'RRPR', pokok: 50, ratePct: 2, flexible: true,
+      tenorBulan: 0, tanggalMaturity: null, noticeDays: 30, tanggalMulai: '2026-06-01', status: 'aktif',
+      schedule: [
+        { tanggal: '2026-09-01', tipe: 'bagihasil', jumlah: 1, status: 'pending' },
+        { tanggal: '2027-08-01', tipe: 'bagihasil', jumlah: 1, status: 'pending' },
+      ] }],
+  };
+  const n = T.convertFlexibleToRegular(st, { match: /papa/i, tenorBulan: 12, maturityDate: '2027-08-01' });
+  assert.ok(n > 0, 'first run changes something');
+  const c = st.investorContracts[0];
+  assert.strictEqual(c.flexible, false);
+  assert.strictEqual(c.tenorBulan, 12);
+  assert.strictEqual(c.tanggalMaturity, '2027-08-01');
+  const pokok = c.schedule.filter((s) => s.tipe === 'pokok');
+  assert.strictEqual(pokok.length, 1, 'exactly one principal row');
+  assert.strictEqual(pokok[0].jumlah, 50);
+  assert.strictEqual(pokok[0].tanggal, '2027-08-01');
+});
+
+test('PA2. converting twice is a no-op (idempotent, merge-safe)', () => {
+  const st = {
+    investorContracts: [{ id: 'p', nama: 'Papa (RRPR)', pokok: 50, flexible: true, schedule: [] }],
+  };
+  T.convertFlexibleToRegular(st, { match: /papa/i, tenorBulan: 12, maturityDate: '2027-08-01' });
+  const n2 = T.convertFlexibleToRegular(st, { match: /papa/i, tenorBulan: 12, maturityDate: '2027-08-01' });
+  assert.strictEqual(n2, 0, 'second run changes nothing');
+  assert.strictEqual(st.investorContracts[0].schedule.filter((s) => s.tipe === 'pokok').length, 1, 'no duplicate pokok row');
+});
+
+test('PA3. once regular, Papa appears as a real obligation in the forecast', () => {
+  const st = S({
+    ledger: [],
+    investorContracts: [{ id: 'p', nama: 'Papa (RRPR)', pokok: 50, flexible: true, schedule: [
+      { tanggal: '2026-09-01', tipe: 'bagihasil', jumlah: 1, status: 'pending' },
+    ] }],
+  });
+  assert.strictEqual(T.forecastEvents(st, CFG, TODAY).length, 0, 'flexible: invisible to the forecast');
+  T.convertFlexibleToRegular(st, { match: /papa/i, tenorBulan: 12, maturityDate: '2027-08-01' });
+  const evs = T.forecastEvents(st, CFG, TODAY);
+  assert.strictEqual(evs.length, 2, 'now the bagi hasil AND the 50 jt pokok are on the calendar');
+  assert.ok(evs.every((e) => /Papa/.test(e.label)), 'named');
+});

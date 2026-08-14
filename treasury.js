@@ -521,7 +521,11 @@
   function rrprBorrowed(state) {
     return R4((state.bridges || []).reduce((s, b) => {
       if (!b || b.settled || b.status === 'settled' || b.status === 'lunas') return s;
-      const fromRRPR = b.from === POCKET.RRPR || b.pocket === POCKET.RRPR || b.dari === POCKET.RRPR || b.source === 'RRPR' || b.sumber === 'RRPR';
+      // Deal entry only ever bridges FROM RRPR, and legacy rows were written without
+      // any source field at all ({amount, restoreBy, dealId}) — treat those as RRPR
+      // rather than silently reporting zero borrowed.
+      const named = b.from || b.pocket || b.dari || b.source || b.sumber;
+      const fromRRPR = !named || named === POCKET.RRPR || named === 'RRPR';
       return fromRRPR ? s + (+b.amount || +b.jumlah || 0) : s;
     }, 0));
   }
@@ -530,11 +534,16 @@
   // Order: repay any RRPR borrowing (0 when nothing was borrowed) → rest to Gde. The
   // forecast then splits the Gde portion into free-to-reinvest vs held-for-obligation.
   // RRPR is NEVER topped up to target from returns.
-  function returnWaterfall(state, cfg, amount, today) {
+  // `inflow` describes the money actually arriving: {date, label}. Judging it on
+  // today's date instead of its own left the scheduled event in the timeline AND
+  // added the amount on top, double-counting it (a 89,775 return read as 69,55
+  // free to reinvest when the honest answer was 0).
+  function returnWaterfall(state, cfg, amount, today, inflow) {
     amount = R4(amount);
+    inflow = inflow || {};
     const repayRRPR = R4(Math.min(amount, rrprBorrowed(state)));
     const toGde = R4(amount - repayRRPR);
-    const alloc = allocateInflow(state, cfg, today, { amount: toGde, date: today, label: null });
+    const alloc = allocateInflow(state, cfg, today, { amount: toGde, date: inflow.date || today, label: inflow.label || null });
     return {
       total: amount,
       repayRRPR: repayRRPR,
@@ -1118,6 +1127,31 @@
     return { reinvest, hold, forObligation: hold > 0.005 ? oblig : null, available, minAfter };
   }
 
+  // Move a flexible (perpetual, callable) investor onto the same fixed terms as
+  // everyone else: a real tenor, a real maturity date, and a principal row on the
+  // schedule. Until this runs the contract is invisible to the forecast (flexible
+  // contracts are skipped) while the deal gate models a hypothetical partial call,
+  // so the same money is counted two different ways on two screens.
+  // Mutates state like migrate() does. Idempotent: safe to run on every load.
+  function convertFlexibleToRegular(state, opts) {
+    opts = opts || {};
+    const re = opts.match;
+    let changed = 0;
+    (state.investorContracts || []).forEach((c) => {
+      if (!re || !re.test(c.nama || c.label || '')) return;
+      if (c.flexible) { c.flexible = false; changed++; }
+      if (c.noticeDays != null) { c.noticeDays = null; changed++; }
+      if (opts.tenorBulan != null && c.tenorBulan !== opts.tenorBulan) { c.tenorBulan = opts.tenorBulan; changed++; }
+      if (opts.maturityDate && c.tanggalMaturity !== opts.maturityDate) { c.tanggalMaturity = opts.maturityDate; changed++; }
+      if (!Array.isArray(c.schedule)) { c.schedule = []; changed++; }
+      if (opts.maturityDate && !c.schedule.some((s) => s.tipe === 'pokok')) {
+        c.schedule.push({ tanggal: opts.maturityDate, tipe: 'pokok', jumlah: R4(+c.pokok || 0), status: 'pending' });
+        changed++;
+      }
+    });
+    return changed;
+  }
+
   // ── SAFE CONCURRENT WRITES (app ↔ Telegram bot) ───────────────────────────
   // The whole fund lives in ONE Firestore document, so a naive whole-state write
   // from the app would silently erase anything the bot posted while the page was
@@ -1217,7 +1251,11 @@
       C.push({
         id: 'ctr:' + c.id, providerId: provId, principal: R4(c.pokok), ratePct: c.ratePct != null ? c.ratePct : 2,
         startDate: c.tanggalMulai, maturityDate: c.tanggalMaturity || null, flexible, noticeDays: flexible ? (c.noticeDays || 30) : null,
-        withdrawalNotice: c.withdrawalNotice || null, schedule: c.schedule || [], status: c.status || 'aktif', legacyName: c.nama,
+        withdrawalNotice: c.withdrawalNotice || null, schedule: c.schedule || [], status: c.status || 'aktif',
+        // `nama` is what every reader (investorObligations, paymentLadder, the deal
+        // sheet) actually looks for. Writing only legacyName made every obligation
+        // row read "Investor", so a RED verdict could not be traced to a person.
+        nama: c.nama, legacyName: c.nama,
       });
     });
 
@@ -1265,7 +1303,7 @@
     // recommendations
     returnWaterfall, rrprBorrowed, fundingRecommendation, pickSourcesForDeal, guaranteeGate, maxSafeTicket, buildTieredSchedule, fundingNeed,
     // validation + metrics + migration
-    validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, healthChecks, migrate, mergeCloudOps, pickPaymentPocket, proposePocketFix, proposeLedgerRedate, sinkingShortfall, forecastEvents, cashForecast, allocateInflow, incomeBreakdown, deckMetrics, statements,
+    validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, healthChecks, migrate, mergeCloudOps, pickPaymentPocket, proposePocketFix, proposeLedgerRedate, sinkingShortfall, forecastEvents, cashForecast, allocateInflow, convertFlexibleToRegular, incomeBreakdown, deckMetrics, statements,
     // bot operations (shared posting rules)
     OPS, buildEntry, opBayarBagiHasil, opKembalikanPokok, opReturnProyek, opTransfer, opSetorModal, opReversal, applyOp,
   };
