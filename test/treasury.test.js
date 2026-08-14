@@ -1489,7 +1489,7 @@ test('R1. an overdue obligation CAN be paid from cash already in the bank', () =
   const plan = T.coveragePlan(st, CFG, TODAY, { scenario: 'base' });
   assert.strictEqual(plan.rows.length, 1);
   assert.strictEqual(plan.rows[0].shortfall, 0, 'the money is already sitting there');
-  assert.ok(/Kas sekarang/.test(plan.rows[0].covered[0].label));
+  assert.ok(/kantong/.test(plan.rows[0].covered[0].label), 'on-hand coverage names a pocket');
 });
 
 test('R2. the coverage pool is PAYMENT cash: sinking and RRPR may pay investors', () => {
@@ -1613,4 +1613,64 @@ test('SD1. every schedule row finds its coverage row by nama + tanggal', () => {
   // and a stacked pokok really does carry more than one source
   const pokok = idx['Veda · pokok|2026-12-03'];
   assert.ok(pokok.covered.length >= 1);
+});
+
+// ── Pocket-specific coverage: name the actual kantong, respect the rules ────
+const put = (code, v) => entry(TODAY, [dr(code, v), cr('3000', v)]);
+
+test('PK1. a bagi hasil is covered by named pockets and NEVER the sinking fund', () => {
+  const st = cvState({
+    ledger: [put('1000', 1), put('1010', 5), put('1040', 10)], // sinking has plenty
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-09-20', tipe: 'bagihasil', jumlah: 3, status: 'pending' }] }],
+  });
+  const r = T.coveragePlan(st, CFG, TODAY, { scenario: 'base' }).rows[0];
+  assert.strictEqual(r.shortfall, 0);
+  const labels = r.covered.map((c) => c.label);
+  assert.ok(labels.some((l) => /Utama/.test(l)) && labels.some((l) => /Gde/.test(l)), 'names Utama + Gde');
+  assert.ok(!labels.some((l) => /Jatuh Tempo/.test(l)), 'the pokok reserve is off-limits for bagi hasil');
+});
+
+test('PK2. a pokok draws the sinking fund first', () => {
+  const st = cvState({
+    ledger: [put('1010', 5), put('1040', 10)],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-09-20', tipe: 'pokok', jumlah: 12, status: 'pending' }] }],
+  });
+  const r = T.coveragePlan(st, CFG, TODAY, { scenario: 'base' }).rows[0];
+  assert.strictEqual(r.shortfall, 0);
+  assert.ok(/Jatuh Tempo/.test(r.covered[0].label), 'sinking used first');
+  assert.strictEqual(r.covered[0].amount, 10);
+  assert.ok(/Gde/.test(r.covered[1].label));
+  assert.strictEqual(r.covered[1].amount, 2);
+});
+
+test('PK3. RRPR is a flagged last resort', () => {
+  const st = cvState({
+    ledger: [put('1010', 3), put('1020', 25)],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-09-20', tipe: 'pokok', jumlah: 20, status: 'pending' }] }],
+  });
+  const r = T.coveragePlan(st, CFG, TODAY, { scenario: 'base' }).rows[0];
+  assert.strictEqual(r.shortfall, 0);
+  const rrpr = r.covered.find((c) => c.fortress);
+  assert.ok(rrpr && /RRPR/.test(rrpr.label), 'RRPR named + flagged');
+  assert.strictEqual(rrpr.amount, 17, '3 from Gde first, then 17 from the fortress');
+});
+
+test('PK4. on-hand pocket coverage conserves the total', () => {
+  const st = cvState({
+    ledger: [put('1000', 4), put('1010', 4)],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-09-20', tipe: 'pokok', jumlah: 6, status: 'pending' }] }],
+  });
+  const r = T.coveragePlan(st, CFG, TODAY, { scenario: 'base' }).rows[0];
+  const onHand = r.covered.filter((c) => c.date === TODAY).reduce((s, c) => s + c.amount, 0);
+  assert.strictEqual(T.R4(onHand), 6, 'takes exactly what it needs across pockets');
+});
+
+test('PK5. allocateInflow says which pocket to store a hold in', () => {
+  const st = cvState({
+    projects: [{ name: 'Ayam', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-09-02', amount: 5, status: 'pending' }] }],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-10-02', tipe: 'pokok', jumlah: 12, status: 'pending' }] }],
+  });
+  const r = T.allocateInflow(st, CFG, TODAY, { amount: 5, date: '2026-09-02', label: 'Ayam · return' });
+  assert.ok(r.hold > 0);
+  assert.strictEqual(r.holdPocket, '1040', 'held for a pokok → the sinking fund');
 });

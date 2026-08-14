@@ -3889,6 +3889,18 @@ function delProj(id){
 }
 
 // ── PROJECT DETAIL ────────────────────────────────────────────────────
+// Per-return verdict for the project schedule: reinvest vs hold, and which pocket
+// to keep the held money in. Same allocateInflow the Inbox uses.
+function allocRowHTML(amount, date, label, prefix){
+  if(!(amount>0) || !window.Treasury || !Treasury.allocateInflow) return '';
+  let a; try{ a=Treasury.allocateInflow(engineState(),engineCfg(),todayISO(),{amount, date, label}); }catch(e){ return ''; }
+  const pfx=prefix?`<b>${prefix} ${fj(amount)}:</b> `:'';
+  if(a.hold>0.005 && a.forObligation){
+    const pk=a.holdPocket?acct(a.holdPocket).name:'kantong aman';
+    return `<div style="margin-top:5px;font-size:10px;font-weight:800;color:#B45309;background:#FEF3C7;border-radius:8px;padding:6px 8px;line-height:1.45">💡 ${pfx}reinvest <b>${fj(a.reinvest)}</b>, tahan <b>${fj(a.hold)}</b> di <b>${esc(pk)}</b> — buat ${esc(a.forObligation.label)} (${fd(a.forObligation.date)})</div>`;
+  }
+  return `<div style="margin-top:5px;font-size:10px;font-weight:800;color:#0B8F46;background:#DCFCE7;border-radius:8px;padding:6px 8px;line-height:1.45">💡 ${pfx}boleh diputar semua (<b>${fj(a.reinvest)}</b>) — kewajiban terdekat sudah tertutup</div>`;
+}
 function oDet(id){
   const p=S.projects.find(x=>x.id===id); if(!p) return;
   const d=du(p.tanggalJT);
@@ -3969,12 +3981,23 @@ function oDet(id){
       const statusIcon=isPaid?'✅':isDue?'⏳':'🔒';
       const statusText=isPaid?`Dibayar ${fd(s.paidDate)}${s.catatan?' · '+s.catatan:''}`:isDue?'Belum dibayar':'Belum jatuh tempo';
       const statusColor=isPaid?'#0B8F46':isDue?'#B56B00':'var(--sub)';
+      // When this return lands, how much can be put back to work vs must be held —
+      // computed on the NET cash the fund banks, same engine as the Inbox.
+      let allocLine='';
+      if(!isPaid){
+        const fee=resolveNum(p.adminFeePersen,0.5), kontrak=kontrakP(p);
+        const net=Math.max(0, parseFloat(s.amount||0)-kontrak*fee/100);
+        allocLine=allocRowHTML(net, s.dueDate, (p.peminjam||'Proyek')+' · return', 'Return bersih');
+        if(s.isFinal && p.tanggalJT && !p.pokokRecorded)
+          allocLine+=allocRowHTML(parseFloat(p.jumlah||0), p.tanggalJT, (p.peminjam||'Proyek')+' · pokok balik', 'Pokok balik');
+      }
       h+=`<div id="srow-${p.id}-${s.month}" style="padding:10px 0;border-bottom:1px solid var(--bdr)">
         <div class="fb"><span style="font-weight:800;font-size:12px">Bulan ${s.month} — ${fd(s.dueDate)}</span><span style="font-weight:900;font-size:12px">${fj(s.amount)}${s.paidAmount&&s.paidAmount!==s.amount?' (aktual: '+fj(s.paidAmount)+')':''}${finalLbl}</span></div>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-top:4px">
           <span style="font-size:11px;font-weight:700;color:${statusColor}">${statusIcon} ${statusText}</span>
           ${isDue?`<button class="btn sm gr" onclick="confirmSchedulePay('${p.id}',${s.month})">✏️ Bayar</button>`:''}${isPaid?`<button class="btn sm gh" onclick="editSchedulePay('${p.id}',${s.month})" style="font-size:10px">✏️ Edit</button>`:''}
         </div>
+        ${allocLine}
       </div>`;
     });
   } else {

@@ -1151,7 +1151,10 @@
     const shortfall = R4(Math.max(0, floor - minAfter));
     const hold = R4(Math.min(R4(inflow.amount), shortfall));
     const reinvest = R4(R4(inflow.amount) - hold);
-    return { reinvest, hold, forObligation: hold > 0.005 ? oblig : null, available, minAfter };
+    // Where to physically keep the held money: a principal maturity earmarks the
+    // sinking fund (its purpose); anything else stays in Gde as operating cash.
+    const holdPocket = hold > 0.005 ? ((oblig && oblig.tipe === 'pokok') ? POCKET.SINKING : POCKET.GDE) : null;
+    return { reinvest, hold, forObligation: hold > 0.005 ? oblig : null, holdPocket, available, minAfter };
   }
 
   // ── COVERAGE PLAN ─────────────────────────────────────────────────────────
@@ -1169,12 +1172,24 @@
     const scenario = opts.scenario || 'conservative';
     const evs = forecastEvents(state, cfg, today, scenario);
 
-    const drawn = (opts.mix || []).reduce((s, m) => s + R4(+m.amount || 0), 0);
-    // Cash that can PAY an investor is not the same pool as cash that may be DEPLOYED
-    // into a new project: the sinking fund and RRPR exist to honour investors. Use
-    // total liquid here so this plan agrees with the payability proof (paymentLadder).
-    const onHand = R4(totalLiquid(state) - drawn);
-    const pool = [{ date: today, label: 'Kas sekarang', amount: onHand, remaining: onHand }];
+    // On-hand cash, split BY POCKET so coverage names where the money actually is.
+    // Priority mirrors the payment router: sinking (principal only) → Utama → Gde →
+    // idle investor → RRPR (the fortress, flagged, last). A bagi hasil may never draw
+    // the sinking fund. Summed across pockets this equals total liquid, so the plan
+    // still agrees with the payability proof (paymentLadder).
+    const drawByCode = {};
+    (opts.mix || []).forEach((m) => { drawByCode[m.code] = R4((drawByCode[m.code] || 0) + R4(+m.amount || 0)); });
+    const POCKET_SEED = [
+      { code: POCKET.SINKING,  label: 'kantong Investor Jatuh Tempo', sinking: true },
+      { code: POCKET.HUB,      label: 'kantong Utama' },
+      { code: POCKET.GDE,      label: 'kantong Gde' },
+      { code: POCKET.IDLE_INV, label: 'kantong Investor Belum Dialokasikan' },
+      { code: POCKET.RRPR,     label: 'kantong RRPR', fortress: true },
+    ];
+    const pool = POCKET_SEED.map((pk) => {
+      const bal = R4(Math.max(0, pocketBal(state, pk.code) - (drawByCode[pk.code] || 0)));
+      return { date: today, pocketCode: pk.code, label: pk.label, sinking: !!pk.sinking, fortress: !!pk.fortress, amount: bal, remaining: bal };
+    });
     evs.filter((e) => e.io === 'in').forEach((e) => pool.push({ date: e.date, label: e.label, amount: R4(e.amount), remaining: R4(e.amount) }));
 
     if (opts.deal && opts.deal.maturityDate) {
@@ -1201,6 +1216,7 @@
       const covered = [];
       pool.forEach((p) => {
         if (need <= 0.0001 || p.remaining <= 0.0001) return;
+        if (p.sinking && o.tipe !== 'pokok') return; // the sinking fund is for principal only
         // Cash in advance: money must land BEFORE the due date to pay it. Money
         // already in the bank (dated today) is the exception — it can settle an
         // obligation due today or already overdue.
@@ -1209,7 +1225,7 @@
         const take = R4(Math.min(p.remaining, need));
         p.remaining = R4(p.remaining - take);
         need = R4(need - take);
-        covered.push({ label: p.label, date: p.date, amount: take, isNewDeal: !!p.isNewDeal });
+        covered.push({ label: p.label, date: p.date, amount: take, isNewDeal: !!p.isNewDeal, pocketCode: p.pocketCode || null, fortress: !!p.fortress });
       });
       return {
         obligation: { label: o.label, date: o.srcDate || o.date, effDate: o.date, amount: R4(-o.amount), tipe: o.tipe, overdue: !!o.overdue },
