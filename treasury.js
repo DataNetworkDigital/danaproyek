@@ -48,6 +48,7 @@
     investorRatePct: 2,                                       // fixed monthly rate paid to investors
     fundingOrder: ['1030', '1010', '1020'],   // idle investor -> Gde -> RRPR (bridge only)
     operatingFloor: 0,                        // cash kept in Utama as transit float
+    cashCushionPctAUM: 1,                     // out-of-calendar buffer, % of AUM (never built from scheduled obligations)
     hardGuaranteeWindowDays: 60,              // window we pre-fund and net earmarks against
     timingBufferDays: 7,                      // inflows assumed this late; also sizes minBuffer
     singleBorrowerCapPct: 40,                 // warn when one deal exceeds this % of liquid cash
@@ -72,6 +73,7 @@
       investorRatePct: t.investorRatePct != null ? t.investorRatePct : (orgConfig && orgConfig.investorRateDefault) || DEFAULT_CONFIG.investorRatePct,
       fundingOrder: t.fundingOrder || DEFAULT_CONFIG.fundingOrder,
       operatingFloor: t.operatingFloor != null ? t.operatingFloor : DEFAULT_CONFIG.operatingFloor,
+      cashCushionPctAUM: t.cashCushionPctAUM != null ? t.cashCushionPctAUM : DEFAULT_CONFIG.cashCushionPctAUM,
       hardGuaranteeWindowDays: t.hardGuaranteeWindowDays != null ? t.hardGuaranteeWindowDays : DEFAULT_CONFIG.hardGuaranteeWindowDays,
       timingBufferDays: t.timingBufferDays != null ? t.timingBufferDays : DEFAULT_CONFIG.timingBufferDays,
       singleBorrowerCapPct: t.singleBorrowerCapPct != null ? t.singleBorrowerCapPct : DEFAULT_CONFIG.singleBorrowerCapPct,
@@ -1102,7 +1104,7 @@
   }
   function cashForecast(state, cfg, today, opts) {
     opts = opts || {};
-    const floor = resolveNumber(cfg && cfg.operatingFloor, 0);
+    const floor = ladderFloor(state, cfg);
     // Every promise (verdict, hold, coverage) is judged on the careful basis; 'base'
     // exists only to show the owner the upside, never to justify a commitment.
     const scenario = opts.scenario || 'conservative';
@@ -1125,7 +1127,7 @@
   // Excludes this inflow from the timeline, then measures the worst shortfall from
   // the inflow's date onward. inflow = { amount, date, label? }.
   function allocateInflow(state, cfg, today, inflow) {
-    const floor = resolveNumber(cfg && cfg.operatingFloor, 0);
+    const floor = ladderFloor(state, cfg);
     const available = forecastAvailable(state);
     const all = forecastEvents(state, cfg, today, inflow.scenario || 'conservative');
     // The event we are deciding must leave the calendar, or its money is counted
@@ -1276,6 +1278,29 @@
     return { scenario, rows, inflows, freedom, totalShortfall, firstGap, leftover: R4(pool.reduce((s, p) => s + p.remaining, 0)) };
   }
 
+  // Cash kept back for what the calendar does NOT contain: a bank charge, a small
+  // emergency, a borrower who misses by more than the timing buffer allows.
+  //
+  // It is deliberately a slice of AUM and NEVER a sum of upcoming obligations. Every
+  // scheduled payment is already subtracted inside the forward ladder, so a floor
+  // built from those same payments would subtract them twice: with cash 100 against a
+  // 60 obligation the ladder correctly frees 40, but a 60 floor would free 0 and the
+  // fund would refuse perfectly safe deals. Worse, such a floor balloons as a big
+  // maturity enters its window, so the block would arrive exactly when the numbers
+  // look busiest and are hardest to sanity-check by hand.
+  function cashCushion(state, cfg) {
+    const pct = resolveNumber(cfg && cfg.cashCushionPctAUM, 0);
+    if (!(pct > 0)) return 0;
+    const aum = R4(totalLiquid(state) + balanceOf(state.ledger, state.accounts, '1100', {}));
+    return R4(Math.max(0, aum) * pct / 100);
+  }
+
+  // The whole floor the ladder must stay above: the Utama transit float plus the
+  // out-of-calendar cushion.
+  function ladderFloor(state, cfg) {
+    return R4(resolveNumber(cfg && cfg.operatingFloor, 0) + cashCushion(state, cfg));
+  }
+
   // How much of each future inflow may be redeployed, and how much must stay parked.
   //
   // The rule is the forward ladder, NOT a calendar window. Redeploying X out of an
@@ -1301,7 +1326,7 @@
   function inflowFreedom(state, cfg, today, opts) {
     opts = opts || {};
     const scenario = opts.scenario || 'conservative';
-    const floor = resolveNumber(cfg && cfg.operatingFloor, 0);
+    const floor = ladderFloor(state, cfg);
     const evs = forecastEvents(state, cfg, today, scenario);
 
     // Running balance, then the minimum from each point forward.
@@ -1360,7 +1385,7 @@
   // so what may be redeployed is whatever still clears the floor.
   function inflowIfPaidToday(state, cfg, today, amount, opts) {
     opts = opts || {};
-    const floor = resolveNumber(cfg && cfg.operatingFloor, 0);
+    const floor = ladderFloor(state, cfg);
     const fc = cashForecast(state, cfg, today, { scenario: opts.scenario || 'conservative' });
     const amt = R4(+amount || 0);
     const free = R4(Math.max(0, Math.min(amt, R4(fc.minBalance + amt - floor))));
@@ -1642,7 +1667,7 @@
     // recommendations
     returnWaterfall, rrprBorrowed, fundingRecommendation, pickSourcesForDeal, guaranteeGate, maxSafeTicket, buildTieredSchedule, fundingNeed,
     // validation + metrics + migration
-    validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, healthChecks, migrate, mergeCloudOps, pickPaymentPocket, proposePocketFix, proposeLedgerRedate, sinkingShortfall, forecastEvents, cashForecast, allocateInflow, convertFlexibleToRegular, coveragePlan, coverageDelta, inflowPlan, inflowFreedom, inflowIfPaidToday, planSnapshot, planDrift, incomeBreakdown, deckMetrics, statements,
+    validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, healthChecks, migrate, mergeCloudOps, pickPaymentPocket, proposePocketFix, proposeLedgerRedate, sinkingShortfall, forecastEvents, cashForecast, allocateInflow, convertFlexibleToRegular, coveragePlan, coverageDelta, inflowPlan, inflowFreedom, inflowIfPaidToday, cashCushion, ladderFloor, planSnapshot, planDrift, incomeBreakdown, deckMetrics, statements,
     // bot operations (shared posting rules)
     OPS, buildEntry, opBayarBagiHasil, opKembalikanPokok, opReturnProyek, opTransfer, opSetorModal, opReversal, applyOp,
   };

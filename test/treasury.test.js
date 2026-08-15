@@ -33,7 +33,10 @@ const entry = (tanggal, lines, extra) => Object.assign({ id: tanggal + Math.rand
 function S(over) {
   return Object.assign({ accounts: ACCOUNTS, pockets: POCKETS, ledger: [], contracts: [], providers: [], projects: [], allocations: [], orgConfig: {}, today: TODAY }, over || {});
 }
-const CFG = T.cfgOf({});
+// Ladder mechanics are tested WITHOUT the out-of-calendar cushion, so the numbers
+// below isolate what they mean to test. The shipped default is 1% of AUM and is
+// covered separately by CU1-CU4.
+const CFG = T.cfgOf({ treasury: { cashCushionPctAUM: 0 } });
 
 // Opening position ledger (mirrors the real seed postings)
 function openingLedger() {
@@ -1897,4 +1900,51 @@ test('OD1. an overdue return still gets advice, judged as if banked today', () =
   assert.ok(Math.abs(v.hold + v.free - 2.75) < 0.005, 'reconciles');
   assert.strictEqual(v.hold, 1, 'cash 5 + 2.75 = 7.75 against a 6 pokok leaves 1 to park');
   assert.ok(/Veda/.test(v.bindingLabel || ''), 'names what forces the hold');
+});
+
+// ── cash cushion: for what the calendar does NOT contain ─────────────────
+test('CU1. the cushion is a slice of AUM, never a copy of scheduled obligations', () => {
+  const st = cvState({
+    ledger: [cash(100)],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-08-23', tipe: 'pokok', jumlah: 60, status: 'pending' }] }],
+  });
+  const cfg1 = T.cfgOf({ treasury: { cashCushionPctAUM: 1 } });
+  assert.strictEqual(T.cashCushion(st, cfg1), 1, '1% of AUM 100');
+  // and it must NOT scale with the 60 that is already in the ladder
+  const st2 = cvState({
+    ledger: [cash(100)],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-08-23', tipe: 'pokok', jumlah: 200, status: 'pending' }] }],
+  });
+  assert.strictEqual(T.cashCushion(st2, cfg1), 1, 'a bigger obligation does not raise the cushion');
+});
+
+test('CU2. the cushion reduces deployable cash by exactly itself, no double count', () => {
+  const st = cvState({
+    ledger: [cash(100)],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-08-23', tipe: 'pokok', jumlah: 60, status: 'pending' }] }],
+  });
+  const none = T.cashForecast(st, T.cfgOf({ treasury: { cashCushionPctAUM: 0 } }), TODAY, { scenario: 'base' });
+  const with1 = T.cashForecast(st, T.cfgOf({ treasury: { cashCushionPctAUM: 1 } }), TODAY, { scenario: 'base' });
+  assert.strictEqual(none.freeToDeploy, 40, 'the 60 obligation is already in the ladder');
+  assert.strictEqual(with1.freeToDeploy, 39, 'exactly 1 less, NOT 40 minus 60 again');
+});
+
+test('CU3. the cushion also protects the per-inflow reinvest advice', () => {
+  const st = cvState({
+    ledger: [cash(100)],
+    projects: [{ name: 'Ayam', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-09-14', amount: 10, status: 'pending' }] }],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-09-20', tipe: 'pokok', jumlah: 108, status: 'pending' }] }],
+  });
+  const none = T.inflowFreedom(st, T.cfgOf({ treasury: { cashCushionPctAUM: 0 } }), TODAY, { scenario: 'base' }).rows[0];
+  const with1 = T.inflowFreedom(st, T.cfgOf({ treasury: { cashCushionPctAUM: 1 } }), TODAY, { scenario: 'base' }).rows[0];
+  assert.strictEqual(none.hold, 8, '100 + 10 - 108 leaves 2 free');
+  assert.strictEqual(with1.hold, 9, 'the cushion parks one more');
+});
+
+test('CU4. the shipped default really does keep a cushion (nobody silently zeroed it)', () => {
+  assert.strictEqual(T.cfgOf({}).cashCushionPctAUM, 1, 'default 1% of AUM');
+  const st = cvState({ ledger: [cash(100)] });
+  assert.strictEqual(T.cashCushion(st, T.cfgOf({})), 1);
+  // and the advice never spends down to literally nothing
+  assert.ok(T.cashForecast(st, T.cfgOf({}), TODAY, { scenario: 'base' }).freeToDeploy < 100);
 });
