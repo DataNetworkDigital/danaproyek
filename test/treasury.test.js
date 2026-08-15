@@ -1674,3 +1674,37 @@ test('PK5. allocateInflow says which pocket to store a hold in', () => {
   assert.ok(r.hold > 0);
   assert.strictEqual(r.holdPocket, '1040', 'held for a pokok → the sinking fund');
 });
+
+// ── Overdue return must stay excluded even after the conservative +7d shift ──
+test('OV5. a return overdue by less than the timing shift is NOT resurrected', () => {
+  const today = '2026-08-15';
+  const st = S({
+    ledger: [entry('2026-08-01', [dr('1010', 5), cr('3000', 5)])],
+    projects: [{ name: 'Ayam', status: 'aktif', type: 'monthly',
+      monthlyReturns: [{ date: '2026-08-14', amount: 2.5, status: 'pending' }] }], // 1 day overdue
+  });
+  const cons = T.forecastEvents(st, CFG, today, 'conservative').filter((e) => e.io === 'in');
+  assert.strictEqual(cons.length, 0, 'a past-due unpaid return is not cash, even shifted +7d');
+});
+
+test('OV6. an overdue return cannot appear as a coverage source', () => {
+  const today = '2026-08-15';
+  const st = cvState({
+    projects: [{ name: 'Ayam', status: 'aktif', type: 'monthly',
+      monthlyReturns: [{ date: '2026-08-14', amount: 2.5, status: 'pending' }] }],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-12-03', tipe: 'pokok', jumlah: 2, status: 'pending' }] }],
+  });
+  const plan = T.coveragePlan(st, CFG, today, {});
+  const usesAyam = plan.rows.some((r) => r.covered.some((c) => /Ayam/.test(c.label)));
+  assert.ok(!usesAyam, 'the overdue return must not be counted toward the pokok');
+});
+
+test('OV7. a future return is still counted (shift not over-applied)', () => {
+  const today = '2026-08-15';
+  const st = S({
+    projects: [{ name: 'Ayam', status: 'aktif', type: 'monthly',
+      monthlyReturns: [{ date: '2026-09-14', amount: 2.5, status: 'pending' }] }],
+  });
+  const cons = T.forecastEvents(st, CFG, today, 'conservative').filter((e) => e.io === 'in');
+  assert.strictEqual(cons.length, 1, 'a genuinely future return still lands');
+});

@@ -191,14 +191,17 @@
       if ((p.type || 'onetime') === 'monthly') {
         (p.monthlyReturns || []).forEach((r) => {
           if (r.status === 'paid') return;
+          if (today && r.date < today) return; // scheduled in the past and still unpaid = not cash
           out.push({ date: addDays(r.date, shift), srcDate: r.date, gross: R4(+r.amount || 0), amount: R4((+r.amount || 0) * hc), kind: 'inflow', rank: 4, label: (p.name || 'Proyek') + ' · return', quality: p.inflowQuality || 'contracted' });
         });
-        if (p.principalDate && !p.principalPaid) out.push({ date: addDays(p.principalDate, shift), srcDate: p.principalDate, gross: R4(+p.deploy || 0), amount: R4((+p.deploy || 0) * hc), kind: 'inflow', rank: 4, label: (p.name || 'Proyek') + ' · pokok balik', quality: p.inflowQuality || 'contracted' });
+        if (p.principalDate && !p.principalPaid && !(today && p.principalDate < today)) out.push({ date: addDays(p.principalDate, shift), srcDate: p.principalDate, gross: R4(+p.deploy || 0), amount: R4((+p.deploy || 0) * hc), kind: 'inflow', rank: 4, label: (p.name || 'Proyek') + ' · pokok balik', quality: p.inflowQuality || 'contracted' });
       } else {
         if (p.principalPaid) return;
-        const date = addDays(p.principalDate || p.maturityDate, shift);
+        const schD = p.principalDate || p.maturityDate;
+        if (today && schD && schD < today) return; // overdue one-time repayment is not cash
+        const date = addDays(schD, shift);
         const gross = R4((+p.deploy || 0) + (+p.profit || 0)); // principal + profit, ONCE
-        out.push({ date, srcDate: p.principalDate || p.maturityDate, gross: R4(gross), amount: R4(gross * hc), kind: 'inflow', rank: 4, label: (p.name || 'Proyek') + ' · pokok + laba', quality: p.inflowQuality || 'contracted' });
+        out.push({ date, srcDate: schD, gross: R4(gross), amount: R4(gross * hc), kind: 'inflow', rank: 4, label: (p.name || 'Proyek') + ' · pokok + laba', quality: p.inflowQuality || 'contracted' });
       }
     });
     return out;
