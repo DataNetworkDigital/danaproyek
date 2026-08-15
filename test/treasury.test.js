@@ -1734,9 +1734,167 @@ test('IP2. genuine surplus is reinvestable AND absent from coverage (both agree)
     investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-10-02', tipe: 'pokok', jumlah: 12, status: 'pending' }] }],
   });
   const plan = T.coveragePlan(st, CFG, TODAY, { scenario: 'base' });
-  assert.ok(!plan.rows.some((r) => r.covered.some((c) => /Ayam/.test(c.label))), 'Ayam not needed → not a source');
+  // With 30 coming in against 12 owed there IS surplus, so the plan still has to name
+  // a source for Veda while each individual return stays releasable. The invariant is
+  // not "same number", it is: whatever we call free must really be droppable.
   const ipA = T.inflowPlan(plan, 'Ayam · return', '2026-09-10');
-  assert.strictEqual(ipA.reinvest, 10); assert.strictEqual(ipA.hold, 0);
-  const ipS = T.inflowPlan(plan, 'Sawah · return', '2026-09-01');
-  assert.strictEqual(ipS.hold, 12, 'Sawah covers the 12'); assert.strictEqual(ipS.reinvest, 8);
+  assert.strictEqual(ipA.hold, 0, 'individually free');
+  assert.strictEqual(ipA.reinvest, 10);
+  if (ipA.covers.length) assert.ok(ipA.safeWithout, 'earmarked on paper but flagged as releasable, so the UI can say why');
+  // Prove it: delete Ayam from the book entirely and Veda is still fully covered.
+  const without = cvState({
+    projects: [{ name: 'Sawah', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-09-01', amount: 20, status: 'pending' }] }],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-10-02', tipe: 'pokok', jumlah: 12, status: 'pending' }] }],
+  });
+  assert.strictEqual(T.coveragePlan(without, CFG, TODAY, { scenario: 'base' }).totalShortfall, 0,
+    'dropping the "free" inflow really does leave every obligation covered');
+});
+
+// ── inflowFreedom: how much of a future inflow may be redeployed ──────────
+// The rule: redeploying X from an inflow at date t lowers EVERY later balance by
+// X, so the most you may take is the smallest forward balance from t onward,
+// minus the operating floor. No calendar window: money that lands on the 9th and
+// covers an obligation on the 16th simply removes the shortfall, which leaves
+// everything earlier free.
+
+test('IF1. an early return is FREE when a later inflow already covers the obligation', () => {
+  const st = cvState({
+    projects: [
+      { name: 'Ayam', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-09-14', amount: 2.5, status: 'pending' }] },
+      { name: 'Tani', status: 'aktif', type: 'onetime', deploy: 200, principalDate: '2026-10-27' },
+    ],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-12-05', tipe: 'pokok', jumlah: 100, status: 'pending' }] }],
+  });
+  const f = T.inflowFreedom(st, CFG, TODAY, { scenario: 'base' });
+  const ayam = f.rows.find((r) => /Ayam/.test(r.label));
+  assert.ok(ayam, 'the Ayam return is in the freedom list');
+  assert.strictEqual(ayam.hold, 0, 'nothing needs holding: Tani lands first and covers Veda');
+  assert.strictEqual(ayam.free, 2.5, 'fully reinvestable');
+});
+
+test('IF2. hold appears only when the ladder truly breaks', () => {
+  const st = cvState({
+    projects: [{ name: 'Ayam', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-09-14', amount: 100, status: 'pending' }] }],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-09-20', tipe: 'pokok', jumlah: 100, status: 'pending' }] }],
+  });
+  const f = T.inflowFreedom(st, CFG, TODAY, { scenario: 'base' });
+  const ayam = f.rows.find((r) => /Ayam/.test(r.label));
+  assert.strictEqual(ayam.hold, 100, 'it is the only money that can pay Veda');
+  assert.strictEqual(ayam.free, 0);
+});
+
+test('IF3. partial hold = exactly the uncovered part, not the whole inflow', () => {
+  const st = cvState({
+    projects: [{ name: 'Ayam', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-09-14', amount: 100, status: 'pending' }] }],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-09-20', tipe: 'pokok', jumlah: 60, status: 'pending' }] }],
+  });
+  const f = T.inflowFreedom(st, CFG, TODAY, { scenario: 'base' });
+  const ayam = f.rows.find((r) => /Ayam/.test(r.label));
+  assert.strictEqual(ayam.hold, 60, 'hold the obligation, not the whole 100');
+  assert.strictEqual(ayam.free, 40);
+});
+
+test('IF4. the operating floor is respected on top of the obligations', () => {
+  const st = cvState({
+    projects: [{ name: 'Ayam', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-09-14', amount: 100, status: 'pending' }] }],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-09-20', tipe: 'pokok', jumlah: 60, status: 'pending' }] }],
+  });
+  const cfgFloor = T.cfgOf({ treasury: { operatingFloor: 10 } });
+  const f = T.inflowFreedom(st, cfgFloor, TODAY, { scenario: 'base' });
+  const ayam = f.rows.find((r) => /Ayam/.test(r.label));
+  assert.strictEqual(ayam.hold, 70, '60 obligation + 10 cushion');
+  assert.strictEqual(ayam.free, 30);
+});
+
+test('IF5. the hold names the obligation that binds it', () => {
+  const st = cvState({
+    projects: [{ name: 'Ayam', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-09-14', amount: 100, status: 'pending' }] }],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-09-20', tipe: 'pokok', jumlah: 60, status: 'pending' }] }],
+  });
+  const f = T.inflowFreedom(st, CFG, TODAY, { scenario: 'base' });
+  const ayam = f.rows.find((r) => /Ayam/.test(r.label));
+  assert.ok(/Veda/.test(ayam.bindingLabel || ''), 'says which obligation forces the hold');
+  assert.strictEqual(ayam.bindingDate, '2026-09-20');
+});
+
+test('IF6. the freed amount is denominated in REAL money, not the haircut figure', () => {
+  // Conservative haircuts and delays the inflow for SAFETY, but the owner banks the
+  // actual rupiah. The hold is computed carefully; the free part is what is really left.
+  const st = cvState({
+    projects: [{ name: 'Ayam', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-09-14', amount: 100, status: 'pending' }] }],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-12-20', tipe: 'pokok', jumlah: 60, status: 'pending' }] }],
+  });
+  const f = T.inflowFreedom(st, CFG, TODAY, { scenario: 'conservative' });
+  const ayam = f.rows.find((r) => /Ayam/.test(r.label));
+  assert.strictEqual(ayam.amount, 100, 'shows the actual amount that lands, not the haircut one');
+  assert.ok(Math.abs(ayam.hold + ayam.free - 100) < 0.005, 'hold + free always reconciles to the real inflow');
+});
+
+test('LF1. an obligation is covered by the NEAREST sufficient money before it, not the earliest', () => {
+  // Small return in September, big principal back in October, investor pokok in December.
+  // Earliest-first would nibble the September return; just-in-time uses October and
+  // leaves September free, which is what the reinvest advice also says.
+  const st = cvState({
+    projects: [
+      { name: 'Ayam', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-09-14', amount: 2.5, status: 'pending' }] },
+      { name: 'Tani', status: 'aktif', type: 'onetime', deploy: 200, principalDate: '2026-10-27' },
+    ],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-12-05', tipe: 'pokok', jumlah: 100, status: 'pending' }] }],
+  });
+  const plan = T.coveragePlan(st, CFG, TODAY, { scenario: 'base' });
+  const veda = plan.rows.find((r) => /Veda/.test(r.obligation.label));
+  assert.strictEqual(veda.shortfall, 0, 'still fully covered');
+  assert.ok(veda.covered.every((c) => !/Ayam/.test(c.label)), 'does NOT nibble the small September return');
+  assert.ok(veda.covered.some((c) => /Tani/.test(c.label)), 'paid by the October principal instead');
+  const ip = T.inflowPlan(plan, 'Ayam · return', '2026-09-14');
+  assert.strictEqual(ip.hold, 0, 'so the project schedule agrees it is free');
+});
+
+test('LF2. reaching back still happens when the near money is not enough', () => {
+  const st = cvState({
+    projects: [
+      { name: 'Ayam', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-09-14', amount: 40, status: 'pending' }] },
+      { name: 'Tani', status: 'aktif', type: 'onetime', deploy: 70, principalDate: '2026-10-27' },
+    ],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-12-05', tipe: 'pokok', jumlah: 100, status: 'pending' }] }],
+  });
+  const plan = T.coveragePlan(st, CFG, TODAY, { scenario: 'base' });
+  const veda = plan.rows.find((r) => /Veda/.test(r.obligation.label));
+  assert.strictEqual(veda.shortfall, 0, 'feasibility preserved: 70 + 30 of the 40');
+  assert.ok(veda.covered.some((c) => /Tani/.test(c.label)), 'takes the near money first');
+  assert.ok(veda.covered.some((c) => /Ayam/.test(c.label)), 'then reaches back for the rest');
+});
+
+test('LF3. an earlier obligation is never starved by a later one taking near money', () => {
+  // O1 due Sep 20 can only use the Sep 14 inflow; O2 due Dec 5 could use either.
+  // O2 must not swallow the Sep 14 money and leave O1 short.
+  const st = cvState({
+    projects: [
+      { name: 'Ayam', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-09-14', amount: 50, status: 'pending' }] },
+      { name: 'Tani', status: 'aktif', type: 'onetime', deploy: 50, principalDate: '2026-10-27' },
+    ],
+    investorContracts: [{ nama: 'Veda', schedule: [
+      { tanggal: '2026-09-20', tipe: 'pokok', jumlah: 50, status: 'pending' },
+      { tanggal: '2026-12-05', tipe: 'pokok', jumlah: 50, status: 'pending' },
+    ] }],
+  });
+  const plan = T.coveragePlan(st, CFG, TODAY, { scenario: 'base' });
+  assert.strictEqual(plan.totalShortfall, 0, 'both obligations still fully covered');
+});
+
+test('OD1. an overdue return still gets advice, judged as if banked today', () => {
+  const st = cvState({
+    ledger: [cash(5)],
+    projects: [{ name: 'Ayam', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-07-14', amount: 2.75, status: 'pending' }] }],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-09-20', tipe: 'pokok', jumlah: 6, status: 'pending' }] }],
+  });
+  // the overdue return is correctly absent from the forecast...
+  const f = T.inflowFreedom(st, CFG, TODAY, { scenario: 'base' });
+  assert.ok(!f.rows.some((r) => /Ayam/.test(r.label)), 'a late borrower is not counted as cash');
+  // ...but recording it today must still produce a verdict
+  const v = T.inflowIfPaidToday(st, CFG, TODAY, 2.75, { scenario: 'base' });
+  assert.strictEqual(v.amount, 2.75);
+  assert.ok(Math.abs(v.hold + v.free - 2.75) < 0.005, 'reconciles');
+  assert.strictEqual(v.hold, 1, 'cash 5 + 2.75 = 7.75 against a 6 pokok leaves 1 to park');
+  assert.ok(/Veda/.test(v.bindingLabel || ''), 'names what forces the hold');
 });

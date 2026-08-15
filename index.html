@@ -1902,11 +1902,14 @@ function tWaterfall(){
   // the actual decision: how much can go back out to work vs be parked, and where
   if(hold>0.005){
     const pk=ip?(ip.holdPocket?acct(ip.holdPocket).name:'kantong aman'):(w.forObligation&&w.forObligation.tipe==='pokok'?acct('1040').name:acct('1010').name);
-    const forO=ip?((ip.covers&&ip.covers[0])?` — buat <b>${esc(ip.covers[0].label)}</b> (${fd(ip.covers[0].date)})${ip.covers.length>1?` +${ip.covers.length-1} lagi`:''}`:'')
-                 :(w.forObligation?` — buat <b>${esc(w.forObligation.label)}</b> (${fd(w.forObligation.date)})`:'');
+    const b=ip?(ip.binding||(ip.covers&&ip.covers[0])):w.forObligation;
+    const forO=b?` — buat <b>${esc(b.label)}</b> (${fd(b.date)})`:'';
     h+=`<div style="font-size:10.5px;font-weight:800;margin-top:8px;color:#B45309;background:#FEF3C7;border-radius:9px;padding:8px 10px;line-height:1.45">💡 Putar <b>${fj(reinvest)}</b>, tahan <b>${fj(hold)}</b> di <b>${esc(pk)}</b>${forO}.</div>`;
   } else {
-    h+=`<div style="font-size:10.5px;font-weight:800;margin-top:8px;color:#0B8F46;background:#DCFCE7;border-radius:9px;padding:8px 10px;line-height:1.45">💡 Boleh diputar semua (<b>${fj(reinvest)}</b>) — tidak dipakai nutup kewajiban.</div>`;
+    const why=(ip&&ip.safeWithout&&ip.covers&&ip.covers[0])
+      ? ` — <b>${esc(ip.covers[0].label)}</b> (${fd(ip.covers[0].date)}) tetap aman tanpa uang ini`
+      : ' — tidak dipakai nutup kewajiban';
+    h+=`<div style="font-size:10.5px;font-weight:800;margin-top:8px;color:#0B8F46;background:#DCFCE7;border-radius:9px;padding:8px 10px;line-height:1.45">💡 Boleh diputar semua (<b>${fj(reinvest)}</b>)${why}.</div>`;
   }
   h+=`</div>`;
   document.getElementById('t-ret-out').innerHTML=h;
@@ -2227,10 +2230,14 @@ function rKeuInbox(){
       if(a&&a.found){
         if(a.hold>0.005){
           const pk=a.holdPocket?acct(a.holdPocket).name:'kantong aman';
-          const forO=(a.covers&&a.covers[0])?` buat <b>${esc(a.covers[0].label)}</b> (${fd(a.covers[0].date)})${a.covers.length>1?` +${a.covers.length-1} lagi`:''}`:'';
+          const b=a.binding||(a.covers&&a.covers[0]);
+          const forO=b?` buat <b>${esc(b.label)}</b> (${fd(b.date)})`:'';
           recLine+=`<div style="font-size:10px;font-weight:800;margin-top:5px;color:#B45309;background:#FEF3C7;border-radius:9px;padding:7px 9px;line-height:1.45">💡 Tahan <b>${fj(a.hold)}</b> di <b>${esc(pk)}</b>${forO}${a.reinvest>0.005?`, sisanya <b>${fj(a.reinvest)}</b> boleh diputar`:''}.</div>`;
         } else {
-          recLine+=`<div style="font-size:10px;font-weight:800;margin-top:5px;color:#0B8F46;background:#DCFCE7;border-radius:9px;padding:7px 9px;line-height:1.45">💡 Boleh diputar semua (<b>${fj(a.reinvest)}</b>) ke proyek baru — tidak dipakai nutup kewajiban.</div>`;
+          const why=(a.safeWithout&&a.covers&&a.covers[0])
+            ? ` — <b>${esc(a.covers[0].label)}</b> (${fd(a.covers[0].date)}) tetap aman tanpa uang ini`
+            : ' — tidak dipakai nutup kewajiban';
+          recLine+=`<div style="font-size:10px;font-weight:800;margin-top:5px;color:#0B8F46;background:#DCFCE7;border-radius:9px;padding:7px 9px;line-height:1.45">💡 Boleh diputar semua (<b>${fj(a.reinvest)}</b>) ke proyek baru${why}.</div>`;
         }
       }
     }
@@ -3919,17 +3926,37 @@ function delProj(id){
 // to keep the held money in. Same coverage plan the Inbox and investor view use.
 // Reinvest vs hold for one return row, read from the shared coverage plan (so it
 // agrees with the investor coverage). `plan` = Treasury.coveragePlan(...,{scenario:'base'}).
-function allocRowHTML(plan, label, srcDate, prefix){
+function allocRowHTML(plan, label, srcDate, prefix, opts){
   if(!plan || !window.Treasury || !Treasury.inflowPlan) return '';
-  const a=Treasury.inflowPlan(plan, label, srcDate);
-  if(!a.found) return '';
-  const pfx=prefix?`<b>${prefix} ${fj(a.amount)}:</b> `:'';
+  opts=opts||{};
+  let a=Treasury.inflowPlan(plan, label, srcDate);
+  let late=false;
+  // An overdue unpaid return is (correctly) missing from the forecast, but it is the
+  // row the owner is about to tap BAYAR on, so judge it as landing today instead of
+  // showing nothing at all.
+  if(!a.found){
+    if(!(opts.lateAmount>0) || !Treasury.inflowIfPaidToday) return '';
+    const v=Treasury.inflowIfPaidToday(engineState(),engineCfg(),todayISO(),opts.lateAmount,{scenario:'conservative'});
+    a={found:true, amount:v.amount, reinvest:v.free, hold:v.hold,
+       holdPocket:v.hold>0.005?'1010':null, covers:[], safeWithout:false,
+       binding:v.bindingLabel?{label:v.bindingLabel,date:v.bindingDate}:null};
+    late=true;
+  }
+  const pfx=prefix?`<b>${prefix} ${fj(a.amount)}${late?' (kalau dibayar hari ini)':''}:</b> `:'';
   if(a.hold>0.005){
     const pk=a.holdPocket?acct(a.holdPocket).name:'kantong aman';
-    const forO=(a.covers&&a.covers[0])?` — buat ${esc(a.covers[0].label)} (${fd(a.covers[0].date)})${a.covers.length>1?` +${a.covers.length-1} lagi`:''}`:'';
+    // Name the obligation that actually forces the hold, not merely the first thing
+    // the plan happened to earmark this money for.
+    const b=a.binding||(a.covers&&a.covers[0]);
+    const forO=b?` — buat ${esc(b.label)} (${fd(b.date)})`:'';
     return `<div style="margin-top:5px;font-size:10px;font-weight:800;color:#B45309;background:#FEF3C7;border-radius:8px;padding:6px 8px;line-height:1.45">💡 ${pfx}reinvest <b>${fj(a.reinvest)}</b>, tahan <b>${fj(a.hold)}</b> di <b>${esc(pk)}</b>${forO}</div>`;
   }
-  return `<div style="margin-top:5px;font-size:10px;font-weight:800;color:#0B8F46;background:#DCFCE7;border-radius:8px;padding:6px 8px;line-height:1.45">💡 ${pfx}boleh diputar semua (<b>${fj(a.reinvest)}</b>) — tidak dipakai nutup kewajiban</div>`;
+  // Free, but the plan still lists this money against an obligation. Say why it is
+  // safe to let go, otherwise this reads as a contradiction of the investor screen.
+  const why=(a.safeWithout&&a.covers&&a.covers[0])
+    ? ` — ${esc(a.covers[0].label)} (${fd(a.covers[0].date)}) tetap aman tanpa uang ini`
+    : ' — tidak dipakai nutup kewajiban';
+  return `<div style="margin-top:5px;font-size:10px;font-weight:800;color:#0B8F46;background:#DCFCE7;border-radius:8px;padding:6px 8px;line-height:1.45">💡 ${pfx}boleh diputar semua (<b>${fj(a.reinvest)}</b>)${why}</div>`;
 }
 function oDet(id){
   const p=S.projects.find(x=>x.id===id); if(!p) return;
@@ -4018,9 +4045,13 @@ function oDet(id){
       // computed on the NET cash the fund banks, same engine as the Inbox.
       let allocLine='';
       if(!isPaid){
-        allocLine=allocRowHTML(_covPlan, (p.peminjam||'Proyek')+' · return', s.dueDate, 'Return bersih');
+        // net of Mas Hena's fee: the cash the fund actually banks, and the only figure
+        // an overdue row can be judged on (it is absent from the forecast).
+        const _fee=resolveNum(p.adminFeePersen,0.5), _kontrak=kontrakP(p);
+        const _net=Math.max(0, parseFloat(s.amount||0)-_kontrak*_fee/100);
+        allocLine=allocRowHTML(_covPlan, (p.peminjam||'Proyek')+' · return', s.dueDate, 'Return bersih', {lateAmount:_net});
         if(s.isFinal && p.tanggalJT && !p.pokokRecorded)
-          allocLine+=allocRowHTML(_covPlan, (p.peminjam||'Proyek')+' · pokok balik', p.tanggalJT, 'Pokok balik');
+          allocLine+=allocRowHTML(_covPlan, (p.peminjam||'Proyek')+' · pokok balik', p.tanggalJT, 'Pokok balik', {lateAmount:parseFloat(p.jumlah||0)});
       }
       h+=`<div id="srow-${p.id}-${s.month}" style="padding:10px 0;border-bottom:1px solid var(--bdr)">
         <div class="fb"><span style="font-weight:800;font-size:12px">Bulan ${s.month} — ${fd(s.dueDate)}</span><span style="font-weight:900;font-size:12px">${fj(s.amount)}${s.paidAmount&&s.paidAmount!==s.amount?' (aktual: '+fj(s.paidAmount)+')':''}${finalLbl}</span></div>

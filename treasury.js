@@ -1214,10 +1214,25 @@
     const obligations = evs.filter((e) => e.io === 'out')
       .sort((a, b) => (a.date < b.date ? -1 : (a.date > b.date ? 1 : (a.tipe === b.tipe ? 0 : (a.tipe === 'pokok' ? -1 : 1)))));
 
+    // Just in time: an obligation reaches for the NEAREST money that still arrives in
+    // time, and only reaches further back when that is not enough. Paying December's
+    // pokok out of August's small returns would be an artefact of scanning earliest
+    // first, and it is what used to make the project schedule say "hold everything".
+    // Feasibility is unaffected: an earlier obligation can only draw on money that a
+    // later one could also draw on, so whichever units get taken, the total left for
+    // the later obligation is identical (see LF3).
+    // Cash already in the bank is tried LAST, so it stays visibly free the same way
+    // cashForecast reports it, and it is still the only thing eligible for anything
+    // due today or overdue.
+    const futureFirst = pool.filter((p) => !p.pocketCode)
+      .sort((a, b) => (a.date < b.date ? 1 : (a.date > b.date ? -1 : 0)));
+    const onHand = pool.filter((p) => p.pocketCode); // keeps the payment-router priority
+    const drawOrder = futureFirst.concat(onHand);
+
     const rows = obligations.map((o) => {
       let need = R4(-o.amount);
       const covered = [];
-      pool.forEach((p) => {
+      drawOrder.forEach((p) => {
         if (need <= 0.0001 || p.remaining <= 0.0001) return;
         if (p.sinking && o.tipe !== 'pokok') return; // the sinking fund is for principal only
         // Cash in advance: money must land BEFORE the due date to pay it. Money
@@ -1250,21 +1265,138 @@
 
     const totalShortfall = R4(rows.reduce((s, r) => s + r.shortfall, 0));
     const firstGap = rows.find((r) => r.shortfall > 0.005) || null;
-    return { scenario, rows, inflows, totalShortfall, firstGap, leftover: R4(pool.reduce((s, p) => s + p.remaining, 0)) };
+    // How much of each inflow must genuinely stay parked. Always taken on the careful
+    // basis even when the plan itself is displayed at face value, because the owner
+    // asked to SEE real rupiah but must never be advised to redeploy on a best case.
+    // Skipped for what-if plans (a deal being considered is not in the ledger yet).
+    let freedom = [];
+    if (!opts.deal && !opts.mix) {
+      try { freedom = inflowFreedom(state, cfg, today, { scenario: 'conservative' }).rows; } catch (err) { freedom = []; }
+    }
+    return { scenario, rows, inflows, freedom, totalShortfall, firstGap, leftover: R4(pool.reduce((s, p) => s + p.remaining, 0)) };
+  }
+
+  // How much of each future inflow may be redeployed, and how much must stay parked.
+  //
+  // The rule is the forward ladder, NOT a calendar window. Redeploying X out of an
+  // inflow that lands at date t lowers every balance from t onward by X, so the most
+  // that may leave is the SMALLEST forward balance from t on, minus the operating
+  // floor. Everything else is free. That is why money arriving on the 9th which
+  // covers an obligation on the 16th simply erases the shortfall, and every earlier
+  // return stays free instead of being pointlessly earmarked months in advance.
+  //
+  // Safety comes from the scenario, not from guesswork: on 'conservative' the ladder
+  // is built from inflows already shifted and haircut by quality, so the fund never
+  // leans fully on money that might slip. The AMOUNT shown is the real rupiah that
+  // lands (base), because that is what the owner actually banks; only the decision of
+  // how much to keep is taken on the careful basis. hold + free always reconciles to
+  // the real inflow.
+  //
+  // READ ONE ROW AT A TIME. Each row answers "if I redeploy THIS inflow, does the
+  // ladder still hold" independently, so the `free` column must never be summed and
+  // treated as one lump that may all be deployed at once. That is safe in practice
+  // because the plan is recomputed from the real balance after every action: once a
+  // return is banked and redeployed, the next render already sees the lower cash and
+  // shrinks the later rows accordingly.
+  function inflowFreedom(state, cfg, today, opts) {
+    opts = opts || {};
+    const scenario = opts.scenario || 'conservative';
+    const floor = resolveNumber(cfg && cfg.operatingFloor, 0);
+    const evs = forecastEvents(state, cfg, today, scenario);
+
+    // Running balance, then the minimum from each point forward.
+    let bal = forecastAvailable(state);
+    const seq = evs.map((e) => { bal = R4(bal + e.amount); return { e: e, bal: bal }; });
+    const sufMin = new Array(seq.length);
+    const sufAt = new Array(seq.length);
+    let m = Infinity, at = null;
+    for (let i = seq.length - 1; i >= 0; i--) {
+      if (seq[i].bal < m) { m = seq[i].bal; at = seq[i].e; }
+      sufMin[i] = m; sufAt[i] = at;
+    }
+
+    // Real (un-haircut, un-shifted) amount per inflow, keyed by identity.
+    const realBy = {};
+    forecastEvents(state, cfg, today, 'base').forEach((e) => {
+      if (e.io === 'in') realBy[e.label + '|' + (e.srcDate || e.date)] = R4(e.amount);
+    });
+
+    const rows = [];
+    seq.forEach((s, i) => {
+      const e = s.e;
+      if (e.io !== 'in') return;
+      const srcDate = e.srcDate || e.date;
+      const real = realBy[e.label + '|' + srcDate];
+      const amount = R4(real == null ? e.amount : real);
+      // The haircut exists to distrust money that has NOT arrived. It must not be
+      // applied to the very inflow being judged: once this return lands its amount is
+      // known, so credit the difference back from here on. Without this the advice
+      // held back a slice of every return purely as an artefact of its own discount,
+      // protecting no obligation at all.
+      const certain = R4(amount - R4(e.amount));
+      const headroom = R4(sufMin[i] + certain - floor);
+      // Never free more than this inflow actually brings, and never a negative hold.
+      const free = R4(Math.max(0, Math.min(amount, headroom)));
+      const hold = R4(Math.max(0, amount - free));
+      const b = hold > 0.005 ? sufAt[i] : null;
+      rows.push({
+        label: e.label, srcDate: srcDate, date: e.date, amount: amount,
+        free: free, hold: hold,
+        bindingLabel: b ? b.label : null,
+        bindingDate: b ? (b.srcDate || b.date) : null,
+      });
+    });
+    return { scenario: scenario, floor: floor, rows: rows };
   }
 
   // Look up one incoming return in the coverage plan: how much is held (consumed by
   // obligations) vs free to reinvest, plus where to keep the held part. Reading this
   // instead of a separate marginal analysis is what keeps the project schedule and
   // the investor coverage in agreement.
+  // Verdict for money landing TODAY: an overdue return the owner is about to record.
+  // Such a return is deliberately absent from the forecast (a borrower who is late is
+  // not cash), yet it is precisely the row with the pay button on it, so leaving it
+  // without advice is worse than useless. Banking A lifts every forward balance by A,
+  // so what may be redeployed is whatever still clears the floor.
+  function inflowIfPaidToday(state, cfg, today, amount, opts) {
+    opts = opts || {};
+    const floor = resolveNumber(cfg && cfg.operatingFloor, 0);
+    const fc = cashForecast(state, cfg, today, { scenario: opts.scenario || 'conservative' });
+    const amt = R4(+amount || 0);
+    const free = R4(Math.max(0, Math.min(amt, R4(fc.minBalance + amt - floor))));
+    const hold = R4(Math.max(0, amt - free));
+    const b = hold > 0.005 ? fc.binding : null;
+    return {
+      amount: amt, free: free, hold: hold,
+      bindingLabel: b ? b.label : null, bindingDate: b ? (b.srcDate || b.date) : null,
+    };
+  }
+
+  // Two DIFFERENT questions, and with any surplus they cannot share one number:
+  //   - how much must stay parked  -> necessity, from inflowFreedom (the decision)
+  //   - who this money is earmarked for -> the plan's assignment (the story)
+  // When the fund has more coming in than it owes, every single inflow is individually
+  // free (drop it and the others still cover), yet the plan must still name a source
+  // for each obligation. Forcing those to match is what produced the old "hold
+  // everything" advice. So the amount comes from freedom, the names come from the
+  // plan, and `safeWithout` marks the case where the money is earmarked on paper but
+  // genuinely releasable, which the UI must say out loud instead of staying silent.
   function inflowPlan(plan, label, srcDate) {
     const list = (plan && plan.inflows) || [];
     const hit = list.find((i) => i.label === label && (i.srcDate === srcDate || i.date === srcDate)) || null;
-    if (!hit) return { found: false, amount: 0, reinvest: 0, hold: 0, holdPocket: null, coversPokok: false, covers: [] };
+    if (!hit) return { found: false, amount: 0, reinvest: 0, hold: 0, holdPocket: null, coversPokok: false, covers: [], safeWithout: false, binding: null };
+    const fr = ((plan && plan.freedom) || []).find((f) => f.label === label && (f.srcDate === srcDate || f.date === srcDate)) || null;
+    // Fall back to the plan's own consumption only if freedom is unavailable.
+    const hold = fr ? fr.hold : hit.consumed;
+    const amount = fr ? Math.max(hit.amount, fr.amount) : hit.amount;
+    const reinvest = R4(Math.max(0, amount - hold));
     return {
-      found: true, amount: hit.amount, reinvest: hit.remaining, hold: hit.consumed,
-      holdPocket: hit.consumed > 0.005 ? (hit.coversPokok ? POCKET.SINKING : POCKET.GDE) : null,
+      found: true, amount: amount, reinvest: reinvest, hold: R4(hold),
+      holdPocket: hold > 0.005 ? (hit.coversPokok ? POCKET.SINKING : POCKET.GDE) : null,
       coversPokok: hit.coversPokok, covers: hit.covers,
+      // earmarked in the plan, but the ladder survives without it
+      safeWithout: hold <= 0.005 && (hit.covers || []).length > 0,
+      binding: fr && fr.bindingLabel ? { label: fr.bindingLabel, date: fr.bindingDate } : null,
     };
   }
 
@@ -1510,7 +1642,7 @@
     // recommendations
     returnWaterfall, rrprBorrowed, fundingRecommendation, pickSourcesForDeal, guaranteeGate, maxSafeTicket, buildTieredSchedule, fundingNeed,
     // validation + metrics + migration
-    validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, healthChecks, migrate, mergeCloudOps, pickPaymentPocket, proposePocketFix, proposeLedgerRedate, sinkingShortfall, forecastEvents, cashForecast, allocateInflow, convertFlexibleToRegular, coveragePlan, coverageDelta, inflowPlan, planSnapshot, planDrift, incomeBreakdown, deckMetrics, statements,
+    validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, healthChecks, migrate, mergeCloudOps, pickPaymentPocket, proposePocketFix, proposeLedgerRedate, sinkingShortfall, forecastEvents, cashForecast, allocateInflow, convertFlexibleToRegular, coveragePlan, coverageDelta, inflowPlan, inflowFreedom, inflowIfPaidToday, planSnapshot, planDrift, incomeBreakdown, deckMetrics, statements,
     // bot operations (shared posting rules)
     OPS, buildEntry, opBayarBagiHasil, opKembalikanPokok, opReturnProyek, opTransfer, opSetorModal, opReversal, applyOp,
   };
