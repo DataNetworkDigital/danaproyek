@@ -1193,7 +1193,7 @@
       const bal = R4(Math.max(0, pocketBal(state, pk.code) - (drawByCode[pk.code] || 0)));
       return { date: today, pocketCode: pk.code, label: pk.label, sinking: !!pk.sinking, fortress: !!pk.fortress, amount: bal, remaining: bal };
     });
-    evs.filter((e) => e.io === 'in').forEach((e) => pool.push({ date: e.date, label: e.label, amount: R4(e.amount), remaining: R4(e.amount) }));
+    evs.filter((e) => e.io === 'in').forEach((e) => pool.push({ date: e.date, srcDate: e.srcDate || e.date, label: e.label, amount: R4(e.amount), remaining: R4(e.amount), covers: [] }));
 
     if (opts.deal && opts.deal.maturityDate) {
       const d = opts.deal;
@@ -1228,6 +1228,8 @@
         const take = R4(Math.min(p.remaining, need));
         p.remaining = R4(p.remaining - take);
         need = R4(need - take);
+        if (o.tipe === 'pokok') p.coversPokok = true;
+        if (p.covers) p.covers.push({ label: o.label, date: o.srcDate || o.date, tipe: o.tipe, amount: take });
         covered.push({ label: p.label, date: p.date, amount: take, isNewDeal: !!p.isNewDeal, pocketCode: p.pocketCode || null, fortress: !!p.fortress });
       });
       return {
@@ -1236,9 +1238,34 @@
       };
     });
 
+    // Per-inflow view (the reverse of `rows`): how much of each incoming return the
+    // plan CONSUMES vs leaves free. This is the single source of truth for the
+    // project-schedule and Inbox reinvest/hold, so those can never contradict the
+    // investor coverage above.
+    const inflows = pool.filter((p) => p.srcDate || p.isNewDeal).map((p) => ({
+      label: p.label, srcDate: p.srcDate || p.date, date: p.date, amount: R4(p.amount),
+      consumed: R4(p.amount - p.remaining), remaining: R4(p.remaining),
+      coversPokok: !!p.coversPokok, covers: p.covers || [],
+    }));
+
     const totalShortfall = R4(rows.reduce((s, r) => s + r.shortfall, 0));
     const firstGap = rows.find((r) => r.shortfall > 0.005) || null;
-    return { scenario, rows, totalShortfall, firstGap, leftover: R4(pool.reduce((s, p) => s + p.remaining, 0)) };
+    return { scenario, rows, inflows, totalShortfall, firstGap, leftover: R4(pool.reduce((s, p) => s + p.remaining, 0)) };
+  }
+
+  // Look up one incoming return in the coverage plan: how much is held (consumed by
+  // obligations) vs free to reinvest, plus where to keep the held part. Reading this
+  // instead of a separate marginal analysis is what keeps the project schedule and
+  // the investor coverage in agreement.
+  function inflowPlan(plan, label, srcDate) {
+    const list = (plan && plan.inflows) || [];
+    const hit = list.find((i) => i.label === label && (i.srcDate === srcDate || i.date === srcDate)) || null;
+    if (!hit) return { found: false, amount: 0, reinvest: 0, hold: 0, holdPocket: null, coversPokok: false, covers: [] };
+    return {
+      found: true, amount: hit.amount, reinvest: hit.remaining, hold: hit.consumed,
+      holdPocket: hit.consumed > 0.005 ? (hit.coversPokok ? POCKET.SINKING : POCKET.GDE) : null,
+      coversPokok: hit.coversPokok, covers: hit.covers,
+    };
   }
 
   // What changed for the OTHER obligations because of this deal. Keyed on
@@ -1483,7 +1510,7 @@
     // recommendations
     returnWaterfall, rrprBorrowed, fundingRecommendation, pickSourcesForDeal, guaranteeGate, maxSafeTicket, buildTieredSchedule, fundingNeed,
     // validation + metrics + migration
-    validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, healthChecks, migrate, mergeCloudOps, pickPaymentPocket, proposePocketFix, proposeLedgerRedate, sinkingShortfall, forecastEvents, cashForecast, allocateInflow, convertFlexibleToRegular, coveragePlan, coverageDelta, planSnapshot, planDrift, incomeBreakdown, deckMetrics, statements,
+    validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, healthChecks, migrate, mergeCloudOps, pickPaymentPocket, proposePocketFix, proposeLedgerRedate, sinkingShortfall, forecastEvents, cashForecast, allocateInflow, convertFlexibleToRegular, coveragePlan, coverageDelta, inflowPlan, planSnapshot, planDrift, incomeBreakdown, deckMetrics, statements,
     // bot operations (shared posting rules)
     OPS, buildEntry, opBayarBagiHasil, opKembalikanPokok, opReturnProyek, opTransfer, opSetorModal, opReversal, applyOp,
   };

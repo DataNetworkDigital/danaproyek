@@ -1226,7 +1226,7 @@ function invDetail(id){
   // money pays it — same data as the return allocation, so the two never disagree.
   const cov={};
   try{
-    if(Treasury.coveragePlan) Treasury.coveragePlan(engineState(),engineCfg(),todayISO(),{}).rows
+    if(Treasury.coveragePlan) Treasury.coveragePlan(engineState(),engineCfg(),todayISO(),{scenario:'base'}).rows
       .forEach(r=>{ cov[r.obligation.label+'|'+r.obligation.date]=r; });
   }catch(e){}
   (c.schedule||[]).forEach(s=>{
@@ -1660,7 +1660,7 @@ function rRencanaKas(st, cfg, today){
 function rPlanDrift(st, cfg, today){
   const plans=(S.plans||[]);
   if(!plans.length || !Treasury.planDrift) return '';
-  let live; try{ live=Treasury.coveragePlan(st,cfg,today,{}); }catch(e){ return ''; }
+  let live; try{ live=Treasury.coveragePlan(st,cfg,today,{scenario:'base'}); }catch(e){ return ''; }
   const hits=[];
   plans.forEach(pl=>{
     let d; try{ d=Treasury.planDrift(st,cfg,today,pl,{live}); }catch(e){ return; }
@@ -1883,13 +1883,31 @@ function tWaterfall(){
   // Judge the money on the date it actually lands; passing today for a future-dated
   // scheduled return left that return in the timeline AND added the amount again.
   const lEl=document.getElementById('t-ret-label');
-  const w=Treasury.returnWaterfall(engineState(),engineCfg(),amt,todayISO(),{date:inflowDate, label:(lEl&&lEl.value)||null});
+  const label=(lEl&&lEl.value)||null;
+  const w=Treasury.returnWaterfall(engineState(),engineCfg(),amt,todayISO(),{date:inflowDate, label});
+  // For a PICKED scheduled inflow, read the verdict from the same coverage plan the
+  // project schedule + investor coverage use, so the three views never contradict.
+  // Freeform amounts (no label) keep the marginal waterfall answer.
+  let ip=null;
+  if(label && Treasury.coveragePlan && Treasury.inflowPlan){
+    try{ ip=Treasury.inflowPlan(Treasury.coveragePlan(engineState(),engineCfg(),todayISO(),{scenario:'base'}), label, inflowDate); }catch(e){}
+    if(!ip||!ip.found) ip=null;
+  }
+  const hold = ip?ip.hold:w.hold, reinvest = ip?ip.reinvest:w.reinvest;
   let h=`<div class="card-s" style="background:var(--clay-card)">`;
-  w.steps.forEach(s=>{ h+=`<div class="rep-r"><span class="rl" style="font-size:11px">${s.to}<div style="font-size:9.5px;color:var(--sub)">${s.why}</div></span><span class="rv" style="font-weight:800">${fj(s.amount)}</span></div>`; });
-  // the actual decision: how much of the Gde portion can go back out to work
-  h+= (w.hold>0.005)
-    ? `<div style="font-size:10.5px;font-weight:800;margin-top:8px;color:#B45309;background:#FEF3C7;border-radius:9px;padding:8px 10px;line-height:1.45">💡 Putar <b>${fj(w.reinvest)}</b>, tahan <b>${fj(w.hold)}</b>${w.forObligation?` buat <b>${esc(w.forObligation.label)}</b> (${fd(w.forObligation.date)})`:' buat jaga-jaga kas'}. Belum ada inflow lain yang menutup sebelum itu.</div>`
-    : `<div style="font-size:10.5px;font-weight:800;margin-top:8px;color:#0B8F46;background:#DCFCE7;border-radius:9px;padding:8px 10px;line-height:1.45">💡 Boleh diputar semua (<b>${fj(w.reinvest)}</b>) — kewajiban terdekat sudah tertutup inflow lain.</div>`;
+  w.steps.forEach(s=>{
+    const why=(s.code==='1010')?('Sisanya masuk Gde; '+(hold>0.005?'sebagian ditahan buat kewajiban terdekat':'bebas diputar')+'.'):s.why;
+    h+=`<div class="rep-r"><span class="rl" style="font-size:11px">${s.to}<div style="font-size:9.5px;color:var(--sub)">${why}</div></span><span class="rv" style="font-weight:800">${fj(s.amount)}</span></div>`;
+  });
+  // the actual decision: how much can go back out to work vs be parked, and where
+  if(hold>0.005){
+    const pk=ip?(ip.holdPocket?acct(ip.holdPocket).name:'kantong aman'):(w.forObligation&&w.forObligation.tipe==='pokok'?acct('1040').name:acct('1010').name);
+    const forO=ip?((ip.covers&&ip.covers[0])?` — buat <b>${esc(ip.covers[0].label)}</b> (${fd(ip.covers[0].date)})${ip.covers.length>1?` +${ip.covers.length-1} lagi`:''}`:'')
+                 :(w.forObligation?` — buat <b>${esc(w.forObligation.label)}</b> (${fd(w.forObligation.date)})`:'');
+    h+=`<div style="font-size:10.5px;font-weight:800;margin-top:8px;color:#B45309;background:#FEF3C7;border-radius:9px;padding:8px 10px;line-height:1.45">💡 Putar <b>${fj(reinvest)}</b>, tahan <b>${fj(hold)}</b> di <b>${esc(pk)}</b>${forO}.</div>`;
+  } else {
+    h+=`<div style="font-size:10.5px;font-weight:800;margin-top:8px;color:#0B8F46;background:#DCFCE7;border-radius:9px;padding:8px 10px;line-height:1.45">💡 Boleh diputar semua (<b>${fj(reinvest)}</b>) — tidak dipakai nutup kewajiban.</div>`;
+  }
   h+=`</div>`;
   document.getElementById('t-ret-out').innerHTML=h;
 }
@@ -2097,8 +2115,8 @@ function pendingEvents(){
   const skip=window._inboxSkip||{};
   return events.filter(e=>!skip[e.id]).sort((a,b)=>a.tanggal<b.tanggal?-1:1);
 }
-// The engine's name for an incoming event, so allocateInflow can identify (and
-// therefore exclude) the very inflow being decided instead of counting it twice.
+// The engine's name for an incoming event, so the coverage plan (inflowPlan) can
+// match this inflow to its reinvest/hold verdict instead of counting it twice.
 function inflowLabelOf(ev){
   if(!ev||!ev.pname) return null;
   if(ev.kind==='proj') return ev.pname+' · return';
@@ -2141,10 +2159,14 @@ function inboxAccept(id){
   if(ev.arah!=='keluar'){
     // Compute the reinvest/hold verdict BEFORE posting (while the inflow is still a
     // pending forecast event), then land the cash in Gde per the owner's model.
-    const a=(ev.arah==='masuk' && Treasury.allocateInflow)?Treasury.allocateInflow(engineState(),engineCfg(),todayISO(),{amount:ev.jumlah,date:ev.tanggal,label:inflowLabelOf(ev)}):null;
+    let a=null;
+    if(ev.arah==='masuk' && Treasury.coveragePlan && Treasury.inflowPlan){
+      const _cp=Treasury.coveragePlan(engineState(),engineCfg(),todayISO(),{scenario:'base'});
+      a=Treasury.inflowPlan(_cp, inflowLabelOf(ev), ev.tanggal);
+    }
     inboxPost(ev, ev.arah==='masuk'?'1010':'1000', todayISO(), ev.jumlah);
-    if(a){
-      if(a.hold>0.005 && a.forObligation) toast(`✅ Masuk Gde · 💡 tahan ${fj(a.hold)} buat ${a.forObligation.label} (${fd(a.forObligation.date)})`,{duration:7000});
+    if(a&&a.found){
+      if(a.hold>0.005) toast(`✅ Masuk Gde · 💡 tahan ${fj(a.hold)} di ${a.holdPocket?acct(a.holdPocket).name:'kantong aman'}${(a.covers&&a.covers[0])?' buat '+a.covers[0].label:''}`,{duration:7000});
       else toast(`✅ Masuk Gde · 💡 boleh diputar semua (${fj(a.reinvest)})`,{duration:6000});
       return;
     }
@@ -2186,6 +2208,9 @@ function rKeuInbox(){
   let h=`<div class="fc-note" style="margin-bottom:12px">Satu tempat untuk semua yang jatuh tempo: <b>bayar investor</b> dan <b>terima return proyek</b>. Web sudah menyarankan uangnya dari kantong mana. <b>Accept</b> = catat sesuai saran · <b>Custom</b> = ubah dulu · <b>Skip</b> = sembunyikan.</div>`;
   if(!ev.length) return h+`<div class="es"><div class="ei">✅</div><div class="et">Inbox bersih</div><div class="esb">Tidak ada yang jatuh tempo dalam 5 hari ke depan.</div></div>`;
   const st=engineState(), cfg=engineCfg();
+  // one coverage plan drives both the pay-from pocket and the reinvest/hold verdict,
+  // so the Inbox can never contradict the project schedule or investor coverage.
+  const _cov=(Treasury.coveragePlan)?Treasury.coveragePlan(st,cfg,todayISO(),{scenario:'base'}):null;
   ev.forEach(e=>{
     const col=e.dd<0?'#DC2626':(e.dd<=2?'#B45309':'var(--sub)');
     // recommendation line: where the money comes from (out) or lands (in)
@@ -2197,14 +2222,15 @@ function rKeuInbox(){
         : `<div style="font-size:10.5px;font-weight:800;margin-top:6px;color:#DC2626">⚠️ Belum ada kantong cukup (kurang ${fj(pk.short)}) — tunggu pemasukan atau setor dulu</div>`;
     } else if(e.arah==='masuk'){
       recLine=`<div style="font-size:10.5px;font-weight:800;margin-top:6px;color:#0B8F46">📥 Masuk ke kantong Gde</div>`;
-      // Forecast verdict for THIS inflow: reinvest or hold for a specific obligation
-      // that no earlier inflow covers. (Supersedes the older sinking-only nudge.)
-      const a=Treasury.allocateInflow?Treasury.allocateInflow(st,cfg,todayISO(),{amount:e.jumlah,date:e.tanggal,label:inflowLabelOf(e)}):null;
-      if(a){
+      // Reinvest/hold read from the SAME plan that fills the investor coverage.
+      const a=(_cov&&Treasury.inflowPlan)?Treasury.inflowPlan(_cov, inflowLabelOf(e), e.tanggal):null;
+      if(a&&a.found){
         if(a.hold>0.005){
-          recLine+=`<div style="font-size:10px;font-weight:800;margin-top:5px;color:#B45309;background:#FEF3C7;border-radius:9px;padding:7px 9px;line-height:1.45">💡 Tahan <b>${fj(a.hold)}</b>${a.forObligation?` buat <b>${esc(a.forObligation.label)}</b> (${fd(a.forObligation.date)})`:' buat jaga-jaga kas'}${a.reinvest>0.005?`, sisanya <b>${fj(a.reinvest)}</b> boleh diputar`:''}. Belum ada inflow lain yang menutup sebelum tanggal itu.</div>`;
+          const pk=a.holdPocket?acct(a.holdPocket).name:'kantong aman';
+          const forO=(a.covers&&a.covers[0])?` buat <b>${esc(a.covers[0].label)}</b> (${fd(a.covers[0].date)})${a.covers.length>1?` +${a.covers.length-1} lagi`:''}`:'';
+          recLine+=`<div style="font-size:10px;font-weight:800;margin-top:5px;color:#B45309;background:#FEF3C7;border-radius:9px;padding:7px 9px;line-height:1.45">💡 Tahan <b>${fj(a.hold)}</b> di <b>${esc(pk)}</b>${forO}${a.reinvest>0.005?`, sisanya <b>${fj(a.reinvest)}</b> boleh diputar`:''}.</div>`;
         } else {
-          recLine+=`<div style="font-size:10px;font-weight:800;margin-top:5px;color:#0B8F46;background:#DCFCE7;border-radius:9px;padding:7px 9px;line-height:1.45">💡 Boleh diputar semua (<b>${fj(a.reinvest)}</b>) ke proyek baru — kewajiban terdekat sudah tertutup inflow lain.</div>`;
+          recLine+=`<div style="font-size:10px;font-weight:800;margin-top:5px;color:#0B8F46;background:#DCFCE7;border-radius:9px;padding:7px 9px;line-height:1.45">💡 Boleh diputar semua (<b>${fj(a.reinvest)}</b>) ke proyek baru — tidak dipakai nutup kewajiban.</div>`;
         }
       }
     }
@@ -2867,8 +2893,8 @@ function renderDecision(id, overrideMix){
   // deal changes for the obligations that were already covered. Derived fresh from
   // the same calendar as the verdict, so the two can never disagree.
   if(Treasury.coveragePlan){
-    const planBefore=Treasury.coveragePlan(st,cfg,today,{});
-    const planAfter =Treasury.coveragePlan(st,cfg,today,{mix:picked, deal});
+    const planBefore=Treasury.coveragePlan(st,cfg,today,{scenario:'base'});
+    const planAfter =Treasury.coveragePlan(st,cfg,today,{scenario:'base', mix:picked, deal});
     const delta=Treasury.coverageDelta(planBefore,planAfter);
     const shown=planAfter.rows.slice(0,6);
     b+=`<div class="rep-sec">Rencana bayar — uangnya dari mana</div><div class="card-s" style="margin-bottom:12px">`;
@@ -2951,7 +2977,7 @@ function confirmMasuk(id){
   // so passing mix+deal again would subtract the draw twice and bank its return twice.
   let planAtEntry=null;
   try{
-    if(Treasury.coveragePlan) planAtEntry=Treasury.coveragePlan(_st,engineCfg(),todayISO(),{mix, deal:dealFromProject(p)});
+    if(Treasury.coveragePlan) planAtEntry=Treasury.coveragePlan(_st,engineCfg(),todayISO(),{scenario:'base', mix, deal:dealFromProject(p)});
   }catch(err){ console.warn('[plan snapshot]',err); }
   const lines=[{account:'1100',debit:total,credit:0}].concat(mix.map(m=>({account:m.code,debit:0,credit:m.amount})));
   const e=ledgerPost(todayISO(),'Deploy ke proyek: '+(p.peminjam||''),lines,'deploy');
@@ -3890,16 +3916,20 @@ function delProj(id){
 
 // ── PROJECT DETAIL ────────────────────────────────────────────────────
 // Per-return verdict for the project schedule: reinvest vs hold, and which pocket
-// to keep the held money in. Same allocateInflow the Inbox uses.
-function allocRowHTML(amount, date, label, prefix){
-  if(!(amount>0) || !window.Treasury || !Treasury.allocateInflow) return '';
-  let a; try{ a=Treasury.allocateInflow(engineState(),engineCfg(),todayISO(),{amount, date, label}); }catch(e){ return ''; }
-  const pfx=prefix?`<b>${prefix} ${fj(amount)}:</b> `:'';
-  if(a.hold>0.005 && a.forObligation){
+// to keep the held money in. Same coverage plan the Inbox and investor view use.
+// Reinvest vs hold for one return row, read from the shared coverage plan (so it
+// agrees with the investor coverage). `plan` = Treasury.coveragePlan(...,{scenario:'base'}).
+function allocRowHTML(plan, label, srcDate, prefix){
+  if(!plan || !window.Treasury || !Treasury.inflowPlan) return '';
+  const a=Treasury.inflowPlan(plan, label, srcDate);
+  if(!a.found) return '';
+  const pfx=prefix?`<b>${prefix} ${fj(a.amount)}:</b> `:'';
+  if(a.hold>0.005){
     const pk=a.holdPocket?acct(a.holdPocket).name:'kantong aman';
-    return `<div style="margin-top:5px;font-size:10px;font-weight:800;color:#B45309;background:#FEF3C7;border-radius:8px;padding:6px 8px;line-height:1.45">💡 ${pfx}reinvest <b>${fj(a.reinvest)}</b>, tahan <b>${fj(a.hold)}</b> di <b>${esc(pk)}</b> — buat ${esc(a.forObligation.label)} (${fd(a.forObligation.date)})</div>`;
+    const forO=(a.covers&&a.covers[0])?` — buat ${esc(a.covers[0].label)} (${fd(a.covers[0].date)})${a.covers.length>1?` +${a.covers.length-1} lagi`:''}`:'';
+    return `<div style="margin-top:5px;font-size:10px;font-weight:800;color:#B45309;background:#FEF3C7;border-radius:8px;padding:6px 8px;line-height:1.45">💡 ${pfx}reinvest <b>${fj(a.reinvest)}</b>, tahan <b>${fj(a.hold)}</b> di <b>${esc(pk)}</b>${forO}</div>`;
   }
-  return `<div style="margin-top:5px;font-size:10px;font-weight:800;color:#0B8F46;background:#DCFCE7;border-radius:8px;padding:6px 8px;line-height:1.45">💡 ${pfx}boleh diputar semua (<b>${fj(a.reinvest)}</b>) — kewajiban terdekat sudah tertutup</div>`;
+  return `<div style="margin-top:5px;font-size:10px;font-weight:800;color:#0B8F46;background:#DCFCE7;border-radius:8px;padding:6px 8px;line-height:1.45">💡 ${pfx}boleh diputar semua (<b>${fj(a.reinvest)}</b>) — tidak dipakai nutup kewajiban</div>`;
 }
 function oDet(id){
   const p=S.projects.find(x=>x.id===id); if(!p) return;
@@ -3960,6 +3990,9 @@ function oDet(id){
   }
   // Schedule view
   h+=`<div class="dv"></div>`;
+  // One coverage plan (actual amounts) drives every row's reinvest/hold, so this
+  // schedule can never contradict the investor coverage for the same money.
+  const _covPlan=(window.Treasury&&Treasury.coveragePlan)?Treasury.coveragePlan(engineState(),engineCfg(),todayISO(),{scenario:'base'}):null;
   const rt=p.returnType||'sekali';
   if(rt==='bulanan'){
     generateSchedule(p);
@@ -3985,11 +4018,9 @@ function oDet(id){
       // computed on the NET cash the fund banks, same engine as the Inbox.
       let allocLine='';
       if(!isPaid){
-        const fee=resolveNum(p.adminFeePersen,0.5), kontrak=kontrakP(p);
-        const net=Math.max(0, parseFloat(s.amount||0)-kontrak*fee/100);
-        allocLine=allocRowHTML(net, s.dueDate, (p.peminjam||'Proyek')+' · return', 'Return bersih');
+        allocLine=allocRowHTML(_covPlan, (p.peminjam||'Proyek')+' · return', s.dueDate, 'Return bersih');
         if(s.isFinal && p.tanggalJT && !p.pokokRecorded)
-          allocLine+=allocRowHTML(parseFloat(p.jumlah||0), p.tanggalJT, (p.peminjam||'Proyek')+' · pokok balik', 'Pokok balik');
+          allocLine+=allocRowHTML(_covPlan, (p.peminjam||'Proyek')+' · pokok balik', p.tanggalJT, 'Pokok balik');
       }
       h+=`<div id="srow-${p.id}-${s.month}" style="padding:10px 0;border-bottom:1px solid var(--bdr)">
         <div class="fb"><span style="font-weight:800;font-size:12px">Bulan ${s.month} — ${fd(s.dueDate)}</span><span style="font-weight:900;font-size:12px">${fj(s.amount)}${s.paidAmount&&s.paidAmount!==s.amount?' (aktual: '+fj(s.paidAmount)+')':''}${finalLbl}</span></div>

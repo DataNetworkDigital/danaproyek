@@ -1708,3 +1708,35 @@ test('OV7. a future return is still counted (shift not over-applied)', () => {
   const cons = T.forecastEvents(st, CFG, today, 'conservative').filter((e) => e.io === 'in');
   assert.strictEqual(cons.length, 1, 'a genuinely future return still lands');
 });
+
+// ── inflowPlan: project view derived from the SAME plan as the investor view ──
+test('IP1. a needed return is HELD, not "reinvest all" (no contradiction)', () => {
+  const st = cvState({
+    projects: [{ name: 'Ayam', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-09-02', amount: 10, status: 'pending' }] }],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-10-02', tipe: 'pokok', jumlah: 10, status: 'pending' }] }],
+  });
+  const plan = T.coveragePlan(st, CFG, TODAY, { scenario: 'base' });
+  const vedaRow = plan.rows.find((r) => /Veda/.test(r.obligation.label));
+  assert.ok(vedaRow.covered.some((c) => /Ayam/.test(c.label)), 'investor view: Ayam covers Veda');
+  const ip = T.inflowPlan(plan, 'Ayam · return', '2026-09-02');
+  assert.strictEqual(ip.hold, 10, 'project view agrees: fully held');
+  assert.strictEqual(ip.reinvest, 0, 'NOT freely reinvestable');
+  assert.strictEqual(ip.holdPocket, '1040', 'held for a pokok -> sinking');
+  assert.ok(ip.covers.some((c) => /Veda/.test(c.label)), 'names what it is held for');
+});
+
+test('IP2. genuine surplus is reinvestable AND absent from coverage (both agree)', () => {
+  const st = cvState({
+    projects: [
+      { name: 'Sawah', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-09-01', amount: 20, status: 'pending' }] },
+      { name: 'Ayam', status: 'aktif', type: 'monthly', monthlyReturns: [{ date: '2026-09-10', amount: 10, status: 'pending' }] },
+    ],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-10-02', tipe: 'pokok', jumlah: 12, status: 'pending' }] }],
+  });
+  const plan = T.coveragePlan(st, CFG, TODAY, { scenario: 'base' });
+  assert.ok(!plan.rows.some((r) => r.covered.some((c) => /Ayam/.test(c.label))), 'Ayam not needed → not a source');
+  const ipA = T.inflowPlan(plan, 'Ayam · return', '2026-09-10');
+  assert.strictEqual(ipA.reinvest, 10); assert.strictEqual(ipA.hold, 0);
+  const ipS = T.inflowPlan(plan, 'Sawah · return', '2026-09-01');
+  assert.strictEqual(ipS.hold, 12, 'Sawah covers the 12'); assert.strictEqual(ipS.reinvest, 8);
+});
