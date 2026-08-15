@@ -1948,3 +1948,31 @@ test('CU4. the shipped default really does keep a cushion (nobody silently zeroe
   // and the advice never spends down to literally nothing
   assert.ok(T.cashForecast(st, T.cfgOf({}), TODAY, { scenario: 'base' }).freeToDeploy < 100);
 });
+
+// ── concentration: just-in-time can quietly stake everything on one payer ──
+test('CN1. flags an obligation whose cover leans on a single inflow', () => {
+  const st = cvState({
+    projects: [{ name: 'Tani', status: 'aktif', type: 'onetime', deploy: 200, principalDate: '2026-10-27' }],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-12-05', tipe: 'pokok', jumlah: 100, status: 'pending' }] }],
+  });
+  const plan = T.coveragePlan(st, CFG, TODAY, { scenario: 'base' });
+  const c = T.coverageConcentration(plan);
+  assert.ok(c.worst, 'reports the most concentrated obligation');
+  assert.ok(/Tani/.test(c.worst.source), 'names the single payer everything rests on');
+  assert.strictEqual(c.worst.pct, 100);
+  assert.ok(c.rows.length >= 1);
+});
+
+test('CN2. spread cover is not flagged', () => {
+  const st = cvState({
+    projects: [
+      { name: 'A', status: 'aktif', type: 'onetime', deploy: 34, principalDate: '2026-10-01' },
+      { name: 'B', status: 'aktif', type: 'onetime', deploy: 33, principalDate: '2026-10-10' },
+      { name: 'C', status: 'aktif', type: 'onetime', deploy: 33, principalDate: '2026-10-20' },
+    ],
+    investorContracts: [{ nama: 'Veda', schedule: [{ tanggal: '2026-12-05', tipe: 'pokok', jumlah: 100, status: 'pending' }] }],
+  });
+  const plan = T.coveragePlan(st, CFG, TODAY, { scenario: 'base' });
+  const c = T.coverageConcentration(plan, { thresholdPct: 50 });
+  assert.strictEqual(c.rows.length, 0, 'no single source above half');
+});

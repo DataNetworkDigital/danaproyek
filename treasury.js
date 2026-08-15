@@ -1278,6 +1278,46 @@
     return { scenario, rows, inflows, freedom, totalShortfall, firstGap, leftover: R4(pool.reduce((s, p) => s + p.remaining, 0)) };
   }
 
+  // Just-in-time matching buys back idle cash, but it pays for it in concentration:
+  // paying December out of one big October inflow means one borrower now carries the
+  // whole month, where spreading it over many small returns used to diversify it. The
+  // small returns that used to be the backup have meanwhile been redeployed into
+  // projects that will not have matured. The haircut softens a slip; it does not
+  // survive a default. So the trade has to be visible rather than implied.
+  function coverageConcentration(plan, opts) {
+    opts = opts || {};
+    const threshold = opts.thresholdPct != null ? opts.thresholdPct : 50;
+    const rows = [];
+    ((plan && plan.rows) || []).forEach((r) => {
+      const total = R4((r.covered || []).reduce((s, c) => s + c.amount, 0));
+      if (!(total > 0.005)) return;
+      const bySrc = {};
+      (r.covered || []).forEach((c) => { bySrc[c.label] = R4((bySrc[c.label] || 0) + c.amount); });
+      let src = null, amt = 0;
+      Object.keys(bySrc).forEach((k) => { if (bySrc[k] > amt) { amt = bySrc[k]; src = k; } });
+      const pct = R4(amt / total * 100);
+      if (pct >= threshold) {
+        rows.push({
+          obligation: r.obligation.label, date: r.obligation.date, amount: R4(r.obligation.amount),
+          source: src, sourceAmount: amt, pct: pct,
+        });
+      }
+    });
+    rows.sort((a, b) => (b.pct - a.pct) || (b.sourceAmount - a.sourceAmount));
+    // How much of everything owed rests on the single most relied-upon payer.
+    const bySrcAll = {};
+    ((plan && plan.rows) || []).forEach((r) => {
+      (r.covered || []).forEach((c) => { bySrcAll[c.label] = R4((bySrcAll[c.label] || 0) + c.amount); });
+    });
+    let topSrc = null, topAmt = 0, grand = 0;
+    Object.keys(bySrcAll).forEach((k) => { grand = R4(grand + bySrcAll[k]); if (bySrcAll[k] > topAmt) { topAmt = bySrcAll[k]; topSrc = k; } });
+    return {
+      rows: rows, worst: rows[0] || null,
+      topSource: topSrc, topSourceAmount: R4(topAmt),
+      topSourcePct: grand > 0 ? R4(topAmt / grand * 100) : 0,
+    };
+  }
+
   // Cash kept back for what the calendar does NOT contain: a bank charge, a small
   // emergency, a borrower who misses by more than the timing buffer allows.
   //
@@ -1667,7 +1707,7 @@
     // recommendations
     returnWaterfall, rrprBorrowed, fundingRecommendation, pickSourcesForDeal, guaranteeGate, maxSafeTicket, buildTieredSchedule, fundingNeed,
     // validation + metrics + migration
-    validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, healthChecks, migrate, mergeCloudOps, pickPaymentPocket, proposePocketFix, proposeLedgerRedate, sinkingShortfall, forecastEvents, cashForecast, allocateInflow, convertFlexibleToRegular, coveragePlan, coverageDelta, inflowPlan, inflowFreedom, inflowIfPaidToday, cashCushion, ladderFloor, planSnapshot, planDrift, incomeBreakdown, deckMetrics, statements,
+    validateAllocations, providerAvailable, hasPosted, metrics, openingChecks, healthChecks, migrate, mergeCloudOps, pickPaymentPocket, proposePocketFix, proposeLedgerRedate, sinkingShortfall, forecastEvents, cashForecast, allocateInflow, convertFlexibleToRegular, coveragePlan, coverageDelta, inflowPlan, inflowFreedom, inflowIfPaidToday, cashCushion, ladderFloor, coverageConcentration, planSnapshot, planDrift, incomeBreakdown, deckMetrics, statements,
     // bot operations (shared posting rules)
     OPS, buildEntry, opBayarBagiHasil, opKembalikanPokok, opReturnProyek, opTransfer, opSetorModal, opReversal, applyOp,
   };
