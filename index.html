@@ -1125,8 +1125,11 @@ function invModal(mode, id, personId){
       <div class="fg"><label class="fl">Bagi Hasil (%/bln)</label><input class="fi" id="ic-rate" type="number" step="0.01" value="${c?(c.ratePct??2):2}"></div>
     </div>
     <div class="fr">
-      <div class="fg"><label class="fl">Tanggal Mulai</label><input class="fi" id="ic-mulai" type="date" value="${c?c.tanggalMulai:ds}"></div>
+      <div class="fg"><label class="fl">Tanggal Uang Masuk</label><input class="fi" id="ic-masuk" type="date" value="${c?(c.tanggalUangMasuk||c.tanggalMulai):ds}" onchange="invDeriveMulai()"></div>
       <div class="fg"><label class="fl">Tenor (bln)</label><input class="fi" id="ic-tenor" type="number" value="${c?c.tenorBulan:12}"></div>
+    </div>
+    <div class="fg"><label class="fl">Tanggal Mulai · bayar ke investor</label><input class="fi" id="ic-mulai" type="date" value="${c?c.tanggalMulai:addDays(ds,7)}">
+      <div class="fh">Otomatis 7 hari setelah uang masuk (H+7). Boleh diubah kalau perlu.</div>
     </div>
     <div class="fg"><label class="fl">Struktur Bagi Hasil</label>
       <select class="fi" id="ic-struktur" onchange="invHint()">${opt('bulanan')}${opt('akhir')}${opt('cicil')}</select>
@@ -1140,6 +1143,9 @@ function invPersonChange(){
   const sel=document.getElementById('ic-person'), wrap=document.getElementById('ic-newwrap');
   if(sel&&wrap) wrap.style.display = sel.value==='__new' ? 'block' : 'none';
 }
+// Tanggal Mulai (tanggal bayar ke investor) = uang masuk + 7 hari (H+7). Auto,
+// tapi tetap boleh dioverride manual di form.
+function invDeriveMulai(){ const m=document.getElementById('ic-masuk'), s=document.getElementById('ic-mulai'); if(m&&s&&m.value) s.value=addDays(m.value,7); }
 function invSave(mode, id){
   const sel=document.getElementById('ic-person');
   const label=(document.getElementById('ic-label')||{}).value||'';
@@ -1154,23 +1160,25 @@ function invSave(mode, id){
   const nama=person.nama+(label.trim()?' ('+label.trim()+')':'');
   const pokok=parseFloat(document.getElementById('ic-pokok').value||0);
   const rate=parseFloat(document.getElementById('ic-rate').value||2);
-  const mulai=document.getElementById('ic-mulai').value;
+  const masuk=document.getElementById('ic-masuk').value;
+  const mulai=document.getElementById('ic-mulai').value||addDays(masuk,7);
   const tenor=parseInt(document.getElementById('ic-tenor').value||0);
   const struktur=document.getElementById('ic-struktur').value;
   if(!person){ toast('❌ Investor wajib'); return; }
   if(!(pokok>0)){ toast('❌ Pokok harus > 0'); return; }
   if(!(tenor>0)){ toast('❌ Tenor harus > 0'); return; }
+  if(!masuk){ toast('❌ Tanggal uang masuk wajib'); return; }
   if(mode==='edit'){
     const c=invContracts().find(x=>x.id===id); if(!c) return;
     const anyPaid=(c.schedule||[]).some(s=>s.status==='paid');
-    Object.assign(c,{nama,investorId:person.id,label:label.trim()||null,pokok,ratePct:rate,tanggalMulai:mulai,tenorBulan:tenor,struktur});
+    Object.assign(c,{nama,investorId:person.id,label:label.trim()||null,pokok,ratePct:rate,tanggalUangMasuk:masuk,tanggalMulai:mulai,tenorBulan:tenor,struktur});
     if(!anyPaid) c.schedule=contractSchedule(c);
     save(); cm('mo-keu'); rKeu(); toast(anyPaid?'✅ Diperbarui (jadwal terkunci karena sudah ada pembayaran)':'✅ Kontrak diperbarui');
   } else {
-    const c={id:uid(),nama,investorId:person.id,label:label.trim()||null,pokok,ratePct:rate,tanggalMulai:mulai,tenorBulan:tenor,struktur,status:'aktif'};
+    const c={id:uid(),nama,investorId:person.id,label:label.trim()||null,pokok,ratePct:rate,tanggalUangMasuk:masuk,tanggalMulai:mulai,tenorBulan:tenor,struktur,status:'aktif'};
     c.schedule=contractSchedule(c);
     invContracts().push(c);
-    ledgerPost2(mulai,'Terima dana investor: '+nama,'1030','2000',pokok,'inv-masuk'); // cash into amunisi, liability up
+    ledgerPost2(masuk,'Terima dana investor: '+nama,'1030','2000',pokok,'inv-masuk'); // kas masuk di tanggal uang masuk; jadwal bayar & pokok ikut tanggalMulai (H+7)
     save(); cm('mo-keu'); rKeu(); toast('✅ Kontrak dibuat + pokok diterima');
   }
 }
