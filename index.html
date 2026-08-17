@@ -2183,6 +2183,11 @@ function inboxPost(ev, pocket, date, amount){
     ledgerPost(date,'Akrual bagi hasil: '+c.nama,[{account:'5000',debit:amount,credit:0},{account:'2010',debit:0,credit:amount}],'akrual-bh'); // dicatat, belum dibayar
     s.status='paid'; s.paidDate=date;
   }
+  // A just-recorded return can clear a stale "terlambat", but this path re-renders
+  // via rKeu() and never reaches rAll() — the only other place the terlambat↔aktif
+  // flip runs. Without reconciling here the project stays red AND save() persists
+  // that stale red to the cloud. fixProjectStatuses() saves internally if it flips.
+  fixProjectStatuses();
   save(); rKeu();
 }
 function inboxAccept(id){
