@@ -342,6 +342,7 @@ body.modal-open{position:fixed;left:0;right:0;width:100%;overflow:hidden}
     <button class="ni on" onclick="go('b')" id="n-b"><span class="ico">🏠</span><span class="lbl">Ringkasan</span></button>
     <button class="ni" onclick="go('p')" id="n-p" style="display:none"><span class="ico">🏗️</span><span class="lbl">Proyek</span></button>
     <button class="ni" onclick="go('u')" id="n-u" style="display:none"><span class="ico">🏛️</span><span class="lbl">Treasury</span></button>
+    <button class="ni" onclick="go('k')" id="n-k" style="display:none"><span class="ico">📅</span><span class="lbl">Kalender</span></button>
     <button class="ni" onclick="go('r')" id="n-r" style="display:none"><span class="ico">📊</span><span class="lbl">Laporan</span></button>
     <button class="ni" onclick="showPin()" id="n-admin"><span class="ico">🔐</span><span class="lbl">Admin</span></button>
   </nav>
@@ -350,6 +351,7 @@ body.modal-open{position:fixed;left:0;right:0;width:100%;overflow:hidden}
 <div class="mo" id="mo-pay" onclick="cm('mo-pay')"><div class="modal" onclick="event.stopPropagation()"><button class="mclose" onclick="cm('mo-pay')" aria-label="Tutup">×</button><div class="mh"></div><div class="mtt">✅ Catat Pembayaran</div><div id="mo-pay-b"></div></div></div>
 <div class="mo" id="mo-ext" onclick="cm('mo-ext')"><div class="modal" onclick="event.stopPropagation()"><button class="mclose" onclick="cm('mo-ext')" aria-label="Tutup">×</button><div class="mh"></div><div class="mtt" id="mo-ext-t">Dana Eksternal</div><div id="mo-ext-b"></div></div></div>
 <div class="mo" id="mo-det" onclick="cm('mo-det')"><div class="modal" onclick="event.stopPropagation()"><button class="mclose" onclick="cm('mo-det')" aria-label="Tutup">×</button><div class="mh"></div><div id="mo-det-b"></div></div></div>
+<div class="mo" id="mo-day" onclick="cm('mo-day')"><div class="modal" onclick="event.stopPropagation()"><button class="mclose" onclick="cm('mo-day')" aria-label="Tutup">×</button><div class="mh"></div><div class="mtt" id="mo-day-t">Detail Hari</div><div id="mo-day-b"></div></div></div>
 <div class="mo" id="mo-fund" onclick="cm('mo-fund')"><div class="modal" onclick="event.stopPropagation()"><button class="mclose" onclick="cm('mo-fund')" aria-label="Tutup">×</button><div class="mh"></div><div class="mtt">⚙️ Konfigurasi KUR</div><div id="mo-fund-b"></div></div></div>
 <div class="mo" id="mo-edet" onclick="cm('mo-edet')"><div class="modal" onclick="event.stopPropagation()"><button class="mclose" onclick="cm('mo-edet')" aria-label="Tutup">×</button><div class="mh"></div><div id="mo-edet-b"></div></div></div>
 <div class="mo" id="mo-keu" onclick="cm('mo-keu')"><div class="modal" onclick="event.stopPropagation()"><button class="mclose" onclick="cm('mo-keu')" aria-label="Tutup">×</button><div class="mh"></div><div class="mtt" id="mo-keu-t">Kantong</div><div id="mo-keu-b"></div></div></div>
@@ -405,7 +407,7 @@ async function adminLogin(email,pass){
     const tok=await firebase.auth().currentUser.getIdTokenResult();
     if(!tok.claims||!tok.claims.admin){ toast('Akun ini bukan admin'); await firebase.auth().signOut(); return; }
     _adminUnlocked=true; cm('mo-pin');
-    ['n-p','n-u','n-r'].forEach(id=>{const el=document.getElementById(id); if(el) el.style.display='';});
+    ['n-p','n-u','n-k','n-r'].forEach(id=>{const el=document.getElementById(id); if(el) el.style.display='';});
     const na=document.getElementById('n-admin'); if(na) na.style.display='none';
     await loadFromFirestore(); rAll(); go('b'); toast('🔓 Admin');
   }catch(e){ toast('Login gagal'); console.warn('adminLogin',e); }
@@ -3345,6 +3347,14 @@ function getCalendarEvents(year,month){
       const feeAmt=Math.round(kontrak*fee/100*1e4)/1e4;
       if(feeAmt>0.005) push(s.dueDate,{type:'adminfee',label:'Fee Mas Hena · '+p.peminjam,amount:feeAmt,paid:s.status==='paid',order:2});
     });
+    // One-time deals carry no monthly schedule: the whole profit lands at maturity,
+    // so surface laba (+ its Mas Hena fee) there or the calendar under-reports income.
+    if((p.returnType||'sekali')!=='bulanan' && inMonth(p.tanggalJT)){
+      const laba=Math.round(Math.max(0, kontrakP(p)-parseFloat(p.jumlah||0))*1e4)/1e4;
+      if(laba>0.005) push(p.tanggalJT,{type:'income',label:'Laba · '+p.peminjam,amount:laba,paid:!!p.pokokRecorded,order:1});
+      const feeAmt=Math.round(kontrak*fee/100*1e4)/1e4;
+      if(feeAmt>0.005) push(p.tanggalJT,{type:'adminfee',label:'Fee Mas Hena · '+p.peminjam,amount:feeAmt,paid:!!p.pokokRecorded,order:2});
+    }
     if(inMonth(p.tanggalJT)) push(p.tanggalJT,{type:'income',label:'Pokok balik · '+p.peminjam,amount:parseFloat(p.jumlah||0),order:1});
   });
   // 2. Kewajiban investor dari KONTRAK (Papa fleksibel dikecualikan — itu akrual, bukan kas)
@@ -3374,6 +3384,8 @@ function rK(){
   });
   const totalOut=totalBagiHasil+totalAdminFee+totalPokok;
   const net=totalIncome-totalOut;
+  const toInvestor=totalBagiHasil+totalPokok; // dibagikan/dikembalikan ke investor
+  const incomeNet=totalIncome-totalAdminFee;  // yang benar-benar kita terima setelah fee
   const monthNames=['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
   const todayISO=new Date().toISOString().split('T')[0];
   // Build calendar grid (Sun=0...Sat=6)
@@ -3388,9 +3400,9 @@ function rK(){
       <button onclick="kalNav(1)" style="background:var(--card);border:1px solid var(--bdr);border-radius:10px;width:38px;height:38px;font-size:16px;font-weight:900;cursor:pointer;font-family:Nunito,sans-serif">›</button>
     </div>
     <div class="cf-strip">
-      <div class="cf-col"><div class="cf-lbl">Income</div><div class="cf-val" style="color:#0B8F46">${fj(totalIncome)}</div></div>
-      <div class="cf-col"><div class="cf-lbl">Keluar</div><div class="cf-val" style="color:var(--r)">${fj(totalOut)}</div><div class="cf-sub">${[totalBagiHasil>0.005?'Bagi hasil '+fj(totalBagiHasil):'',totalAdminFee>0.005?'Fee Mas Hena '+fj(totalAdminFee):'',totalPokok>0.005?'Pokok '+fj(totalPokok):''].filter(Boolean).join(' · ')||'—'}</div></div>
-      <div class="cf-col"><div class="cf-lbl">Net</div><div class="cf-val" style="color:${net>=0?'#0B8F46':'var(--r)'}">${fj(net)}</div></div>
+      <div class="cf-col"><div class="cf-lbl">Kita terima</div><div class="cf-val" style="color:#0B8F46">${fj(totalIncome)}</div><div class="cf-sub">${totalAdminFee>0.005?'bersih '+fj(incomeNet):'return proyek'}</div></div>
+      <div class="cf-col"><div class="cf-lbl">Ke investor</div><div class="cf-val" style="color:var(--r)">${fj(toInvestor)}</div><div class="cf-sub">${[totalBagiHasil>0.005?'BH '+fj(totalBagiHasil):'',totalPokok>0.005?'Pokok '+fj(totalPokok):''].filter(Boolean).join(' · ')||'—'}</div></div>
+      <div class="cf-col"><div class="cf-lbl">Sisa buat kita</div><div class="cf-val" style="color:${net>=0?'#0B8F46':'var(--r)'}">${net>=0?'':'-'}${fj(Math.abs(net))}</div><div class="cf-sub">${totalAdminFee>0.005?'stlh fee '+fj(totalAdminFee):'terima − investor'}</div></div>
     </div>
     <div style="background:var(--card);border-radius:14px;padding:10px;box-shadow:var(--sh);margin-bottom:14px">
       <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-bottom:6px;font-size:9px;font-weight:900;color:var(--sub);text-align:center;text-transform:uppercase;letter-spacing:.4px">
@@ -3446,7 +3458,29 @@ function kalNav(delta){
   else if(_kalMonth>11){_kalMonth=0;_kalYear++;}
   rK();
 }
-function kalOpenDay(iso){/* placeholder — future: show modal with day events */}
+function kalOpenDay(iso){
+  if(_kalYear===null){const n=new Date();_kalYear=n.getFullYear();_kalMonth=n.getMonth();}
+  const evs=(getCalendarEvents(_kalYear,_kalMonth)[iso])||[];
+  const el=document.getElementById('mo-day-b'); if(!el) return;
+  const t=document.getElementById('mo-day-t'); if(t) t.textContent='📅 '+fd(iso);
+  if(!evs.length){ el.innerHTML=`<div class="es" style="padding:24px 12px"><div class="ei">📭</div><div class="et">Tidak ada agenda hari ini</div></div>`; om('mo-day'); return; }
+  const inc=evs.filter(e=>e.type==='income'), fee=evs.filter(e=>e.type==='adminfee');
+  const bh=evs.filter(e=>e.type==='bagihasil'), pk=evs.filter(e=>e.type==='pokok');
+  const sum=a=>a.reduce((s,e)=>s+e.amount,0);
+  const terima=sum(inc), keInvestor=sum(bh)+sum(pk), feeT=sum(fee), net=terima-feeT-keInvestor;
+  const lines=(arr,color,sign)=>arr.map(e=>`<div class="fb txx" style="padding:3px 0"><span>${esc(e.label)}${e.paid?' ✓':''}</span><span style="color:${color};font-weight:800">${sign}${fj(e.amount)}</span></div>`).join('');
+  let h='';
+  if(inc.length) h+=`<div style="font-size:11px;font-weight:900;color:#0B8F46;margin:2px 0 4px">🟢 Kita terima</div>${lines(inc,'#0B8F46','+')}`;
+  if(bh.length||pk.length) h+=`<div style="font-size:11px;font-weight:900;color:#B45309;margin:12px 0 4px">↗️ Ke investor</div>${lines(bh,'#B45309','-')}${lines(pk,'#DC2626','-')}`;
+  if(fee.length) h+=`<div style="font-size:11px;font-weight:900;color:#7C3AED;margin:12px 0 4px">💼 Fee Mas Hena</div>${lines(fee,'#7C3AED','-')}`;
+  h+=`<div style="margin-top:12px;border-top:1px solid var(--bdr);padding-top:10px">
+    <div class="fb txx" style="padding:2px 0"><span>Terima</span><span style="color:#0B8F46;font-weight:800">+${fj(terima)}</span></div>
+    <div class="fb txx" style="padding:2px 0"><span>Ke investor</span><span style="color:#B45309;font-weight:800">-${fj(keInvestor)}</span></div>
+    ${feeT>0.005?`<div class="fb txx" style="padding:2px 0"><span>Fee Mas Hena</span><span style="color:#7C3AED;font-weight:800">-${fj(feeT)}</span></div>`:''}
+    <div class="fb" style="padding:6px 0 0;font-weight:900;font-size:13px"><span>Sisa buat kita</span><span style="color:${net>=0?'#0B8F46':'var(--r)'}">${net>=0?'+':'-'}${fj(Math.abs(net))}</span></div>
+  </div>`;
+  el.innerHTML=h; om('mo-day');
+}
 
 // ── PEMODAL (Owner / Non-Owner / Utang) ──────────────────────────────
 
@@ -4972,7 +5006,7 @@ async function unlockAdmin(){
   _adminUnlocked=true;
   cm('mo-pin');
   // Show admin tabs, hide admin button
-  ['n-p','n-u','n-r'].forEach(id=>{const el=document.getElementById(id); if(el) el.style.display='';});
+  ['n-p','n-u','n-k','n-r'].forEach(id=>{const el=document.getElementById(id); if(el) el.style.display='';});
   document.getElementById('n-admin').style.display='none';
   // Load from Firestore
   await loadFromFirestore();
